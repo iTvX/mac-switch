@@ -65,19 +65,21 @@ jobs:
 
       - name: Build, sign, and notarize
         env:
-          NOTARY_PROFILE: mac-switch-notary
-          NOTARY_VIA_LAUNCHCTL: "1"
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
           SPARKLE_VIA_LAUNCHCTL: "1"
           SU_FEED_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
           MAC_SWITCH_FEEDBACK_URL: ${{ vars.MAC_SWITCH_FEEDBACK_URL }}
-        run: NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db" ./Scripts/build_release.sh
+        run: ./Scripts/build_release.sh
 
       - name: Verify release bundle
         env:
-          NOTARY_PROFILE: mac-switch-notary
-          NOTARY_VIA_LAUNCHCTL: "1"
-        run: NOTARY_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db" ./Scripts/check_release_ready.sh
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: ./Scripts/check_release_ready.sh
 
       - name: Upload GitHub release asset
         env:
