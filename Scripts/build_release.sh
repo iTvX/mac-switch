@@ -23,6 +23,7 @@ MAC_SWITCH_FEEDBACK_URL="${MAC_SWITCH_FEEDBACK_URL:-}"
 SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-com.maxyu.macswitch.sparkle}"
 SPARKLE_BIN_DIR="${SPARKLE_BIN_DIR:-$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin}"
 SPARKLE_VIA_LAUNCHCTL="${SPARKLE_VIA_LAUNCHCTL:-0}"
+CODESIGN_VIA_LAUNCHCTL="${CODESIGN_VIA_LAUNCHCTL:-0}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 if [[ "$SKIP_NOTARIZATION" == "1" ]]; then
     REQUIRE_NOTARIZATION=0
@@ -49,6 +50,14 @@ run_sparkle_tool() {
         launchctl asuser "$(id -u)" "$@"
     else
         "$@"
+    fi
+}
+
+run_codesign() {
+    if [[ "$CODESIGN_VIA_LAUNCHCTL" == "1" ]]; then
+        launchctl asuser "$(id -u)" codesign "$@"
+    else
+        codesign "$@"
     fi
 }
 
@@ -218,16 +227,16 @@ for nested in \
     "$SPARKLE_DEST/Versions/Current/Updater.app" \
     "$SPARKLE_DEST/Versions/Current/Autoupdate"; do
     if [[ -e "$nested" ]]; then
-        codesign --force --options runtime --timestamp --sign "$IDENTITY" "$nested"
+        run_codesign --force --options runtime --timestamp --sign "$IDENTITY" "$nested"
     fi
 done
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE_DEST"
+run_codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE_DEST"
 
-codesign --force --options runtime --timestamp \
+run_codesign --force --options runtime --timestamp \
     --entitlements "$ROOT_DIR/Resources/MacSwitch.entitlements" \
     --sign "$IDENTITY" "$APP_PATH"
 
-codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+run_codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --self-test-safe
 if [[ "$RUN_UI_SMOKE" == "1" ]]; then
     "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --ui-smoke-test

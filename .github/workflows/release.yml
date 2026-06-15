@@ -70,6 +70,7 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
           SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
+          CODESIGN_VIA_LAUNCHCTL: "1"
           SU_FEED_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
           MAC_SWITCH_FEEDBACK_URL: ${{ vars.MAC_SWITCH_FEEDBACK_URL }}
         run: ./Scripts/build_release.sh
