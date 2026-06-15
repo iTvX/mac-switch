@@ -10,7 +10,16 @@ APPCAST_PATH="${APPCAST_PATH:-$APPCAST_DIR/appcast.xml}"
 UPDATE_ASSET_NAME="${UPDATE_ASSET_NAME:-Mac.Switch.zip}"
 SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-com.maxyu.macswitch.sparkle}"
 SPARKLE_BIN_DIR="${SPARKLE_BIN_DIR:-$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin}"
+SPARKLE_VIA_LAUNCHCTL="${SPARKLE_VIA_LAUNCHCTL:-0}"
 DOWNLOAD_URL_PREFIX="${DOWNLOAD_URL_PREFIX:-}"
+
+run_sparkle_tool() {
+    if [[ "$SPARKLE_VIA_LAUNCHCTL" == "1" ]]; then
+        launchctl asuser "$(id -u)" "$@"
+    else
+        "$@"
+    fi
+}
 
 if [[ ! -f "$ZIP_PATH" ]]; then
     echo "Release archive is missing at $ZIP_PATH." >&2
@@ -41,12 +50,12 @@ GENERATE_ARGS=(
 )
 
 if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
-    printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SPARKLE_BIN_DIR/generate_appcast" \
+    printf '%s' "$SPARKLE_PRIVATE_KEY" | run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
         --ed-key-file - \
         "${GENERATE_ARGS[@]}" \
         "$APPCAST_DIR"
 else
-    "$SPARKLE_BIN_DIR/generate_appcast" \
+    run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
         --account "$SPARKLE_ACCOUNT" \
         "${GENERATE_ARGS[@]}" \
         "$APPCAST_DIR"
