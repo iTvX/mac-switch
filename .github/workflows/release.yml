@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Check out release source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 0
@@ -65,11 +65,8 @@ jobs:
 
       - name: Build, sign, and notarize
         env:
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_PROFILE: mac-switch-notary
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
-          SPARKLE_PUBLIC_KEY: ${{ secrets.SPARKLE_PUBLIC_KEY }}
           CODESIGN_VIA_LAUNCHCTL: "1"
           SU_FEED_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
           MAC_SWITCH_FEEDBACK_URL: ${{ vars.MAC_SWITCH_FEEDBACK_URL }}
@@ -77,9 +74,7 @@ jobs:
 
       - name: Verify release bundle
         env:
-          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
-          NOTARY_TEAM_ID: ${{ secrets.NOTARY_TEAM_ID }}
-          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          NOTARY_PROFILE: mac-switch-notary
         run: ./Scripts/check_release_ready.sh
 
       - name: Upload GitHub release asset
@@ -106,7 +101,6 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
-          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: ./Scripts/generate_appcast.sh
 
       - name: Publish Sparkle appcast
