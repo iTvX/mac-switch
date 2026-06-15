@@ -50,16 +50,15 @@ GENERATE_ARGS=(
 )
 
 if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
-    printf '%s' "$SPARKLE_PRIVATE_KEY" | run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
-        --ed-key-file - \
-        "${GENERATE_ARGS[@]}" \
-        "$APPCAST_DIR"
-else
-    run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
-        --account "$SPARKLE_ACCOUNT" \
-        "${GENERATE_ARGS[@]}" \
-        "$APPCAST_DIR"
+    echo "SPARKLE_PRIVATE_KEY environment signing is no longer supported for release appcasts." >&2
+    echo "Store the Sparkle signing key in the release Mac Keychain and use --account $SPARKLE_ACCOUNT." >&2
+    exit 1
 fi
+
+run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
+    --account "$SPARKLE_ACCOUNT" \
+    "${GENERATE_ARGS[@]}" \
+    "$APPCAST_DIR"
 
 test -s "$APPCAST_PATH"
 echo "Generated appcast: $APPCAST_PATH"

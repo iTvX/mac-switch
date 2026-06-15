@@ -8,9 +8,6 @@ APP_PATH="${APP_PATH:-$ROOT_DIR/Build/$APP_NAME.app}"
 ZIP_PATH="${ZIP_PATH:-$ROOT_DIR/Build/$APP_NAME.zip}"
 DEFAULT_NOTARY_PROFILE="${DEFAULT_NOTARY_PROFILE:-mac-switch-notary}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-$DEFAULT_NOTARY_PROFILE}"
-NOTARY_APPLE_ID="${NOTARY_APPLE_ID:-}"
-NOTARY_TEAM_ID="${NOTARY_TEAM_ID:-}"
-NOTARY_PASSWORD="${NOTARY_PASSWORD:-}"
 KEYCHAIN_DB="${KEYCHAIN_DB:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARY_KEYCHAIN="${NOTARY_KEYCHAIN:-}"
 NOTARY_VIA_LAUNCHCTL="${NOTARY_VIA_LAUNCHCTL:-0}"
@@ -83,19 +80,14 @@ else
     fail "No valid notarization staple found on the app."
 fi
 
-DIRECT_NOTARY_FIELDS=0
-[[ -n "$NOTARY_APPLE_ID" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-[[ -n "$NOTARY_TEAM_ID" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-[[ -n "$NOTARY_PASSWORD" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-
-if [[ "$DIRECT_NOTARY_FIELDS" -eq 3 ]]; then
-    if run_notarytool history --apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD" >/dev/null 2>&1; then
-        pass "Direct notary credentials are available"
-    else
-        fail "Direct notary credentials are invalid or unavailable."
+DIRECT_NOTARY_ENV_NAMES=()
+for name in NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD; do
+    if [[ -n "${!name:-}" ]]; then
+        DIRECT_NOTARY_ENV_NAMES+=("$name")
     fi
-elif [[ "$DIRECT_NOTARY_FIELDS" -ne 0 ]]; then
-    fail "Direct notary credentials require NOTARY_APPLE_ID, NOTARY_TEAM_ID, and NOTARY_PASSWORD together."
+done
+if [[ "${#DIRECT_NOTARY_ENV_NAMES[@]}" -gt 0 ]]; then
+    fail "Direct Apple ID notarization environment variables are no longer supported. Unset ${DIRECT_NOTARY_ENV_NAMES[*]} and use a notarytool Keychain profile."
 elif notary_profile_is_available "$NOTARY_PROFILE"; then
     pass "Configured notary keychain profile is available"
 else

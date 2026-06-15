@@ -11,9 +11,6 @@ FRAMEWORKS_DIR="$APP_PATH/Contents/Frameworks"
 IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 DEFAULT_NOTARY_PROFILE="${DEFAULT_NOTARY_PROFILE:-mac-switch-notary}"
-NOTARY_APPLE_ID="${NOTARY_APPLE_ID:-}"
-NOTARY_TEAM_ID="${NOTARY_TEAM_ID:-}"
-NOTARY_PASSWORD="${NOTARY_PASSWORD:-}"
 KEYCHAIN_PASSWORD="${KEYCHAIN_PASSWORD:-}"
 KEYCHAIN_DB="${KEYCHAIN_DB:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARY_KEYCHAIN="${NOTARY_KEYCHAIN:-}"
@@ -87,46 +84,36 @@ if [[ ! -f "Resources/MacSwitchIcon.icns" ]]; then
 fi
 
 if [[ "$SKIP_NOTARIZATION" != "1" ]]; then
-    if [[ -z "$NOTARY_PROFILE" ]] && notary_profile_is_available "$DEFAULT_NOTARY_PROFILE"; then
+    DIRECT_NOTARY_ENV_NAMES=()
+    for name in NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD; do
+        if [[ -n "${!name:-}" ]]; then
+            DIRECT_NOTARY_ENV_NAMES+=("$name")
+        fi
+    done
+    if [[ "${#DIRECT_NOTARY_ENV_NAMES[@]}" -gt 0 ]]; then
+        echo "Direct Apple ID notarization environment variables are no longer supported for release builds." >&2
+        echo "Unset ${DIRECT_NOTARY_ENV_NAMES[*]} and use a notarytool Keychain profile instead." >&2
+        echo "Create it with: $(notary_profile_setup_hint "${NOTARY_PROFILE:-$DEFAULT_NOTARY_PROFILE}")" >&2
+        exit 1
+    fi
+
+    if [[ -z "$NOTARY_PROFILE" ]]; then
         NOTARY_PROFILE="$DEFAULT_NOTARY_PROFILE"
     fi
 
-    DIRECT_NOTARY_FIELDS=0
-    [[ -n "$NOTARY_APPLE_ID" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-    [[ -n "$NOTARY_TEAM_ID" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-    [[ -n "$NOTARY_PASSWORD" ]] && DIRECT_NOTARY_FIELDS=$((DIRECT_NOTARY_FIELDS + 1))
-
-    if [[ "$DIRECT_NOTARY_FIELDS" -ne 0 && "$DIRECT_NOTARY_FIELDS" -ne 3 ]]; then
-        echo "Direct notarization requires NOTARY_APPLE_ID, NOTARY_TEAM_ID, and NOTARY_PASSWORD together." >&2
-        exit 1
-    fi
-
-    if [[ -n "$NOTARY_PROFILE" ]]; then
-        if ! notary_profile_is_available "$NOTARY_PROFILE"; then
-            echo "Configured notary keychain profile is not available or is invalid." >&2
-            echo "Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")" >&2
-            exit 1
-        fi
-        NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
-        if [[ -n "$NOTARY_KEYCHAIN" ]]; then
-            NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
-        fi
-        NOTARY_AUTH_LABEL="configured keychain profile"
-    elif [[ "$DIRECT_NOTARY_FIELDS" -eq 3 ]]; then
-        NOTARY_ARGS=(--apple-id "$NOTARY_APPLE_ID" --team-id "$NOTARY_TEAM_ID" --password "$NOTARY_PASSWORD")
-        if ! run_notarytool history "${NOTARY_ARGS[@]}" >/dev/null 2>&1; then
-            echo "Direct notary credentials are invalid or unavailable." >&2
-            echo "Check NOTARY_APPLE_ID, NOTARY_TEAM_ID, and NOTARY_PASSWORD." >&2
-            exit 1
-        fi
-        NOTARY_AUTH_LABEL="direct Apple ID credentials"
-    elif [[ "$REQUIRE_NOTARIZATION" == "1" ]]; then
+    if ! notary_profile_is_available "$NOTARY_PROFILE"; then
         echo "Notarization is required for release builds, but no valid notarytool credentials were found." >&2
-        echo "Set NOTARY_PROFILE or create the default profile with: $(notary_profile_setup_hint "$DEFAULT_NOTARY_PROFILE")" >&2
-        echo "Alternatively set NOTARY_APPLE_ID, NOTARY_TEAM_ID, and NOTARY_PASSWORD." >&2
+        echo "Configured notary keychain profile '$NOTARY_PROFILE' is unavailable or invalid." >&2
+        echo "Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")" >&2
         echo "For local non-distribution builds only, rerun with SKIP_NOTARIZATION=1." >&2
         exit 1
     fi
+
+    NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+    if [[ -n "$NOTARY_KEYCHAIN" ]]; then
+        NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
+    fi
+    NOTARY_AUTH_LABEL="configured keychain profile"
 fi
 
 if [[ -z "$IDENTITY" ]]; then
