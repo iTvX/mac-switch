@@ -22,6 +22,7 @@ SPARKLE_PUBLIC_KEY="${SPARKLE_PUBLIC_KEY:-}"
 MAC_SWITCH_FEEDBACK_URL="${MAC_SWITCH_FEEDBACK_URL:-}"
 SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-com.maxyu.macswitch.sparkle}"
 SPARKLE_BIN_DIR="${SPARKLE_BIN_DIR:-$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin}"
+SPARKLE_VIA_LAUNCHCTL="${SPARKLE_VIA_LAUNCHCTL:-0}"
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 if [[ "$SKIP_NOTARIZATION" == "1" ]]; then
     REQUIRE_NOTARIZATION=0
@@ -40,6 +41,14 @@ run_notarytool() {
         launchctl asuser "$(id -u)" xcrun notarytool "$@"
     else
         xcrun notarytool "$@"
+    fi
+}
+
+run_sparkle_tool() {
+    if [[ "$SPARKLE_VIA_LAUNCHCTL" == "1" ]]; then
+        launchctl asuser "$(id -u)" "$@"
+    else
+        "$@"
     fi
 }
 
@@ -186,7 +195,7 @@ set_plist_string() {
 
 UPDATE_FEED_FIELDS=0
 if [[ -n "$SU_FEED_URL" && -z "$SPARKLE_PUBLIC_KEY" && -x "$SPARKLE_BIN_DIR/generate_keys" ]]; then
-    SPARKLE_PUBLIC_KEY="$("$SPARKLE_BIN_DIR/generate_keys" --account "$SPARKLE_ACCOUNT" -p 2>/dev/null || true)"
+    SPARKLE_PUBLIC_KEY="$(run_sparkle_tool "$SPARKLE_BIN_DIR/generate_keys" --account "$SPARKLE_ACCOUNT" -p 2>/dev/null || true)"
 fi
 [[ -n "$SU_FEED_URL" ]] && UPDATE_FEED_FIELDS=$((UPDATE_FEED_FIELDS + 1))
 [[ -n "$SPARKLE_PUBLIC_KEY" ]] && UPDATE_FEED_FIELDS=$((UPDATE_FEED_FIELDS + 1))

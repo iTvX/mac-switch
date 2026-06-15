@@ -66,7 +66,9 @@ jobs:
       - name: Build, sign, and notarize
         env:
           NOTARY_PROFILE: mac-switch-notary
+          NOTARY_VIA_LAUNCHCTL: "1"
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+          SPARKLE_VIA_LAUNCHCTL: "1"
           SU_FEED_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
           MAC_SWITCH_FEEDBACK_URL: ${{ vars.MAC_SWITCH_FEEDBACK_URL }}
         run: ./Scripts/build_release.sh
@@ -74,6 +76,7 @@ jobs:
       - name: Verify release bundle
         env:
           NOTARY_PROFILE: mac-switch-notary
+          NOTARY_VIA_LAUNCHCTL: "1"
         run: ./Scripts/check_release_ready.sh
 
       - name: Upload GitHub release asset
@@ -100,6 +103,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+          SPARKLE_VIA_LAUNCHCTL: "1"
         run: ./Scripts/generate_appcast.sh
 
       - name: Publish Sparkle appcast
