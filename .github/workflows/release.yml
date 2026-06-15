@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag, for example v1.0.0"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mac-switch-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build, notarize, and publish
+    runs-on: [self-hosted, macOS, ARM64, mac-switch-release]
+    environment: release
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="$GITHUB_REF_NAME"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag must look like v1.0.0 or v1.0.0-beta.1"
+            exit 1
+          fi
+
+          git rev-parse -q --verify "refs/tags/$tag" >/dev/null
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Run Swift tests
+        run: swift test
+
+      - name: Build, sign, and notarize
+        env:
+          NOTARY_PROFILE: mac-switch-notary
+          SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+          SU_FEED_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
+          MAC_SWITCH_FEEDBACK_URL: ${{ vars.MAC_SWITCH_FEEDBACK_URL }}
+        run: ./Scripts/build_release.sh
+
+      - name: Verify release bundle
+        env:
+          NOTARY_PROFILE: mac-switch-notary
+        run: ./Scripts/check_release_ready.sh
+
+      - name: Upload GitHub release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset="Build/Mac Switch.zip#Mac.Switch.zip"
+          release_args=(--title "Mac Switch $RELEASE_TAG" --generate-notes)
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_args+=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$asset" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$asset" "${release_args[@]}"
+          fi
+
+      - name: Generate Sparkle appcast
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+        run: ./Scripts/generate_appcast.sh
+
+      - name: Publish Sparkle appcast
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPCAST_RELEASE_TAG: appcast
+        run: ./Scripts/publish_appcast.sh

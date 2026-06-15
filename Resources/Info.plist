@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Mac Switch</string>
+    <key>CFBundleExecutable</key>
+    <string>MacSwitch</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.maxyu.macswitch</string>
+    <key>CFBundleIconFile</key>
+    <string>MacSwitchIcon</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Mac Switch</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Mac Switch uses Apple Events to control supported system apps for appearance, media, trash, and lock-screen actions.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Mac Switch uses Bluetooth to find and connect paired Bluetooth audio devices.</string>
+    <key>NSInputMonitoringUsageDescription</key>
+    <string>Mac Switch can temporarily block keyboard input for Lock Keyboard and Screen Cleaning.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>Mac Switch uses your location to switch Dark Mode at sunrise and sunset.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Mac Switch uses your location to switch Dark Mode at sunrise and sunset.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Mac Switch contributors</string>
+</dict>
+</plist>

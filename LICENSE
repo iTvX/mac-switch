@@ -1,0 +1,77 @@
+Mac Switch Source Available License 1.0
+
+Copyright (c) 2026 Mac Switch contributors
+
+This license allows public source review and limited personal use. It is not an
+Open Source Initiative approved open source license.
+
+1. Definitions
+
+"Software" means the Mac Switch source code, documentation, scripts, resources,
+icons, binaries, and other project files distributed with this license.
+
+"Copyright Holder" means the owner or owners of copyright in the Software.
+
+"Commercial Use" means any use that is intended for, enables, supports, or is
+connected to commercial advantage, monetary compensation, paid services,
+business operations, consulting, contracting, advertising, sponsorship,
+subscription offerings, product distribution, app store distribution, managed
+services, or any other revenue-generating activity.
+
+"Distribute" means to publish, upload, share, sell, sublicense, make available,
+provide, transfer, or otherwise give a copy of the Software or any modified,
+derived, compiled, packaged, or bundled form of it to any third party.
+
+2. Permissions
+
+Subject to the restrictions below, you may:
+
+- View and inspect the Software.
+- Download, clone, and build the Software for personal, private,
+  non-commercial evaluation, learning, security review, and testing.
+- Modify the Software privately for your own personal, non-commercial use.
+- Submit proposed changes to the upstream Mac Switch project.
+
+3. Restrictions
+
+Unless you have prior written permission from the Copyright Holder, you may not:
+
+- Use the Software for Commercial Use.
+- Distribute the Software or any modified, derived, compiled, packaged, or
+  bundled version of it.
+- Publish, release, maintain, promote, or distribute a fork, clone, competing
+  version, rebranded version, or derivative product based on the Software.
+- Provide the Software as part of a paid product, paid service, hosted service,
+  managed service, consulting deliverable, app store submission, package manager
+  package, download site, binary release, installer, disk image, archive, or
+  update feed.
+- Remove or alter copyright, license, or attribution notices.
+- Use the Mac Switch name, icon, visual identity, or confusingly similar marks
+  to promote a separate product or fork.
+
+Public repository platform features may technically allow forks or mirrors, but
+this license does not grant permission to publish, release, promote, distribute,
+or commercialize any fork or derivative version.
+
+4. Contributions
+
+Unless a separate written agreement says otherwise, any contribution submitted
+to the upstream Mac Switch project is licensed to the Copyright Holder under
+this license, and the Copyright Holder may include, modify, and redistribute
+that contribution as part of the Software.
+
+5. Termination
+
+Your rights under this license terminate automatically if you violate any term
+of this license. After termination, you must stop using the Software and delete
+all copies in your possession or control unless the Copyright Holder gives you
+written permission to continue.
+
+6. No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NONINFRINGEMENT. THE COPYRIGHT
+HOLDER IS NOT LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
