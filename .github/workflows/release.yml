@@ -65,10 +65,11 @@ jobs:
           fi
 
           git rev-parse -q --verify "refs/tags/$tag" >/dev/null
-          git fetch --no-tags origin "refs/heads/$GITHUB_DEFAULT_BRANCH:refs/remotes/origin/$GITHUB_DEFAULT_BRANCH"
+          default_branch="${GITHUB_DEFAULT_BRANCH:-main}"
+          git fetch --no-tags origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
           tag_commit="$(git rev-list -n 1 "$tag")"
-          if ! git merge-base --is-ancestor "$tag_commit" "origin/$GITHUB_DEFAULT_BRANCH"; then
-            echo "::error::Release tag $tag must point to a commit reachable from $GITHUB_DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$tag_commit" "origin/$default_branch"; then
+            echo "::error::Release tag $tag must point to a commit reachable from $default_branch"
             exit 1
           fi
 
