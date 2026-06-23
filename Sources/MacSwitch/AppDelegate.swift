@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.setActivationPolicy(Self.requiresRegularActivation ? .regular : .accessory)
         softwareUpdates.start()
 
-        let item = NSStatusBar.system.statusItem(withLength: 34)
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem = item
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
