@@ -96,6 +96,7 @@ struct DashboardView: View {
                 .allowsHitTesting(false)
         }
         .shadow(color: .black.opacity(0.18), radius: 22, y: 12)
+        .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
     }
 }
 
@@ -193,11 +194,11 @@ private struct EmptyDashboardView: View {
                 .frame(width: 58, height: 58)
                 .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-            Text("No Switch Added")
+            Text(store.text(.noSwitchAdded))
                 .font(.system(size: 15, weight: .bold))
                 .foregroundStyle(.primary)
 
-            Text("Please select at least one switch to start Mac Switch.")
+            Text(store.text(.selectSwitchPrompt))
                 .font(.system(size: 12.5, weight: .medium))
                 .foregroundStyle(DashboardColors.subtleText)
                 .multilineTextAlignment(.center)
@@ -208,7 +209,7 @@ private struct EmptyDashboardView: View {
                 store.preferredPreferencesTab = "customize"
                 NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
             } label: {
-                Text("Customize")
+                Text(store.text(.customize))
                     .font(.system(size: 12.5, weight: .bold))
                     .frame(width: 112, height: 30)
                     .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -264,7 +265,9 @@ private struct DashboardHeader: View {
                 Text("Mac Switch")
                     .font(.system(size: 13.5, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(activeCount == 0 ? "\(store.visibleKinds.count) controls ready" : "\(activeCount) active of \(store.visibleKinds.count)")
+                Text(activeCount == 0
+                     ? L10n.controlsReady(store.visibleKinds.count, language: store.effectiveLanguage)
+                     : L10n.activeOf(activeCount, total: store.visibleKinds.count, language: store.effectiveLanguage))
                     .font(.system(size: 10.5, weight: .regular))
                     .foregroundStyle(DashboardColors.subtleText)
             }
@@ -272,7 +275,7 @@ private struct DashboardHeader: View {
             Spacer()
 
             if activeCount > 0 {
-                Text(activeCount == 1 ? "1 On" : "\(activeCount) On")
+                Text(L10n.onBadge(activeCount, language: store.effectiveLanguage))
                     .font(.system(size: 9.5, weight: .medium))
                     .foregroundStyle(Color.accentColor)
                     .padding(.horizontal, 7)
@@ -333,7 +336,12 @@ private struct ControlRow: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            RowIdentityContent(kind: kind, snapshot: snapshot, dragProvider: dragProvider)
+            RowIdentityContent(
+                kind: kind,
+                title: store.switchTitle(kind),
+                snapshot: snapshot,
+                dragProvider: dragProvider
+            )
                 .layoutPriority(1)
 
             Spacer(minLength: 6)
@@ -420,6 +428,7 @@ private struct ControlRow: View {
 
 private struct RowIdentityContent: View {
     let kind: SwitchKind
+    let title: String
     let snapshot: SwitchSnapshot
     let dragProvider: (() -> NSItemProvider)?
 
@@ -428,7 +437,7 @@ private struct RowIdentityContent: View {
             SwitchGlyph(kind: kind, snapshot: snapshot)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(kind.title)
+                Text(title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
@@ -909,7 +918,7 @@ private struct FooterBar: View {
                 .frame(height: 1)
 
             ZStack {
-                DashboardFooterButton {
+                DashboardFooterButton(title: store.text(.customize)) {
                     store.preferredPreferencesTab = "customize"
                     NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
                 }
@@ -929,12 +938,13 @@ private struct FooterBar: View {
 }
 
 private struct DashboardFooterButton: View {
+    let title: String
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            Label("Customize", systemImage: "square.grid.2x2")
+            Label(title, systemImage: "square.grid.2x2")
                 .font(.system(size: 12, weight: .medium))
                 .labelStyle(.titleAndIcon)
                 .foregroundStyle(.primary.opacity(0.82))
@@ -1095,7 +1105,7 @@ struct PreferencesView: View {
                 .ignoresSafeArea()
 
             HStack(spacing: 10) {
-                PreferencesSidebar(selection: $tab)
+                PreferencesSidebar(selection: $tab, store: store)
 
                 ZStack(alignment: .bottom) {
                     Group {
@@ -1125,6 +1135,7 @@ struct PreferencesView: View {
         .frame(minWidth: 540, minHeight: 390)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
+        .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
         .onAppear {
             publishLayout(for: tab)
         }
@@ -1161,11 +1172,11 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
+    func title(language: AppLanguage) -> String {
         switch self {
-        case .general: return "General"
-        case .customize: return "Customize"
-        case .about: return "About"
+        case .general: return L10n.text(.general, language: language)
+        case .customize: return L10n.text(.customize, language: language)
+        case .about: return L10n.text(.about, language: language)
         }
     }
 
@@ -1223,6 +1234,7 @@ private extension View {
 
 private struct PreferencesSidebar: View {
     @Binding var selection: PreferencesTab
+    @ObservedObject var store: SwitchStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -1235,7 +1247,7 @@ private struct PreferencesSidebar: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Mac Switch")
                         .font(.system(size: 13.5, weight: .bold))
-                    Text("Preferences")
+                    Text(store.text(.preferences))
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.secondary)
                 }
@@ -1244,7 +1256,7 @@ private struct PreferencesSidebar: View {
 
             VStack(spacing: 4) {
                 ForEach(PreferencesTab.allCases) { item in
-                    SidebarTabButton(item: item, isSelected: selection == item) {
+                    SidebarTabButton(item: item, title: item.title(language: store.effectiveLanguage), isSelected: selection == item) {
                         if item.isImplemented {
                             selection = item
                         }
@@ -1254,7 +1266,7 @@ private struct PreferencesSidebar: View {
 
             Spacer()
 
-            Text("Menu bar utility")
+            Text(store.text(.menuBarUtility))
                 .font(.system(size: 10.5, weight: .medium))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1334,6 +1346,7 @@ private struct PreferencesErrorBanner: View {
 
 private struct SidebarTabButton: View {
     let item: PreferencesTab
+    let title: String
     let isSelected: Bool
     let action: () -> Void
     @State private var isHovering = false
@@ -1346,7 +1359,7 @@ private struct SidebarTabButton: View {
                     .frame(width: 16)
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
 
-                Text(item.title)
+                Text(title)
                     .font(.system(size: 12.1, weight: isSelected ? .medium : .regular))
                     .foregroundStyle(isSelected ? Color.primary : Color.secondary)
                     .lineLimit(1)
@@ -1566,13 +1579,13 @@ private struct GeneralPreferencesView: View {
 
     var body: some View {
         SettingsPage(
-            title: "General",
-            subtitle: "Launch behavior, menu bar appearance, and system permissions."
+            title: store.text(.general),
+            subtitle: store.text(.generalSubtitle)
         ) {
             VStack(alignment: .leading, spacing: 12) {
-                SettingsGroup("Startup") {
+                SettingsGroup(store.text(.startup)) {
                     SettingsRow(
-                        title: "Start at Login"
+                        title: store.text(.startAtLogin)
                     ) {
                         HStack(spacing: 8) {
                             SettingsPill(
@@ -1589,7 +1602,7 @@ private struct GeneralPreferencesView: View {
                                     refreshStartAtLoginStatusSoon()
                                 }
                             } label: {
-                                Label("Review", systemImage: "gearshape")
+                                Label(store.text(.review), systemImage: "gearshape")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
@@ -1605,7 +1618,7 @@ private struct GeneralPreferencesView: View {
                                         refreshStartAtLoginStatusSoon()
                                     }
                                 } label: {
-                                    Label("Approve", systemImage: "checkmark.circle")
+                                    Label(store.text(.approve), systemImage: "checkmark.circle")
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
@@ -1614,7 +1627,7 @@ private struct GeneralPreferencesView: View {
                                 Button {
                                     store.cancelStartAtLoginApproval()
                                 } label: {
-                                    Label("Cancel", systemImage: "xmark.circle")
+                                    Label(store.text(.cancel), systemImage: "xmark.circle")
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
@@ -1623,7 +1636,7 @@ private struct GeneralPreferencesView: View {
                                 Button {
                                     store.repairStartAtLogin()
                                 } label: {
-                                    Label("Repair", systemImage: "wrench.and.screwdriver")
+                                    Label(store.text(.repair), systemImage: "wrench.and.screwdriver")
                                 }
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
@@ -1640,9 +1653,25 @@ private struct GeneralPreferencesView: View {
                     }
                 }
 
-                SettingsGroup("Menu Bar") {
+                SettingsGroup(store.text(.language)) {
                     SettingsRow(
-                        title: "Menu Bar Icon"
+                        title: store.text(.language),
+                        subtitle: store.text(.languageSubtitle)
+                    ) {
+                        Picker("", selection: $store.appLanguage) {
+                            ForEach(AppLanguage.allCases) { language in
+                                Text(language.pickerTitle(in: store.effectiveLanguage)).tag(language)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 178)
+                    }
+                }
+
+                SettingsGroup(store.text(.menuBar)) {
+                    SettingsRow(
+                        title: store.text(.menuBarIcon)
                     ) {
                         Picker("", selection: $store.menuBarIcon) {
                             ForEach(MenuBarIcon.allCases) { icon in
@@ -1650,7 +1679,7 @@ private struct GeneralPreferencesView: View {
                                     Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))
                                         .renderingMode(.template)
                                         .frame(width: 17, height: 17)
-                                    Text(icon.title)
+                                    Text(store.menuBarIconTitle(icon))
                                 }
                                 .tag(icon)
                             }
@@ -1661,9 +1690,9 @@ private struct GeneralPreferencesView: View {
                     }
                 }
 
-                SettingsGroup("Permissions", defaultExpanded: true) {
+                SettingsGroup(store.text(.permissions), defaultExpanded: true) {
                     SettingsRow(
-                        title: "Accessibility",
+                        title: store.text(.accessibility),
                         subtitle: accessibilitySubtitle
                     ) {
                         HStack(spacing: 8) {
@@ -1680,7 +1709,7 @@ private struct GeneralPreferencesView: View {
                                     refreshPermissionStatusSoon()
                                 }
                             } label: {
-                                Label("Open", systemImage: "gearshape")
+                                Label(store.text(.open), systemImage: "gearshape")
                             }
                             .buttonStyle(.bordered)
                         }
@@ -1689,8 +1718,8 @@ private struct GeneralPreferencesView: View {
                     SettingsDivider()
 
                     SettingsRow(
-                        title: "Automation",
-                        subtitle: "Needed when macOS asks Mac Switch to control System Events, Finder, Music, or Spotify."
+                        title: store.text(.automation),
+                        subtitle: store.text(.automationSubtitle)
                     ) {
                         Button {
                             reportOpenResult(
@@ -1699,7 +1728,7 @@ private struct GeneralPreferencesView: View {
                                 failureMessage: "Could not open Automation settings."
                             )
                         } label: {
-                            Label("Review", systemImage: "gearshape")
+                            Label(store.text(.review), systemImage: "gearshape")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -1707,8 +1736,8 @@ private struct GeneralPreferencesView: View {
                     SettingsDivider()
 
                     SettingsRow(
-                        title: "Location",
-                        subtitle: "Used only for sunrise/sunset Dark Mode scheduling."
+                        title: store.text(.location),
+                        subtitle: store.text(.locationSubtitle)
                     ) {
                         Button {
                             reportOpenResult(
@@ -1717,7 +1746,7 @@ private struct GeneralPreferencesView: View {
                                 failureMessage: "Could not open Location Services settings."
                             )
                         } label: {
-                            Label("Open", systemImage: "location")
+                            Label(store.text(.open), systemImage: "location")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -1725,8 +1754,8 @@ private struct GeneralPreferencesView: View {
                     SettingsDivider()
 
                     SettingsRow(
-                        title: "Bluetooth",
-                        subtitle: "Used to find and connect paired Bluetooth audio devices."
+                        title: store.text(.bluetooth),
+                        subtitle: store.text(.bluetoothSubtitle)
                     ) {
                         Button {
                             reportOpenResult(
@@ -1735,20 +1764,20 @@ private struct GeneralPreferencesView: View {
                                 failureMessage: "Could not open Bluetooth settings."
                             )
                         } label: {
-                            Label("Open", systemImage: "antenna.radiowaves.left.and.right")
+                            Label(store.text(.open), systemImage: "antenna.radiowaves.left.and.right")
                         }
                         .buttonStyle(.bordered)
                     }
                 }
 
-                SettingsGroup("Application") {
+                SettingsGroup(store.text(.application)) {
                     SettingsRow(
-                        title: "Quit Mac Switch"
+                        title: store.text(.quitMacSwitch)
                     ) {
                         Button {
                             store.quit()
                         } label: {
-                            Label("Quit", systemImage: "power")
+                            Label(store.text(.quit), systemImage: "power")
                         }
                         .buttonStyle(.bordered)
                     }
@@ -1808,18 +1837,18 @@ private struct GeneralPreferencesView: View {
 
     private var accessibilitySubtitle: String {
         if isCheckingAccessibility && !accessibilityTrusted {
-            return "Checking permission for Lock Keyboard and Screen Cleaning."
+            return store.text(.checkingAccessibilitySubtitle)
         }
         return accessibilityTrusted
-            ? "Granted for Lock Keyboard and Screen Cleaning."
-            : "Required for Lock Keyboard and Screen Cleaning."
+            ? store.text(.accessibilityGrantedSubtitle)
+            : store.text(.accessibilityRequiredSubtitle)
     }
 
     private var accessibilityPillText: String {
         if isCheckingAccessibility && !accessibilityTrusted {
-            return "Checking"
+            return store.text(.checking)
         }
-        return accessibilityTrusted ? "Granted" : "Needs Access"
+        return accessibilityTrusted ? store.text(.granted) : store.text(.needsAccess)
     }
 
     private var accessibilityPillColor: Color {
@@ -1831,15 +1860,15 @@ private struct GeneralPreferencesView: View {
 
     private var startAtLoginPillText: String {
         if store.isUpdatingStartAtLogin {
-            return "Checking"
+            return store.text(.checking)
         }
         if store.startAtLoginNeedsApproval {
-            return "Pending"
+            return store.text(.pending)
         }
         if store.startAtLoginNeedsRepair {
-            return "Repair"
+            return store.text(.repair)
         }
-        return store.startAtLogin ? "On" : "Off"
+        return store.startAtLogin ? store.text(.on) : store.text(.off)
     }
 
     private var startAtLoginPillColor: Color {
@@ -2155,7 +2184,7 @@ private struct AboutPreferencesView: View {
 
     var body: some View {
         SettingsPage(
-            title: "About",
+            title: store.text(.about),
             subtitle: "Mac Switch is a compact native switchboard for everyday system controls."
         ) {
             VStack(alignment: .leading, spacing: 12) {
@@ -2360,7 +2389,7 @@ private struct CustomizePreferencesView: View {
                 return lhsEnabled && !rhsEnabled
             }
 
-            let titleOrder = lhs.title.localizedStandardCompare(rhs.title)
+            let titleOrder = store.switchTitle(lhs).localizedStandardCompare(store.switchTitle(rhs))
             if titleOrder != .orderedSame {
                 return titleOrder == .orderedAscending
             }
@@ -2371,7 +2400,7 @@ private struct CustomizePreferencesView: View {
 
     var body: some View {
         SettingsPage(
-            title: "Customize",
+            title: store.text(.customize),
             subtitle: "Choose which switches appear in the menu.",
             scrolls: false
         ) {
@@ -2418,6 +2447,7 @@ private struct CustomizePreferencesView: View {
                                     ForEach(sortedKinds) { kind in
                                         CustomizeRow(
                                             kind: kind,
+                                            title: store.switchTitle(kind),
                                             isSelected: selectedKind == kind,
                                             isEnabled: store.enabledKinds.contains(kind),
                                             isBusy: store.isCustomizationBusy(kind),
@@ -2533,6 +2563,7 @@ private struct CustomizePreferencesView: View {
 
 private struct CustomizeRow: View {
     let kind: SwitchKind
+    let title: String
     let isSelected: Bool
     let isEnabled: Bool
     let isBusy: Bool
@@ -2560,7 +2591,7 @@ private struct CustomizeRow: View {
                         .frame(width: 22, height: 22)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(kind.title)
+                        Text(title)
                             .font(.system(size: 12.7, weight: .medium))
                             .foregroundStyle(.primary)
                             .lineLimit(1)
@@ -2633,7 +2664,7 @@ private struct SwitchPreferencePanel: View {
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(kind.title)
+                    Text(store.switchTitle(kind))
                         .font(.system(size: 15.5, weight: .semibold))
                         .lineLimit(2)
                         .minimumScaleFactor(0.86)

@@ -611,6 +611,10 @@ final class SwitchStore: ObservableObject {
         didSet { defaults.set(menuBarIcon.rawValue, forKey: DefaultsKey.menuBarIcon) }
     }
 
+    @Published var appLanguage: AppLanguage {
+        didSet { defaults.set(appLanguage.rawValue, forKey: DefaultsKey.appLanguage) }
+    }
+
     @Published var startAtLogin: Bool {
         didSet {
             updateStartAtLoginIfNeeded(startAtLogin)
@@ -655,6 +659,10 @@ final class SwitchStore: ObservableObject {
 
     var visibleKinds: [SwitchKind] {
         Self.normalizedOrder(orderedKinds).filter { enabledKinds.contains($0) }
+    }
+
+    var effectiveLanguage: AppLanguage {
+        appLanguage.effectiveLanguage
     }
 
     init(controller: SystemSwitchController = SystemSwitchController()) {
@@ -713,6 +721,9 @@ final class SwitchStore: ObservableObject {
 
         let iconRaw = defaults.string(forKey: DefaultsKey.menuBarIcon)
         menuBarIcon = iconRaw.flatMap(MenuBarIcon.init(rawValue:)) ?? .switches
+
+        let languageRaw = defaults.string(forKey: DefaultsKey.appLanguage)
+        appLanguage = languageRaw.flatMap(AppLanguage.init(rawValue:)) ?? .system
 
         startAtLogin = LoginItemManager.initialIsEnabled
         saveOrder()
@@ -1382,6 +1393,18 @@ final class SwitchStore: ObservableObject {
         NSApplication.shared.terminate(nil)
     }
 
+    func text(_ key: L10nKey) -> String {
+        L10n.text(key, language: effectiveLanguage)
+    }
+
+    func switchTitle(_ kind: SwitchKind) -> String {
+        L10n.switchTitle(kind, language: effectiveLanguage)
+    }
+
+    func menuBarIconTitle(_ icon: MenuBarIcon) -> String {
+        L10n.menuBarIconTitle(icon, language: effectiveLanguage)
+    }
+
     private func updateStartAtLoginIfNeeded(_ enabled: Bool) {
         guard !isApplyingStartAtLoginState else { return }
         guard !isUpdatingStartAtLogin else { return }
@@ -1728,6 +1751,7 @@ private enum DefaultsKey {
     static let darkModeScheduleStart = "switch.darkMode.scheduleStart"
     static let darkModeScheduleEnd = "switch.darkMode.scheduleEnd"
     static let menuBarIcon = "app.menuBarIcon"
+    static let appLanguage = "app.language"
     static let shortcuts = "switch.shortcuts"
     static let customizationDefaultsVersion = "switch.customizationDefaultsVersion"
 }
