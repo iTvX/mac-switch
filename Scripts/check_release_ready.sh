@@ -31,12 +31,21 @@ notary_profile_setup_hint() {
     fi
 }
 
-notary_profile_is_available() {
+notary_profile_history() {
     local profile="$1"
     if [[ -n "$NOTARY_KEYCHAIN" ]]; then
-        run_notarytool history --keychain-profile "$profile" --keychain "$NOTARY_KEYCHAIN" >/dev/null 2>&1
+        run_notarytool history --keychain-profile "$profile" --keychain "$NOTARY_KEYCHAIN" 2>&1
     else
-        run_notarytool history --keychain-profile "$profile" >/dev/null 2>&1
+        run_notarytool history --keychain-profile "$profile" 2>&1
+    fi
+}
+
+notary_profile_failure_summary() {
+    local output="$1"
+    if grep -qi "required agreement.*missing\\|agreement.*expired\\|HTTP status code: 403" <<< "$output"; then
+        echo "Apple Developer agreement is missing or expired for the configured team. Accept the pending agreement, then rerun release readiness."
+    else
+        echo "Configured notary keychain profile is unavailable. Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")"
     fi
 }
 
@@ -88,10 +97,10 @@ for name in NOTARY_APPLE_ID NOTARY_TEAM_ID NOTARY_PASSWORD; do
 done
 if [[ "${#DIRECT_NOTARY_ENV_NAMES[@]}" -gt 0 ]]; then
     fail "Direct Apple ID notarization environment variables are no longer supported. Unset ${DIRECT_NOTARY_ENV_NAMES[*]} and use a notarytool Keychain profile."
-elif notary_profile_is_available "$NOTARY_PROFILE"; then
+elif NOTARY_PROFILE_CHECK_OUTPUT="$(notary_profile_history "$NOTARY_PROFILE")"; then
     pass "Configured notary keychain profile is available"
 else
-    fail "Configured notary keychain profile is unavailable. Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")"
+    fail "$(notary_profile_failure_summary "$NOTARY_PROFILE_CHECK_OUTPUT")"
 fi
 
 if [[ -f "$ZIP_PATH" ]]; then
