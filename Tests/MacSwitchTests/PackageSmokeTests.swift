@@ -276,6 +276,7 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.maxyu.macswitch")
         XCTAssertEqual(plist["CFBundleExecutable"] as? String, "MacSwitch")
+        XCTAssertEqual(plist["CFBundleIconFile"] as? String, "MacSwitchIcon")
         XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
         XCTAssertEqual(plist["LSApplicationCategoryType"] as? String, "public.app-category.utilities")
         XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "14.0")
@@ -293,6 +294,28 @@ final class PackageSmokeTests: XCTestCase {
         for key in requiredUsageKeys {
             let value = plist[key] as? String
             XCTAssertFalse(value?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true, "\(key) should be present")
+        }
+
+        let iconURL = packageRoot.appendingPathComponent("Resources/MacSwitchIcon.icns")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: iconURL.path), "shipping icon should be bundled as an icns")
+
+        let iconsetURL = packageRoot.appendingPathComponent("Resources/AppIcon.appiconset")
+        let iconsetContents = try String(contentsOf: iconsetURL.appendingPathComponent("Contents.json"))
+        XCTAssertTrue(iconsetContents.contains("\"idiom\": \"mac\""))
+        for filename in [
+            "MacSwitchIcon-16x16@1x.png",
+            "MacSwitchIcon-16x16@2x.png",
+            "MacSwitchIcon-32x32@1x.png",
+            "MacSwitchIcon-32x32@2x.png",
+            "MacSwitchIcon-128x128@1x.png",
+            "MacSwitchIcon-128x128@2x.png",
+            "MacSwitchIcon-256x256@1x.png",
+            "MacSwitchIcon-256x256@2x.png",
+            "MacSwitchIcon-512x512@1x.png",
+            "MacSwitchIcon-512x512@2x.png"
+        ] {
+            XCTAssertTrue(iconsetContents.contains(filename), "\(filename) should be declared in the source iconset")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: iconsetURL.appendingPathComponent(filename).path), "\(filename) should exist")
         }
     }
 
@@ -325,6 +348,7 @@ final class PackageSmokeTests: XCTestCase {
 
     func testReleaseScriptKeepsSigningNotaryAndArchiveGuards() throws {
         let script = try String(contentsOf: packageRoot.appendingPathComponent("Scripts/build_release.sh"))
+        let iconScript = try String(contentsOf: packageRoot.appendingPathComponent("Scripts/generate_app_icon.swift"))
         let readinessScriptURL = packageRoot.appendingPathComponent("Scripts/check_release_ready.sh")
         let readinessScript = try String(contentsOf: readinessScriptURL)
         let readme = try String(contentsOf: packageRoot.appendingPathComponent("README.md"))
@@ -344,6 +368,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(releaseWorkflow.contains("default_branch=\"${GITHUB_DEFAULT_BRANCH:-main}\""))
         XCTAssertTrue(releaseWorkflow.contains("Release tag $tag must point to a commit reachable from $default_branch"))
         XCTAssertTrue(script.contains("Developer ID Application:"), "release script should auto-detect Developer ID identities")
+        XCTAssertTrue(iconScript.contains("AppIcon.appiconset"), "icon generation should use the checked-in app icon source set")
+        XCTAssertTrue(iconScript.contains("MacSwitchIcon-512x512@2x.png"), "icon generation should include a 1024px app icon source")
+        XCTAssertFalse(iconScript.contains("NSBezierPath"), "icon generation should not fall back to the old drawn placeholder icon")
         XCTAssertTrue(script.contains("SIGN_IDENTITY"), "release script should support explicit signing identity overrides")
         XCTAssertFalse(script.contains(privateCiPrefix), "release script should not expose project-specific private CI variables")
         XCTAssertTrue(script.contains("security unlock-keychain"), "release script should unlock the login keychain when a password is supplied")
