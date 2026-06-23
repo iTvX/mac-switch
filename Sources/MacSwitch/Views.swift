@@ -6,6 +6,7 @@ enum DashboardLayout {
     static let width: CGFloat = 326
     static let minHeight: CGFloat = 278
     static let maxHeight: CGFloat = 438
+    static let cornerRadius: CGFloat = 18
 
     static func size(visibleCount: Int, showsError: Bool) -> NSSize {
         NSSize(width: width, height: height(visibleCount: visibleCount, showsError: showsError))
@@ -41,7 +42,7 @@ struct DashboardView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
-                .background(DashboardColors.headerFill)
+                .background(DashboardBandBackground(placement: .header))
 
             Rectangle()
                 .fill(DashboardColors.separator)
@@ -84,18 +85,20 @@ struct DashboardView: View {
         .background {
             DashboardBackdrop()
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .compositingGroup()
+        .clipShape(RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous)
                 .stroke(DashboardColors.border, lineWidth: 1)
         )
         .overlay(alignment: .top) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous)
                 .stroke(DashboardColors.highlight, lineWidth: 1)
                 .blendMode(.screen)
                 .allowsHitTesting(false)
         }
-        .shadow(color: .black.opacity(0.18), radius: 22, y: 12)
+        .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
     }
 }
@@ -222,30 +225,82 @@ private struct EmptyDashboardView: View {
 }
 
 private enum DashboardColors {
-    static let border = Color.primary.opacity(0.11)
-    static let highlight = Color.white.opacity(0.22)
-    static let separator = Color.primary.opacity(0.065)
-    static let headerFill = Color(nsColor: .controlBackgroundColor).opacity(0.22)
-    static let footerFill = Color(nsColor: .controlBackgroundColor).opacity(0.18)
+    static let border = Color.primary.opacity(0.095)
+    static let highlight = Color.white.opacity(0.26)
+    static let separator = Color.primary.opacity(0.055)
+    static let headerFill = Color.white.opacity(0.10)
+    static let footerFill = Color.white.opacity(0.08)
     static let rowFill = Color.clear
-    static let rowHoverFill = Color.white.opacity(0.20)
-    static let rowOnFill = Color.accentColor.opacity(0.13)
-    static let rowDragFill = Color.accentColor.opacity(0.17)
-    static let controlFill = Color(nsColor: .controlBackgroundColor).opacity(0.48)
-    static let controlHoverFill = Color.white.opacity(0.24)
+    static let rowHoverFill = Color.white.opacity(0.15)
+    static let rowOnFill = Color.accentColor.opacity(0.12)
+    static let rowDragFill = Color.accentColor.opacity(0.16)
+    static let controlFill = Color.white.opacity(0.20)
+    static let controlHoverFill = Color.white.opacity(0.30)
     static let subtleText = Color.secondary.opacity(0.88)
-    static let windowVeil = Color(nsColor: .windowBackgroundColor).opacity(0.10)
-    static let glassGlow = Color.white.opacity(0.16)
+    static let windowVeil = Color(nsColor: .windowBackgroundColor).opacity(0.08)
+    static let glassGlow = Color.white.opacity(0.14)
+    static let bottomShade = Color.black.opacity(0.035)
 }
 
 private struct DashboardBackdrop: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous)
+            .fill(.ultraThinMaterial)
+            .overlay {
+                RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous)
+                    .fill(DashboardColors.windowVeil)
+            }
+            .overlay {
+                LinearGradient(
+                    colors: [
+                        DashboardColors.glassGlow.opacity(colorScheme == .dark ? 0.10 : 1),
+                        Color.clear,
+                        DashboardColors.bottomShade.opacity(colorScheme == .dark ? 0.25 : 1)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous))
+            }
+            .clipShape(RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius, style: .continuous))
+    }
+}
+
+private struct DashboardBandBackground: View {
+    let placement: Placement
+
+    enum Placement {
+        case header
+        case footer
+    }
+
+    var body: some View {
         ZStack {
-            VisualEffectView(material: .hudWindow, blendingMode: .behindWindow)
-            DashboardColors.windowVeil
-            DashboardColors.glassGlow.opacity(colorScheme == .dark ? 0.06 : 1)
+            Color.clear
+            LinearGradient(
+                colors: colors,
+                startPoint: placement == .header ? .top : .bottom,
+                endPoint: placement == .header ? .bottom : .top
+            )
+        }
+    }
+
+    private var colors: [Color] {
+        switch placement {
+        case .header:
+            return [
+                DashboardColors.headerFill.opacity(1),
+                DashboardColors.headerFill.opacity(0.40),
+                Color.clear
+            ]
+        case .footer:
+            return [
+                DashboardColors.footerFill.opacity(0.95),
+                DashboardColors.footerFill.opacity(0.46),
+                Color.clear
+            ]
         }
     }
 }
@@ -933,7 +988,7 @@ private struct FooterBar: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
         }
-        .background(DashboardColors.footerFill)
+        .background(DashboardBandBackground(placement: .footer))
     }
 }
 
@@ -947,11 +1002,15 @@ private struct DashboardFooterButton: View {
             Label(title, systemImage: "square.grid.2x2")
                 .font(.system(size: 12, weight: .medium))
                 .labelStyle(.titleAndIcon)
-                .foregroundStyle(.primary.opacity(0.82))
-                .padding(.horizontal, 11)
+                .foregroundStyle(.primary.opacity(0.78))
+                .padding(.horizontal, 12)
                 .frame(height: 28)
-                .background(isHovering ? DashboardColors.controlHoverFill : DashboardColors.controlFill.opacity(0.40), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).stroke(Color.white.opacity(0.13), lineWidth: 1))
+                .background(
+                    isHovering ? DashboardColors.controlHoverFill : DashboardColors.controlFill.opacity(0.54),
+                    in: Capsule()
+                )
+                .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+                .shadow(color: .black.opacity(0.035), radius: 4, y: 1)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -978,8 +1037,15 @@ private struct CompactIconButton: View {
                 }
             }
             .frame(width: 28, height: 28)
-            .background(isHovering ? DashboardColors.controlHoverFill : DashboardColors.controlFill.opacity(0.28), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.white.opacity(0.12), lineWidth: 1))
+            .background(
+                isHovering ? DashboardColors.controlHoverFill : DashboardColors.controlFill.opacity(0.48),
+                in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.03), radius: 4, y: 1)
         }
         .buttonStyle(.plain)
         .foregroundStyle(.primary.opacity(0.74))
