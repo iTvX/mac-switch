@@ -2151,6 +2151,8 @@ final class PackageSmokeTests: XCTestCase {
 
     func testStatusItemOpensDashboardOnMouseDown() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
+        XCTAssertTrue(appDelegate.contains("NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)"))
+        XCTAssertFalse(appDelegate.contains("NSStatusBar.system.statusItem(withLength: 34)"))
         XCTAssertTrue(appDelegate.contains("item.button?.sendAction(on: [.leftMouseDown])"))
     }
 
