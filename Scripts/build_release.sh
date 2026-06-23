@@ -67,13 +67,26 @@ notary_profile_setup_hint() {
     fi
 }
 
-notary_profile_is_available() {
+notary_profile_history() {
     local profile="$1"
     if [[ -n "$NOTARY_KEYCHAIN" ]]; then
-        run_notarytool history --keychain-profile "$profile" --keychain "$NOTARY_KEYCHAIN" >/dev/null 2>&1
+        run_notarytool history --keychain-profile "$profile" --keychain "$NOTARY_KEYCHAIN" 2>&1
     else
-        run_notarytool history --keychain-profile "$profile" >/dev/null 2>&1
+        run_notarytool history --keychain-profile "$profile" 2>&1
     fi
+}
+
+explain_notary_profile_failure() {
+    local output="$1"
+    if grep -qi "required agreement.*missing\\|agreement.*expired\\|HTTP status code: 403" <<< "$output"; then
+        echo "Apple rejected notarization credential validation because a required Apple Developer agreement is missing or expired." >&2
+        echo "Sign in to Apple Developer or App Store Connect for the configured team and accept the pending agreement, then rerun the release." >&2
+    else
+        echo "Configured notary keychain profile '$NOTARY_PROFILE' is unavailable or invalid." >&2
+        echo "Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")" >&2
+    fi
+    echo "notarytool reported:" >&2
+    printf '%s\n' "$output" >&2
 }
 
 cd "$ROOT_DIR"
@@ -101,10 +114,10 @@ if [[ "$SKIP_NOTARIZATION" != "1" ]]; then
         NOTARY_PROFILE="$DEFAULT_NOTARY_PROFILE"
     fi
 
-    if ! notary_profile_is_available "$NOTARY_PROFILE"; then
+    NOTARY_PROFILE_CHECK_OUTPUT=""
+    if ! NOTARY_PROFILE_CHECK_OUTPUT="$(notary_profile_history "$NOTARY_PROFILE")"; then
         echo "Notarization is required for release builds, but no valid notarytool credentials were found." >&2
-        echo "Configured notary keychain profile '$NOTARY_PROFILE' is unavailable or invalid." >&2
-        echo "Create it with: $(notary_profile_setup_hint "$NOTARY_PROFILE")" >&2
+        explain_notary_profile_failure "$NOTARY_PROFILE_CHECK_OUTPUT"
         echo "For local non-distribution builds only, rerun with SKIP_NOTARIZATION=1." >&2
         exit 1
     fi
