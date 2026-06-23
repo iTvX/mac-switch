@@ -165,7 +165,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("@State private var isExpanded = false"))
         XCTAssertTrue(views.contains("@State private var isExpanded = true"))
         XCTAssertTrue(views.contains("init(_ title: String, defaultExpanded: Bool = true"))
-        XCTAssertTrue(views.contains("SettingsGroup(\"Permissions\", defaultExpanded: true)"))
+        XCTAssertTrue(views.contains("SettingsGroup(store.text(.permissions), defaultExpanded: true)"))
         XCTAssertTrue(views.contains("withAnimation(.snappy(duration: 0.18))"))
         XCTAssertFalse(appDelegate.contains("window.minSize = NSSize(width: 900, height: 560)"))
         XCTAssertFalse(views.contains(".frame(minWidth: 900, minHeight: 560)"))
@@ -196,6 +196,52 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(appDelegate.contains("NSImage(systemSymbolName: icon.symbolName"))
         XCTAssertFalse(appDelegate.contains(".sink { [weak self] _ in self?.updateStatusIcon() }"))
         XCTAssertFalse(appDelegate.contains("NSImage(systemSymbolName: store.menuBarIcon.symbolName"))
+    }
+
+    func testLanguageSelectionSupportsCommonLanguages() throws {
+        let localization = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Localization.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let generalPreferencesSource = try extract(
+            views,
+            from: "private struct GeneralPreferencesView",
+            to: "private struct AboutPreferencesView"
+        )
+
+        XCTAssertTrue(localization.contains("case system"))
+        XCTAssertTrue(localization.contains("case simplifiedChinese"))
+        XCTAssertTrue(localization.contains("case traditionalChinese"))
+        XCTAssertTrue(localization.contains("case spanish"))
+        XCTAssertTrue(localization.contains("case japanese"))
+        XCTAssertTrue(localization.contains("case korean"))
+        XCTAssertTrue(localization.contains("case german"))
+        XCTAssertTrue(localization.contains("case french"))
+        XCTAssertTrue(localization.contains("case italian"))
+        XCTAssertTrue(localization.contains("case portuguese"))
+        XCTAssertTrue(localization.contains("static var preferredSystemLanguage"))
+        XCTAssertTrue(localization.contains("Locale.preferredLanguages"))
+        XCTAssertTrue(localization.contains("return .traditionalChinese"))
+        XCTAssertTrue(localization.contains("return .simplifiedChinese"))
+        XCTAssertTrue(localization.contains(".followSystem: \"跟随系统\""))
+        XCTAssertTrue(localization.contains(".followSystem: \"システムに合わせる\""))
+        XCTAssertTrue(localization.contains(".followSystem: \"시스템 따르기\""))
+        XCTAssertTrue(localization.contains(".followSystem: \"System folgen\""))
+
+        XCTAssertTrue(model.contains("@Published var appLanguage: AppLanguage"))
+        XCTAssertTrue(model.contains("DefaultsKey.appLanguage"))
+        XCTAssertTrue(model.contains("appLanguage = languageRaw.flatMap(AppLanguage.init(rawValue:)) ?? .system"))
+        XCTAssertTrue(model.contains("func text(_ key: L10nKey) -> String"))
+        XCTAssertTrue(model.contains("func switchTitle(_ kind: SwitchKind) -> String"))
+
+        XCTAssertTrue(generalPreferencesSource.contains("SettingsGroup(store.text(.language))"))
+        XCTAssertTrue(generalPreferencesSource.contains("Picker(\"\", selection: $store.appLanguage)"))
+        XCTAssertTrue(generalPreferencesSource.contains("ForEach(AppLanguage.allCases)"))
+        XCTAssertTrue(generalPreferencesSource.contains("Text(language.pickerTitle(in: store.effectiveLanguage)).tag(language)"))
+        XCTAssertTrue(generalPreferencesSource.contains("Text(store.menuBarIconTitle(icon))"))
+        XCTAssertTrue(views.contains(".environment(\\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))"))
+        XCTAssertTrue(views.contains("L10n.controlsReady(store.visibleKinds.count, language: store.effectiveLanguage)"))
+        XCTAssertTrue(views.contains("store.switchTitle(lhs).localizedStandardCompare(store.switchTitle(rhs))"))
+        XCTAssertTrue(views.contains("Text(store.switchTitle(kind))"))
     }
 
     func testInfoPlistHasShippingMetadataAndPermissions() throws {
@@ -540,9 +586,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(generalPreferencesSource.contains("store.isUpdatingStartAtLogin || store.startAtLoginNeedsApproval"))
         XCTAssertTrue(generalPreferencesSource.contains("startAtLoginPillText"))
         XCTAssertTrue(generalPreferencesSource.contains("startAtLoginPillColor"))
-        XCTAssertTrue(generalPreferencesSource.contains("Approve"))
+        XCTAssertTrue(generalPreferencesSource.contains("store.text(.approve)"))
         XCTAssertFalse(generalPreferencesSource.contains("Pending approval in Login Items"))
-        XCTAssertTrue(generalPreferencesSource.contains("return \"Pending\""))
+        XCTAssertTrue(generalPreferencesSource.contains("return store.text(.pending)"))
         XCTAssertFalse(generalPreferencesSource.contains("The login item points at another copy or an old service"))
         XCTAssertFalse(generalPreferencesSource.contains("Enabled for this copy of Mac Switch."))
         XCTAssertFalse(generalPreferencesSource.contains("Off. Enable it to open Mac Switch automatically after you sign in."))
@@ -813,7 +859,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customizeSource.contains("private var sortedKinds: [SwitchKind]"))
         XCTAssertTrue(customizeSource.contains("let lhsEnabled = store.enabledKinds.contains(lhs)"))
         XCTAssertTrue(customizeSource.contains("if lhsEnabled != rhsEnabled"))
-        XCTAssertTrue(customizeSource.contains("lhs.title.localizedStandardCompare(rhs.title)"))
+        XCTAssertTrue(customizeSource.contains("store.switchTitle(lhs).localizedStandardCompare(store.switchTitle(rhs))"))
         XCTAssertTrue(customizeSource.contains("ForEach(sortedKinds)"))
         XCTAssertTrue(customizeSource.contains("Drag items in the menu bar menu to change order."))
         XCTAssertFalse(customizeSource.contains("This list is sorted A-Z"))
@@ -2396,7 +2442,7 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertTrue(model.contains("func cancelStartAtLoginApproval()"))
         XCTAssertTrue(loginSource.contains("store.cancelStartAtLoginApproval()"))
-        XCTAssertTrue(loginSource.contains("Label(\"Cancel\", systemImage: \"xmark.circle\")"))
+        XCTAssertTrue(loginSource.contains("Label(store.text(.cancel), systemImage: \"xmark.circle\")"))
         XCTAssertFalse(loginSource.contains("cancel the pending login item"))
 
         XCTAssertTrue(shortcutInstallSource.contains("Button(\"Open Shortcuts\")"))
