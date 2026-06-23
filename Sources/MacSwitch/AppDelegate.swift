@@ -302,17 +302,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.contentView = NSHostingView(rootView: DashboardView(store: store))
+        let hostingView = NSHostingView(rootView: DashboardView(store: store))
+        configureDashboardRoundedMask(on: hostingView)
+        window.contentView = hostingView
         window.title = "Dashboard"
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = false
+        configureDashboardRoundedMask(on: window.contentView)
+        configureDashboardRoundedMask(on: window.contentView?.superview)
         window.isFloatingPanel = true
         window.hidesOnDeactivate = false
         window.level = .statusBar
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         window.animationBehavior = .utilityWindow
         return window
+    }
+
+    private func configureDashboardRoundedMask(on view: NSView?) {
+        guard let view else { return }
+        view.wantsLayer = true
+        view.layer?.backgroundColor = NSColor.clear.cgColor
+        view.layer?.isOpaque = false
+        view.layer?.cornerRadius = DashboardLayout.cornerRadius
+        view.layer?.cornerCurve = .continuous
+        view.layer?.masksToBounds = true
     }
 
     private func prewarmDashboard() {
