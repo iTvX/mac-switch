@@ -273,9 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func updateStatusIcon(_ icon: MenuBarIcon) {
         guard let button = statusItem?.button else { return }
-        let image = NSImage(systemSymbolName: icon.symbolName, accessibilityDescription: "Mac Switch")
-            ?? NSImage(systemSymbolName: "slider.horizontal.3", accessibilityDescription: "Mac Switch")
-        image?.isTemplate = true
+        let image = icon.templateImage()
         button.image = image
         button.imagePosition = .imageOnly
     }

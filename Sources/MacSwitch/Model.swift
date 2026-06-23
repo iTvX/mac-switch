@@ -307,10 +307,10 @@ struct TimeOfDay: Codable, Equatable, Hashable {
 }
 
 enum MenuBarIcon: String, CaseIterable, Codable, Identifiable {
-    case sliders
     case switches
-    case power
+    case sliders
     case grid
+    case power
     case command
     case sparkles
 
@@ -318,24 +318,133 @@ enum MenuBarIcon: String, CaseIterable, Codable, Identifiable {
 
     var title: String {
         switch self {
-        case .sliders: return "Sliders"
         case .switches: return "Switches"
-        case .power: return "Power"
-        case .grid: return "Grid"
-        case .command: return "Command"
-        case .sparkles: return "Sparkles"
+        case .sliders: return "Balance"
+        case .grid: return "Tiles"
+        case .power: return "Pulse"
+        case .command: return "Orbit"
+        case .sparkles: return "Spark"
         }
     }
 
-    var symbolName: String {
-        switch self {
-        case .sliders: return "slider.horizontal.3"
-        case .switches: return "switch.2"
-        case .power: return "power"
-        case .grid: return "square.grid.2x2"
-        case .command: return "command"
-        case .sparkles: return "sparkles"
+    func templateImage(size: NSSize = NSSize(width: 18, height: 18)) -> NSImage {
+        let image = NSImage(size: size)
+        image.lockFocus()
+        defer {
+            image.unlockFocus()
+            image.isTemplate = true
+            image.accessibilityDescription = "Mac Switch \(title)"
         }
+
+        NSGraphicsContext.current?.shouldAntialias = true
+        NSColor.black.setStroke()
+        NSColor.black.setFill()
+
+        let side = min(size.width, size.height)
+        let offsetX = (size.width - side) / 2
+        let offsetY = (size.height - side) / 2
+        let strokeWidth = max(1.45, side * 0.095)
+
+        func x(_ value: CGFloat) -> CGFloat { offsetX + value / 18 * side }
+        func y(_ value: CGFloat) -> CGFloat { offsetY + value / 18 * side }
+        func point(_ xValue: CGFloat, _ yValue: CGFloat) -> NSPoint {
+            NSPoint(x: x(xValue), y: y(yValue))
+        }
+        func rect(_ xValue: CGFloat, _ yValue: CGFloat, _ width: CGFloat, _ height: CGFloat) -> NSRect {
+            NSRect(x: x(xValue), y: y(yValue), width: width / 18 * side, height: height / 18 * side)
+        }
+        func path(_ configure: (NSBezierPath) -> Void) -> NSBezierPath {
+            let path = NSBezierPath()
+            path.lineWidth = strokeWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            configure(path)
+            return path
+        }
+        func stroke(_ path: NSBezierPath) {
+            path.lineWidth = strokeWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+        func roundedRect(_ rect: NSRect, radius: CGFloat, filled: Bool = false) {
+            let path = NSBezierPath(roundedRect: rect, xRadius: radius / 18 * side, yRadius: radius / 18 * side)
+            filled ? path.fill() : stroke(path)
+        }
+        func oval(_ rect: NSRect, filled: Bool = false) {
+            let path = NSBezierPath(ovalIn: rect)
+            filled ? path.fill() : stroke(path)
+        }
+        func line(from start: NSPoint, to end: NSPoint) {
+            stroke(path {
+                $0.move(to: start)
+                $0.line(to: end)
+            })
+        }
+        func diamond(centerX: CGFloat, centerY: CGFloat, radius: CGFloat, filled: Bool = false) {
+            let path = path {
+                $0.move(to: point(centerX, centerY + radius))
+                $0.line(to: point(centerX + radius, centerY))
+                $0.line(to: point(centerX, centerY - radius))
+                $0.line(to: point(centerX - radius, centerY))
+                $0.close()
+            }
+            filled ? path.fill() : stroke(path)
+        }
+
+        switch self {
+        case .switches:
+            roundedRect(rect(8.0, 3.2, 2.0, 11.6), radius: 1.0, filled: true)
+            roundedRect(rect(3.0, 4.1, 7.4, 3.6), radius: 1.8)
+            roundedRect(rect(7.6, 10.3, 7.4, 3.6), radius: 1.8)
+            oval(rect(4.0, 5.0, 1.8, 1.8), filled: true)
+            oval(rect(12.2, 11.2, 1.8, 1.8), filled: true)
+        case .sliders:
+            roundedRect(rect(4.9, 3.1, 2.4, 11.8), radius: 1.2)
+            roundedRect(rect(10.7, 3.1, 2.4, 11.8), radius: 1.2)
+            oval(rect(3.6, 9.7, 5.0, 5.0), filled: true)
+            oval(rect(9.4, 4.2, 5.0, 5.0), filled: true)
+        case .grid:
+            roundedRect(rect(3.1, 3.1, 4.5, 4.5), radius: 1.0)
+            roundedRect(rect(10.4, 3.1, 4.5, 4.5), radius: 1.0)
+            roundedRect(rect(3.1, 10.4, 4.5, 4.5), radius: 1.0)
+            roundedRect(rect(10.4, 10.4, 4.5, 4.5), radius: 1.0, filled: true)
+        case .power:
+            oval(rect(4.7, 4.7, 8.6, 8.6))
+            line(from: point(2.8, 9.0), to: point(5.1, 9.0))
+            line(from: point(12.9, 9.0), to: point(15.2, 9.0))
+            line(from: point(9.0, 12.9), to: point(9.0, 15.2))
+            oval(rect(8.0, 8.0, 2.0, 2.0), filled: true)
+        case .command:
+            oval(rect(7.2, 7.2, 3.6, 3.6), filled: true)
+            let arcA = path {
+                $0.appendArc(
+                    withCenter: point(9.0, 9.0),
+                    radius: 6.1 / 18 * side,
+                    startAngle: 18,
+                    endAngle: 158
+                )
+            }
+            stroke(arcA)
+            let arcB = path {
+                $0.appendArc(
+                    withCenter: point(9.0, 9.0),
+                    radius: 6.1 / 18 * side,
+                    startAngle: 198,
+                    endAngle: 338
+                )
+            }
+            stroke(arcB)
+            oval(rect(12.5, 12.0, 2.2, 2.2), filled: true)
+            oval(rect(3.3, 3.8, 2.2, 2.2), filled: true)
+        case .sparkles:
+            diamond(centerX: 8.2, centerY: 10.4, radius: 4.1)
+            diamond(centerX: 13.7, centerY: 5.1, radius: 1.8, filled: true)
+            diamond(centerX: 4.0, centerY: 4.9, radius: 1.3, filled: true)
+            line(from: point(12.8, 12.9), to: point(14.4, 14.5))
+        }
+
+        return image
     }
 }
 
@@ -603,7 +712,7 @@ final class SwitchStore: ObservableObject {
         )
 
         let iconRaw = defaults.string(forKey: DefaultsKey.menuBarIcon)
-        menuBarIcon = iconRaw.flatMap(MenuBarIcon.init(rawValue:)) ?? .grid
+        menuBarIcon = iconRaw.flatMap(MenuBarIcon.init(rawValue:)) ?? .switches
 
         startAtLogin = LoginItemManager.initialIsEnabled
         saveOrder()

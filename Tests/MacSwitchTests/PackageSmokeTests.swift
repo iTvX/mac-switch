@@ -175,10 +175,25 @@ final class PackageSmokeTests: XCTestCase {
 
     func testMenuBarIconSelectionUsesPublishedValueImmediately() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let menuBarIconSource = try extract(model, from: "enum MenuBarIcon", to: "struct SwitchSnapshot")
 
         XCTAssertTrue(appDelegate.contains(".sink { [weak self] icon in self?.updateStatusIcon(icon) }"))
         XCTAssertTrue(appDelegate.contains("private func updateStatusIcon(_ icon: MenuBarIcon)"))
-        XCTAssertTrue(appDelegate.contains("NSImage(systemSymbolName: icon.symbolName"))
+        XCTAssertTrue(appDelegate.contains("let image = icon.templateImage()"))
+        XCTAssertTrue(menuBarIconSource.contains("func templateImage(size: NSSize = NSSize(width: 18, height: 18)) -> NSImage"))
+        XCTAssertTrue(menuBarIconSource.contains("image.isTemplate = true"))
+        XCTAssertTrue(views.contains("Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))"))
+        XCTAssertTrue(menuBarIconSource.contains("case .power: return \"Pulse\""))
+        XCTAssertTrue(menuBarIconSource.contains("case .command: return \"Orbit\""))
+        XCTAssertTrue(menuBarIconSource.contains("case .sliders: return \"Balance\""))
+        XCTAssertFalse(menuBarIconSource.contains("return \"Power\""))
+        XCTAssertFalse(menuBarIconSource.contains("return \"Command\""))
+        XCTAssertFalse(menuBarIconSource.contains("return \"Sliders\""))
+        XCTAssertFalse(menuBarIconSource.contains("var symbolName: String"))
+        XCTAssertFalse(views.contains("Label(icon.title, systemImage: icon.symbolName)"))
+        XCTAssertFalse(appDelegate.contains("NSImage(systemSymbolName: icon.symbolName"))
         XCTAssertFalse(appDelegate.contains(".sink { [weak self] _ in self?.updateStatusIcon() }"))
         XCTAssertFalse(appDelegate.contains("NSImage(systemSymbolName: store.menuBarIcon.symbolName"))
     }

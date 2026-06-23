@@ -1646,7 +1646,13 @@ private struct GeneralPreferencesView: View {
                     ) {
                         Picker("", selection: $store.menuBarIcon) {
                             ForEach(MenuBarIcon.allCases) { icon in
-                                Label(icon.title, systemImage: icon.symbolName).tag(icon)
+                                HStack(spacing: 8) {
+                                    Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))
+                                        .renderingMode(.template)
+                                        .frame(width: 17, height: 17)
+                                    Text(icon.title)
+                                }
+                                .tag(icon)
                             }
                         }
                         .labelsHidden()
