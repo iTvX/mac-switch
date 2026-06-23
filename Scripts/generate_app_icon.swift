@@ -38,6 +38,7 @@ for file in iconFiles {
             NSLocalizedDescriptionKey: "Missing app icon source: \(source.path)"
         ])
     }
+    try validatePNGHasAlpha(source)
     try fileManager.copyItem(at: source, to: destination)
 }
 
@@ -54,3 +55,20 @@ guard process.terminationStatus == 0 else {
 }
 
 print("Generated \(icns.path) from \(sourceIconset.path)")
+
+private func validatePNGHasAlpha(_ url: URL) throws {
+    let data = try Data(contentsOf: url)
+    let pngSignature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+    guard data.count > 25, data.prefix(8) == pngSignature else {
+        throw NSError(domain: "MacSwitchIcon", code: 3, userInfo: [
+            NSLocalizedDescriptionKey: "\(url.lastPathComponent) is not a valid PNG file"
+        ])
+    }
+
+    let colorType = data[25]
+    guard colorType == 6 else {
+        throw NSError(domain: "MacSwitchIcon", code: 4, userInfo: [
+            NSLocalizedDescriptionKey: "\(url.lastPathComponent) must be an RGBA PNG with alpha to avoid an opaque app-icon halo"
+        ])
+    }
+}

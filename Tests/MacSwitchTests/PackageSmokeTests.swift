@@ -315,7 +315,9 @@ final class PackageSmokeTests: XCTestCase {
             "MacSwitchIcon-512x512@2x.png"
         ] {
             XCTAssertTrue(iconsetContents.contains(filename), "\(filename) should be declared in the source iconset")
-            XCTAssertTrue(FileManager.default.fileExists(atPath: iconsetURL.appendingPathComponent(filename).path), "\(filename) should exist")
+            let iconFileURL = iconsetURL.appendingPathComponent(filename)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: iconFileURL.path), "\(filename) should exist")
+            XCTAssertEqual(try pngColorType(at: iconFileURL), 6, "\(filename) should be RGBA with alpha")
         }
     }
 
@@ -373,6 +375,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(script.contains("Developer ID Application:"), "release script should auto-detect Developer ID identities")
         XCTAssertTrue(iconScript.contains("AppIcon.appiconset"), "icon generation should use the checked-in app icon source set")
         XCTAssertTrue(iconScript.contains("MacSwitchIcon-512x512@2x.png"), "icon generation should include a 1024px app icon source")
+        XCTAssertTrue(iconScript.contains("validatePNGHasAlpha"), "icon generation should reject opaque PNG sources")
+        XCTAssertTrue(iconScript.contains("must be an RGBA PNG with alpha"), "icon generation should explain alpha requirements")
         XCTAssertFalse(iconScript.contains("NSBezierPath"), "icon generation should not fall back to the old drawn placeholder icon")
         XCTAssertTrue(script.contains("SIGN_IDENTITY"), "release script should support explicit signing identity overrides")
         XCTAssertFalse(script.contains(privateCiPrefix), "release script should not expose project-specific private CI variables")
@@ -2614,5 +2618,13 @@ final class PackageSmokeTests: XCTestCase {
 
     private func ascii(_ bytes: [UInt8]) -> String {
         String(decoding: bytes, as: UTF8.self)
+    }
+
+    private func pngColorType(at url: URL) throws -> UInt8 {
+        let data = try Data(contentsOf: url)
+        let signature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        XCTAssertTrue(data.count > 25, "\(url.lastPathComponent) should include PNG IHDR metadata")
+        XCTAssertEqual(data.prefix(8), signature, "\(url.lastPathComponent) should use the PNG signature")
+        return data[25]
     }
 }
