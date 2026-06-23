@@ -57,6 +57,11 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct FooterBar",
             to: "private struct CompactIconButton"
         )
+        let backdropSource = try extract(
+            views,
+            from: "private struct DashboardBackdrop",
+            to: "private struct DashboardBandBackground"
+        )
         let headerSource = try extract(
             views,
             from: "private struct DashboardHeader",
@@ -81,13 +86,21 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("enum DashboardLayout"))
         XCTAssertTrue(views.contains("static let minHeight: CGFloat = 278"))
         XCTAssertTrue(views.contains("static let maxHeight: CGFloat = 438"))
+        XCTAssertTrue(views.contains("static let cornerRadius: CGFloat = 18"))
         XCTAssertTrue(views.contains("private struct DashboardBackdrop"))
-        XCTAssertTrue(views.contains("VisualEffectView(material: .hudWindow"))
+        XCTAssertTrue(backdropSource.contains(".fill(.ultraThinMaterial)"))
+        XCTAssertTrue(backdropSource.contains("RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius"))
+        XCTAssertTrue(dashboardSource.contains(".compositingGroup()"))
+        XCTAssertTrue(dashboardSource.contains(".clipShape(RoundedRectangle(cornerRadius: DashboardLayout.cornerRadius"))
+        XCTAssertFalse(backdropSource.contains("VisualEffectView("))
+        XCTAssertTrue(views.contains("private struct DashboardBandBackground"))
         XCTAssertTrue(views.contains("DashboardColors.windowVeil"))
         XCTAssertTrue(views.contains("DashboardColors.glassGlow"))
         XCTAssertTrue(views.contains("DashboardColors.highlight"))
         XCTAssertTrue(views.contains(".toggleStyle(.switch)"))
         XCTAssertTrue(footerSource.contains("DashboardFooterButton"))
+        XCTAssertTrue(footerSource.contains("DashboardBandBackground(placement: .footer)"))
+        XCTAssertFalse(footerSource.contains(".background(DashboardColors.footerFill)"))
         XCTAssertFalse(footerSource.contains("CompactIconButton(symbol: \"gearshape\")"))
         XCTAssertFalse(footerSource.contains(".frame(maxWidth: .infinity)"))
         XCTAssertFalse(footerSource.contains(".buttonStyle(.bordered)"))
@@ -124,7 +137,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("resizeVisibleDashboardKeepingTopEdge()"))
         XCTAssertFalse(appDelegate.contains("private let dashboardSize = NSSize(width: 326, height: 438)"))
         XCTAssertFalse(views.contains("PaletteToggleStyle"))
-        XCTAssertFalse(views.contains("LinearGradient("))
+        XCTAssertTrue(views.contains("private struct DashboardBandBackground"))
+        XCTAssertTrue(views.contains("LinearGradient("))
     }
 
     func testPreferencesWindowIsResizableAndScreenClamped() throws {
@@ -2256,7 +2270,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(source.contains("Label(\"Battery Settings\", systemImage: \"battery.50percent\")"))
         XCTAssertFalse(source.contains("PaletteToggleStyle"))
         XCTAssertFalse(source.contains("badgeBackground"))
-        XCTAssertFalse(source.contains("LinearGradient("))
+        XCTAssertTrue(source.contains("private struct DashboardBandBackground"))
         XCTAssertTrue(customizeSource.contains("init(store: SwitchStore)"))
         XCTAssertTrue(customizeSource.contains("_selectedKind = State(initialValue: Self.initialSelection(in: store))"))
         XCTAssertTrue(customizeSource.contains("private static func initialSelection(in store: SwitchStore) -> SwitchKind?"))
