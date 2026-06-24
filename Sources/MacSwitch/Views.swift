@@ -594,7 +594,7 @@ private struct ControlRow: View {
 }
 
 private struct DashboardRowQuickMenu: View {
-    static let width: CGFloat = 178
+    static let width: CGFloat = 154
     static let approximateHeight: CGFloat = 84
 
     let hideDisabledReason: String?
@@ -662,6 +662,7 @@ private struct DashboardQuickMenuButton: View {
                     Text(title)
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.62) : .primary)
+                        .lineLimit(1)
 
                     if let subtitle {
                         Text(subtitle)
@@ -671,11 +672,10 @@ private struct DashboardQuickMenuButton: View {
                             .minimumScaleFactor(0.78)
                     }
                 }
-
-                Spacer(minLength: 0)
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(!isDisabled && isHovering ? DashboardColors.controlHoverFill : Color.clear)
