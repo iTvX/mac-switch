@@ -814,6 +814,23 @@ final class SwitchStore: ObservableObject {
         orderedKinds = Self.normalizedOrder(updated)
     }
 
+    func setVisibleOrder(_ visibleOrder: [SwitchKind]) {
+        let currentVisibleKinds = visibleKinds
+        let visibleSet = Set(currentVisibleKinds)
+        let sanitizedVisibleOrder = Self.deduplicatedKinds(visibleOrder).filter { visibleSet.contains($0) }
+        guard sanitizedVisibleOrder.count == currentVisibleKinds.count,
+              Set(sanitizedVisibleOrder) == visibleSet
+        else { return }
+
+        var visibleIterator = sanitizedVisibleOrder.makeIterator()
+        let updated = Self.normalizedOrder(orderedKinds).map { kind in
+            visibleSet.contains(kind) ? (visibleIterator.next() ?? kind) : kind
+        }
+        let normalized = Self.normalizedOrder(updated)
+        guard normalized != orderedKinds else { return }
+        orderedKinds = normalized
+    }
+
     func resetCustomization() {
         guard !hasBusyActions else {
             lastError = "Finish the current switch update before restoring defaults."

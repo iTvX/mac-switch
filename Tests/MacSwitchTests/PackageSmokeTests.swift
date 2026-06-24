@@ -75,11 +75,11 @@ final class PackageSmokeTests: XCTestCase {
         let reorderRowSource = try extract(
             views,
             from: "private struct DashboardReorderRow",
-            to: "private struct DashboardDropPlacement"
+            to: "private struct DashboardDragState"
         )
         let dragModifierSource = try extract(
             views,
-            from: "private struct ConditionalDragModifier",
+            from: "private struct DashboardRowDragModifier",
             to: "private struct SwitchGlyph"
         )
 
@@ -107,25 +107,34 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(headerSource.contains("CompactIconButton(symbol: \"gearshape\")"))
         XCTAssertFalse(headerSource.contains("CompactIconButton(symbol: \"arrow.clockwise\""))
         XCTAssertFalse(headerSource.contains("store.refreshVisibleAsync()"))
-        XCTAssertTrue(dashboardSource.contains("@State private var dashboardDragging: SwitchKind?"))
-        XCTAssertTrue(dashboardSource.contains("@State private var dashboardDropPlacement: DashboardDropPlacement?"))
-        XCTAssertTrue(dashboardSource.contains("dragProvider: {"))
-        XCTAssertTrue(dashboardSource.contains("dragging = kind"))
-        XCTAssertTrue(dashboardSource.contains("DashboardDropSlot(isVisible: showsDropBefore)"))
-        XCTAssertTrue(dashboardSource.contains("DashboardDropSlot(isVisible: showsDropAfter)"))
-        XCTAssertTrue(dashboardSource.contains(".onDrop("))
-        XCTAssertTrue(dashboardSource.contains("delegate: DashboardDropDelegate("))
-        XCTAssertTrue(dashboardSource.contains("rowHeight: ControlRow.rowHeight(for: snapshot)"))
-        XCTAssertTrue(dashboardSource.contains("topInset: showsDropBefore ? DashboardDropSlot.height : 0"))
-        XCTAssertTrue(views.contains("private struct DashboardDropPlacement: Equatable"))
-        XCTAssertTrue(views.contains("private struct DashboardDropSlot: View"))
+        XCTAssertTrue(dashboardSource.contains("@State private var dashboardVisualKinds: [SwitchKind] = []"))
+        XCTAssertTrue(dashboardSource.contains("@State private var dashboardDragState: DashboardDragState?"))
+        XCTAssertTrue(dashboardSource.contains("private var dashboardDisplayKinds: [SwitchKind]"))
+        XCTAssertTrue(dashboardSource.contains("ForEach(Array(dashboardDisplayKinds.enumerated())"))
+        XCTAssertTrue(dashboardSource.contains("updateDashboardDrag(kind: kind, value: value)"))
+        XCTAssertTrue(dashboardSource.contains("finishDashboardDrag(kind: kind, value: value)"))
+        XCTAssertTrue(dashboardSource.contains("private func dashboardReorderedKinds("))
+        XCTAssertTrue(dashboardSource.contains("store.setVisibleOrder(finalOrder)"))
+        XCTAssertTrue(dashboardSource.contains("NSHapticFeedbackManager.defaultPerformer.perform(.alignment"))
+        XCTAssertFalse(dashboardSource.contains("@State private var dashboardDropPlacement"))
+        XCTAssertFalse(views.contains(".onDrop("))
+        XCTAssertFalse(views.contains(".onDrag("))
+        XCTAssertFalse(views.contains("NSItemProvider"))
+        XCTAssertFalse(views.contains("DropDelegate"))
+        XCTAssertFalse(views.contains("DashboardDropSlot"))
         XCTAssertTrue(views.contains("private struct RowIdentityContent: View"))
-        XCTAssertTrue(views.contains("private struct ConditionalDragModifier: ViewModifier"))
-        XCTAssertFalse(reorderRowSource.contains(".onDrag"))
-        XCTAssertTrue(dragModifierSource.contains("content.onDrag(dragProvider)"))
+        XCTAssertTrue(views.contains("private struct DashboardDragState: Equatable"))
+        XCTAssertTrue(views.contains("private struct DashboardRowDragModifier: ViewModifier"))
+        XCTAssertTrue(reorderRowSource.contains("let dragChanged: (DragGesture.Value) -> Void"))
+        XCTAssertTrue(reorderRowSource.contains(".offset(y: dragOffset)"))
+        XCTAssertTrue(reorderRowSource.contains(".animation(nil, value: dragOffset)"))
+        XCTAssertTrue(dragModifierSource.contains("content.highPriorityGesture("))
+        XCTAssertTrue(dragModifierSource.contains("DragGesture(minimumDistance: 4, coordinateSpace: .named(DashboardLayout.coordinateSpaceName))"))
+        XCTAssertTrue(dragModifierSource.contains(".onChanged(onChanged)"))
+        XCTAssertTrue(dragModifierSource.contains(".onEnded(onEnded)"))
         XCTAssertTrue(controlRowSource.contains("RowIdentityContent("))
         XCTAssertTrue(controlRowSource.contains("let isDragging: Bool"))
-        XCTAssertTrue(controlRowSource.contains("let dragProvider: (() -> NSItemProvider)?"))
+        XCTAssertTrue(controlRowSource.contains("let dragChanged: (DragGesture.Value) -> Void"))
         XCTAssertTrue(controlRowSource.contains("DashboardColors.rowDragFill"))
         XCTAssertTrue(controlRowSource.contains("fileprivate static func rowHeight(for snapshot: SwitchSnapshot)"))
         XCTAssertTrue(dashboardSource.contains("@State private var dashboardQuickMenuKind: SwitchKind?"))
@@ -147,8 +156,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains(".zIndex(39)"))
         XCTAssertTrue(dashboardSource.contains("onReceive(NotificationCenter.default.publisher(for: .resetMacSwitchDashboardTransientState))"))
         XCTAssertTrue(dashboardSource.contains("private func resetTransientState()"))
-        XCTAssertTrue(dashboardSource.contains("dashboardDragging = nil"))
-        XCTAssertTrue(dashboardSource.contains("dashboardDropPlacement = nil"))
+        XCTAssertTrue(dashboardSource.contains("dashboardDragState = nil"))
+        XCTAssertTrue(dashboardSource.contains("dashboardVisualKinds = store.visibleKinds"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuKind = nil"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuOpeningEventNumber = nil"))
         XCTAssertTrue(views.contains("private struct DashboardRowFramePreferenceKey: PreferenceKey"))
@@ -970,6 +979,11 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(moveSource.contains("orderedKinds = Self.normalizedOrder(updated)"))
         XCTAssertTrue(model.contains("func move(_ source: SwitchKind, after target: SwitchKind)"))
         XCTAssertTrue(model.contains("let adjustedIndex = min(from < to ? to : to + 1, updated.count)"))
+        XCTAssertTrue(moveSource.contains("func setVisibleOrder(_ visibleOrder: [SwitchKind])"))
+        XCTAssertTrue(moveSource.contains("let visibleSet = Set(currentVisibleKinds)"))
+        XCTAssertTrue(moveSource.contains("let sanitizedVisibleOrder = Self.deduplicatedKinds(visibleOrder).filter { visibleSet.contains($0) }"))
+        XCTAssertTrue(moveSource.contains("var visibleIterator = sanitizedVisibleOrder.makeIterator()"))
+        XCTAssertTrue(moveSource.contains("visibleSet.contains(kind) ? (visibleIterator.next() ?? kind) : kind"))
         XCTAssertFalse(model.contains("func moveVisible(_ kind: SwitchKind, up: Bool)"))
         XCTAssertTrue(saveSource.contains("Self.normalizedOrder(orderedKinds).map(\\.rawValue)"))
         XCTAssertTrue(saveSource.contains("let orderedEnabled = Self.normalizedOrder(orderedKinds).filter { enabledKinds.contains($0) }"))
@@ -1007,28 +1021,32 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(rowSource.contains("chevron.right"))
     }
 
-    func testDashboardDragDropPreviewsLandingSlotBeforeMoving() throws {
+    func testDashboardUsesCustomGestureReorderingWithoutSystemDragImages() throws {
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
-        let dashboardDropDelegateSource = try extract(
+        let dashboardSource = try extract(
             views,
-            from: "private struct DashboardDropDelegate",
-            to: "struct ScreenCleanOverlayView"
+            from: "struct DashboardView",
+            to: "private struct DashboardReorderRow"
         )
-        let placementUpdateSource = try extract(
-            dashboardDropDelegateSource,
-            from: "private func updatePlacement",
-            to: "private func position"
+        let dragModifierSource = try extract(
+            views,
+            from: "private struct DashboardRowDragModifier",
+            to: "private struct SwitchGlyph"
         )
 
-        XCTAssertTrue(views.contains("static let height: CGFloat = 18"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("@Binding var placement: DashboardDropPlacement?"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("return DropProposal(operation: .move)"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("placement = next"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("return rowY > rowHeight / 2 ? .after : .before"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("store.move(source, before: target.item)"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("store.move(source, after: target.item)"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("withAnimation(.spring(response: 0.24, dampingFraction: 0.86))"))
-        XCTAssertFalse(placementUpdateSource.contains("store.move("))
+        XCTAssertTrue(dashboardSource.contains("@State private var dashboardVisualKinds: [SwitchKind] = []"))
+        XCTAssertTrue(dashboardSource.contains("@State private var dashboardDragState: DashboardDragState?"))
+        XCTAssertTrue(dashboardSource.contains("private func dashboardDragOffset(for kind: SwitchKind) -> CGFloat"))
+        XCTAssertTrue(dashboardSource.contains("private func updateDashboardDrag(kind: SwitchKind, value: DragGesture.Value)"))
+        XCTAssertTrue(dashboardSource.contains("private func finishDashboardDrag(kind: SwitchKind, value: DragGesture.Value)"))
+        XCTAssertTrue(dashboardSource.contains("DispatchQueue.main.async"))
+        XCTAssertTrue(dashboardSource.contains("store.setVisibleOrder(finalOrder)"))
+        XCTAssertTrue(dashboardSource.contains("withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06))"))
+        XCTAssertTrue(dragModifierSource.contains("DragGesture(minimumDistance: 4, coordinateSpace: .named(DashboardLayout.coordinateSpaceName))"))
+        XCTAssertFalse(views.contains("NSItemProvider"))
+        XCTAssertFalse(views.contains(".onDrag("))
+        XCTAssertFalse(views.contains(".onDrop("))
+        XCTAssertFalse(views.contains("DropDelegate"))
     }
 
     func testPublicRefreshAPIsDoNotSynchronouslySnapshotSystemState() throws {
