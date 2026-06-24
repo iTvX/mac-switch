@@ -29,6 +29,7 @@ struct DashboardView: View {
     @State private var dashboardDragging: SwitchKind?
     @State private var dashboardDropPlacement: DashboardDropPlacement?
     @State private var dashboardQuickMenuKind: SwitchKind?
+    @State private var dashboardQuickMenuOpeningEventNumber: Int?
     @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
 
     private var panelSize: NSSize {
@@ -64,7 +65,8 @@ struct DashboardView: View {
                                     showsSeparator: index < store.visibleKinds.count - 1,
                                     dragging: $dashboardDragging,
                                     dropPlacement: $dashboardDropPlacement,
-                                    quickMenuKind: $dashboardQuickMenuKind
+                                    quickMenuKind: $dashboardQuickMenuKind,
+                                    quickMenuOpeningEventNumber: $dashboardQuickMenuOpeningEventNumber
                                 )
                             }
                         }
@@ -108,6 +110,7 @@ struct DashboardView: View {
                 DashboardQuickMenuDismissLayer {
                     closeQuickMenu()
                 }
+                .ignoredEventNumber(dashboardQuickMenuOpeningEventNumber)
                 .frame(width: panelSize.width, height: panelSize.height)
                 .zIndex(39)
 
@@ -176,6 +179,7 @@ struct DashboardView: View {
     private func closeQuickMenu() {
         withAnimation(.easeOut(duration: 0.10)) {
             dashboardQuickMenuKind = nil
+            dashboardQuickMenuOpeningEventNumber = nil
         }
     }
 
@@ -183,6 +187,7 @@ struct DashboardView: View {
         dashboardDragging = nil
         dashboardDropPlacement = nil
         dashboardQuickMenuKind = nil
+        dashboardQuickMenuOpeningEventNumber = nil
     }
 }
 
@@ -193,6 +198,7 @@ private struct DashboardReorderRow: View {
     @Binding var dragging: SwitchKind?
     @Binding var dropPlacement: DashboardDropPlacement?
     @Binding var quickMenuKind: SwitchKind?
+    @Binding var quickMenuOpeningEventNumber: Int?
 
     private var snapshot: SwitchSnapshot {
         store.snapshots[kind] ?? .off
@@ -215,11 +221,13 @@ private struct DashboardReorderRow: View {
                 showsSeparator: showsSeparator,
                 isDragging: dragging == kind,
                 quickMenuKind: $quickMenuKind,
+                quickMenuOpeningEventNumber: $quickMenuOpeningEventNumber,
                 dragProvider: {
                     withAnimation(.easeOut(duration: 0.12)) {
                         dragging = kind
                         dropPlacement = nil
                         quickMenuKind = nil
+                        quickMenuOpeningEventNumber = nil
                     }
                     return NSItemProvider(object: kind.rawValue as NSString)
                 }
@@ -449,6 +457,7 @@ private struct ControlRow: View {
     let showsSeparator: Bool
     let isDragging: Bool
     @Binding var quickMenuKind: SwitchKind?
+    @Binding var quickMenuOpeningEventNumber: Int?
     let dragProvider: (() -> NSItemProvider)?
     @State private var isHovering = false
 
@@ -557,22 +566,18 @@ private struct ControlRow: View {
         }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay {
-            DashboardRightClickDetector {
+            DashboardRightClickDetector { event in
                 withAnimation(.snappy(duration: 0.16)) {
+                    quickMenuOpeningEventNumber = event.eventNumber
                     quickMenuKind = kind
                 }
             }
         }
-        .simultaneousGesture(TapGesture().onEnded {
-            guard isQuickMenuPresented else { return }
-            withAnimation(.easeOut(duration: 0.10)) {
-                quickMenuKind = nil
-            }
-        })
         .onHover { isHovering = $0 }
         .onDisappear {
             if isQuickMenuPresented {
                 quickMenuKind = nil
+                quickMenuOpeningEventNumber = nil
             }
         }
         .opacity(rowOpacity)
@@ -705,48 +710,63 @@ private struct DashboardQuickMenuButton: View {
 
 private struct DashboardQuickMenuDismissLayer: NSViewRepresentable {
     let dismiss: () -> Void
+    var ignoredEventNumber: Int? = nil
 
     func makeNSView(context: Context) -> DashboardQuickMenuDismissLayerView {
         let view = DashboardQuickMenuDismissLayerView()
         view.dismiss = dismiss
+        view.ignoredEventNumber = ignoredEventNumber
         return view
     }
 
     func updateNSView(_ nsView: DashboardQuickMenuDismissLayerView, context: Context) {
         nsView.dismiss = dismiss
+        nsView.ignoredEventNumber = ignoredEventNumber
+    }
+
+    func ignoredEventNumber(_ eventNumber: Int?) -> Self {
+        var copy = self
+        copy.ignoredEventNumber = eventNumber
+        return copy
     }
 }
 
 private final class DashboardQuickMenuDismissLayerView: NSView {
     var dismiss: (() -> Void)?
+    var ignoredEventNumber: Int?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         bounds.contains(point) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
-        dismiss?()
+        dismissUnlessOpeningEvent(event)
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        dismiss?()
+        dismissUnlessOpeningEvent(event)
     }
 
     override func otherMouseDown(with event: NSEvent) {
-        dismiss?()
+        dismissUnlessOpeningEvent(event)
     }
 
     override func scrollWheel(with event: NSEvent) {
-        dismiss?()
+        dismissUnlessOpeningEvent(event)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
+
+    private func dismissUnlessOpeningEvent(_ event: NSEvent) {
+        guard event.eventNumber != ignoredEventNumber else { return }
+        dismiss?()
+    }
 }
 
 private struct DashboardRightClickDetector: NSViewRepresentable {
-    let onRightClick: () -> Void
+    let onRightClick: (NSEvent) -> Void
 
     func makeNSView(context: Context) -> DashboardRightClickDetectorView {
         let view = DashboardRightClickDetectorView()
@@ -760,7 +780,7 @@ private struct DashboardRightClickDetector: NSViewRepresentable {
 }
 
 private final class DashboardRightClickDetectorView: NSView {
-    var onRightClick: (() -> Void)?
+    var onRightClick: ((NSEvent) -> Void)?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard bounds.contains(point),
@@ -770,12 +790,12 @@ private final class DashboardRightClickDetectorView: NSView {
     }
 
     override func rightMouseDown(with event: NSEvent) {
-        onRightClick?()
+        onRightClick?(event)
     }
 
     override func mouseDown(with event: NSEvent) {
         if event.modifierFlags.contains(.control) {
-            onRightClick?()
+            onRightClick?(event)
         } else {
             super.mouseDown(with: event)
         }
