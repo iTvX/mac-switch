@@ -413,7 +413,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func installDashboardEventMonitors() {
         guard dashboardLocalEventMonitor == nil, dashboardGlobalEventMonitor == nil else { return }
 
-        dashboardLocalEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] event in
+        dashboardLocalEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
             guard let self else { return event }
 
             if event.type == .keyDown, event.keyCode == 53 {
@@ -421,7 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 return nil
             }
 
-            if event.type == .leftMouseDown || event.type == .rightMouseDown {
+            if event.type == .leftMouseDown || event.type == .rightMouseDown || event.type == .otherMouseDown {
                 let clickedDashboard = event.window === self.dashboardWindow
                 if !clickedDashboard && !self.eventHitsStatusItem(event) {
                     self.hideDashboard()
@@ -431,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return event
         }
 
-        dashboardGlobalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+        dashboardGlobalEventMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
             self?.hideDashboard()
         }
     }

@@ -1536,26 +1536,27 @@ struct PreferencesView: View {
         .background(Color.clear)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
         .onAppear {
-            publishLayout(for: tab)
+            publishParentLayoutIfNeeded(for: tab)
         }
         .onReceive(store.$preferredPreferencesTab) { rawValue in
             if let requested = PreferencesTab(rawValue: rawValue) {
                 tab = requested
-                publishLayout(for: requested)
+                publishParentLayoutIfNeeded(for: requested)
             } else if rawValue == "shortcuts" {
                 tab = .customize
-                publishLayout(for: .customize)
+                publishParentLayoutIfNeeded(for: .customize)
             }
         }
         .onChange(of: tab) { _, newValue in
             if store.preferredPreferencesTab != newValue.rawValue {
                 store.preferredPreferencesTab = newValue.rawValue
             }
-            publishLayout(for: newValue)
+            publishParentLayoutIfNeeded(for: newValue)
         }
     }
 
-    private func publishLayout(for tab: PreferencesTab) {
+    private func publishParentLayoutIfNeeded(for tab: PreferencesTab) {
+        guard tab != .customize else { return }
         NotificationCenter.default.post(
             name: .setMacSwitchPreferencesLayout,
             object: nil,
