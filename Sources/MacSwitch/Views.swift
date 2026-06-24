@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 enum DashboardLayout {
     static let width: CGFloat = 326
@@ -26,8 +25,8 @@ enum DashboardLayout {
 
 struct DashboardView: View {
     @ObservedObject var store: SwitchStore
-    @State private var dashboardDragging: SwitchKind?
-    @State private var dashboardDropPlacement: DashboardDropPlacement?
+    @State private var dashboardVisualKinds: [SwitchKind] = []
+    @State private var dashboardDragState: DashboardDragState?
     @State private var dashboardQuickMenuKind: SwitchKind?
     @State private var dashboardQuickMenuOpeningEventNumber: Int?
     @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
@@ -38,6 +37,14 @@ struct DashboardView: View {
 
     private var activeCount: Int {
         store.visibleKinds.filter { store.snapshots[$0]?.isOn == true }.count
+    }
+
+    private var dashboardDisplayKinds: [SwitchKind] {
+        let visibleKinds = store.visibleKinds
+        guard dashboardVisualKinds.count == visibleKinds.count,
+              Set(dashboardVisualKinds) == Set(visibleKinds)
+        else { return visibleKinds }
+        return dashboardVisualKinds
     }
 
     var body: some View {
@@ -57,22 +64,28 @@ struct DashboardView: View {
                     EmptyDashboardView(store: store)
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
-                        LazyVStack(spacing: 0) {
-                            ForEach(Array(store.visibleKinds.enumerated()), id: \.element.id) { index, kind in
+                        VStack(spacing: 0) {
+                            ForEach(Array(dashboardDisplayKinds.enumerated()), id: \.element.id) { index, kind in
                                 DashboardReorderRow(
                                     kind: kind,
                                     store: store,
-                                    showsSeparator: index < store.visibleKinds.count - 1,
-                                    dragging: $dashboardDragging,
-                                    dropPlacement: $dashboardDropPlacement,
+                                    showsSeparator: index < dashboardDisplayKinds.count - 1,
+                                    isDragging: dashboardDragState?.kind == kind,
+                                    dragOffset: dashboardDragOffset(for: kind),
                                     quickMenuKind: $dashboardQuickMenuKind,
-                                    quickMenuOpeningEventNumber: $dashboardQuickMenuOpeningEventNumber
+                                    quickMenuOpeningEventNumber: $dashboardQuickMenuOpeningEventNumber,
+                                    dragChanged: { value in
+                                        updateDashboardDrag(kind: kind, value: value)
+                                    },
+                                    dragEnded: { value in
+                                        finishDashboardDrag(kind: kind, value: value)
+                                    }
                                 )
                             }
                         }
                         .padding(.vertical, 5)
                         .padding(.horizontal, 7)
-                        .animation(.spring(response: 0.22, dampingFraction: 0.82), value: dashboardDropPlacement)
+                        .animation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06), value: dashboardVisualKinds)
                         .animation(.spring(response: 0.24, dampingFraction: 0.86), value: store.visibleKinds)
                     }
                 }
@@ -137,9 +150,15 @@ struct DashboardView: View {
         }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
+        .onAppear {
+            syncDashboardVisualKinds(with: store.visibleKinds)
+        }
         .onChange(of: store.visibleKinds) { _, visibleKinds in
-            guard let dashboardQuickMenuKind, !visibleKinds.contains(dashboardQuickMenuKind) else { return }
-            self.dashboardQuickMenuKind = nil
+            if let dashboardQuickMenuKind, !visibleKinds.contains(dashboardQuickMenuKind) {
+                self.dashboardQuickMenuKind = nil
+            }
+            guard dashboardDragState == nil else { return }
+            syncDashboardVisualKinds(with: visibleKinds)
         }
         .onReceive(NotificationCenter.default.publisher(for: .resetMacSwitchDashboardTransientState)) { _ in
             resetTransientState()
@@ -184,9 +203,89 @@ struct DashboardView: View {
         }
     }
 
+    private func syncDashboardVisualKinds(with visibleKinds: [SwitchKind]) {
+        guard dashboardDragState == nil else { return }
+        dashboardVisualKinds = visibleKinds
+    }
+
+    private func dashboardDragOffset(for kind: SwitchKind) -> CGFloat {
+        guard let dragState = dashboardDragState, dragState.kind == kind else { return 0 }
+        guard let frame = dashboardRowFrames[kind] else {
+            return dragState.draggedCenterY - dragState.initialCenterY
+        }
+        return dragState.draggedCenterY - frame.midY
+    }
+
+    private func updateDashboardDrag(kind: SwitchKind, value: DragGesture.Value) {
+        let visibleKinds = store.visibleKinds
+        guard visibleKinds.contains(kind) else { return }
+
+        if dashboardVisualKinds.count != visibleKinds.count || Set(dashboardVisualKinds) != Set(visibleKinds) {
+            dashboardVisualKinds = visibleKinds
+        }
+
+        let initialCenterY = dashboardDragState?.initialCenterY ?? dashboardRowFrames[kind]?.midY ?? value.startLocation.y
+        let draggedCenterY = initialCenterY + value.translation.height
+        dashboardDragState = DashboardDragState(kind: kind, initialCenterY: initialCenterY, draggedCenterY: draggedCenterY)
+
+        dashboardQuickMenuKind = nil
+        dashboardQuickMenuOpeningEventNumber = nil
+
+        let currentOrder = dashboardDisplayKinds
+        let reordered = dashboardReorderedKinds(
+            dragging: kind,
+            draggedCenterY: draggedCenterY,
+            currentOrder: currentOrder
+        )
+        guard reordered != currentOrder else { return }
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
+        withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06)) {
+            dashboardVisualKinds = reordered
+        }
+    }
+
+    private func finishDashboardDrag(kind: SwitchKind, value: DragGesture.Value) {
+        updateDashboardDrag(kind: kind, value: value)
+
+        let finalOrder = dashboardDisplayKinds
+        withAnimation(.interactiveSpring(response: 0.20, dampingFraction: 0.90, blendDuration: 0.05)) {
+            dashboardDragState = nil
+            dashboardVisualKinds = finalOrder
+        }
+
+        DispatchQueue.main.async {
+            guard dashboardDragState == nil,
+                  dashboardVisualKinds == finalOrder,
+                  Set(finalOrder) == Set(store.visibleKinds)
+            else { return }
+            store.setVisibleOrder(finalOrder)
+            syncDashboardVisualKinds(with: store.visibleKinds)
+        }
+    }
+
+    private func dashboardReorderedKinds(
+        dragging kind: SwitchKind,
+        draggedCenterY: CGFloat,
+        currentOrder: [SwitchKind]
+    ) -> [SwitchKind] {
+        let otherKinds = currentOrder.filter { $0 != kind }
+        var insertionIndex = otherKinds.count
+        for (index, candidate) in otherKinds.enumerated() {
+            guard let frame = dashboardRowFrames[candidate] else { continue }
+            if draggedCenterY < frame.midY {
+                insertionIndex = index
+                break
+            }
+        }
+
+        var reordered = otherKinds
+        reordered.insert(kind, at: min(insertionIndex, reordered.count))
+        return reordered
+    }
+
     private func resetTransientState() {
-        dashboardDragging = nil
-        dashboardDropPlacement = nil
+        dashboardDragState = nil
+        dashboardVisualKinds = store.visibleKinds
         dashboardQuickMenuKind = nil
         dashboardQuickMenuOpeningEventNumber = nil
     }
@@ -196,69 +295,35 @@ private struct DashboardReorderRow: View {
     let kind: SwitchKind
     @ObservedObject var store: SwitchStore
     let showsSeparator: Bool
-    @Binding var dragging: SwitchKind?
-    @Binding var dropPlacement: DashboardDropPlacement?
+    let isDragging: Bool
+    let dragOffset: CGFloat
     @Binding var quickMenuKind: SwitchKind?
     @Binding var quickMenuOpeningEventNumber: Int?
-
-    private var snapshot: SwitchSnapshot {
-        store.snapshots[kind] ?? .off
-    }
-
-    private var showsDropBefore: Bool {
-        dropPlacement == DashboardDropPlacement(item: kind, position: .before)
-    }
-
-    private var showsDropAfter: Bool {
-        dropPlacement == DashboardDropPlacement(item: kind, position: .after)
-    }
+    let dragChanged: (DragGesture.Value) -> Void
+    let dragEnded: (DragGesture.Value) -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            DashboardDropSlot(isVisible: showsDropBefore)
-            ControlRow(
-                kind: kind,
-                store: store,
-                showsSeparator: showsSeparator,
-                isDragging: dragging == kind,
-                quickMenuKind: $quickMenuKind,
-                quickMenuOpeningEventNumber: $quickMenuOpeningEventNumber,
-                dragProvider: {
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        dragging = kind
-                        dropPlacement = nil
-                        quickMenuKind = nil
-                        quickMenuOpeningEventNumber = nil
-                    }
-                    return NSItemProvider(object: kind.rawValue as NSString)
-                }
-            )
-            DashboardDropSlot(isVisible: showsDropAfter)
-        }
-        .contentShape(Rectangle())
-        .zIndex(quickMenuKind == kind ? 20 : dragging == kind ? 10 : 0)
-        .onDrop(
-            of: [UTType.text],
-            delegate: DashboardDropDelegate(
-                item: kind,
-                store: store,
-                rowHeight: ControlRow.rowHeight(for: snapshot),
-                topInset: showsDropBefore ? DashboardDropSlot.height : 0,
-                dragging: $dragging,
-                placement: $dropPlacement
-            )
+        ControlRow(
+            kind: kind,
+            store: store,
+            showsSeparator: showsSeparator,
+            isDragging: isDragging,
+            quickMenuKind: $quickMenuKind,
+            quickMenuOpeningEventNumber: $quickMenuOpeningEventNumber,
+            dragChanged: dragChanged,
+            dragEnded: dragEnded
         )
+        .contentShape(Rectangle())
+        .offset(y: dragOffset)
+        .animation(nil, value: dragOffset)
+        .zIndex(quickMenuKind == kind ? 20 : isDragging ? 10 : 0)
     }
 }
 
-private struct DashboardDropPlacement: Equatable {
-    enum Position: Equatable {
-        case before
-        case after
-    }
-
-    let item: SwitchKind
-    let position: Position
+private struct DashboardDragState: Equatable {
+    let kind: SwitchKind
+    let initialCenterY: CGFloat
+    let draggedCenterY: CGFloat
 }
 
 private struct DashboardRowFramePreferenceKey: PreferenceKey {
@@ -266,27 +331,6 @@ private struct DashboardRowFramePreferenceKey: PreferenceKey {
 
     static func reduce(value: inout [SwitchKind: CGRect], nextValue: () -> [SwitchKind: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
-    }
-}
-
-private struct DashboardDropSlot: View {
-    static let height: CGFloat = 18
-    let isVisible: Bool
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.accentColor.opacity(0.12))
-            Capsule()
-                .fill(Color.accentColor.opacity(0.60))
-                .frame(width: 48, height: 2)
-        }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 3)
-        .frame(height: isVisible ? Self.height : 0)
-        .opacity(isVisible ? 1 : 0)
-        .clipped()
-        .allowsHitTesting(false)
     }
 }
 
@@ -459,7 +503,8 @@ private struct ControlRow: View {
     let isDragging: Bool
     @Binding var quickMenuKind: SwitchKind?
     @Binding var quickMenuOpeningEventNumber: Int?
-    let dragProvider: (() -> NSItemProvider)?
+    let dragChanged: (DragGesture.Value) -> Void
+    let dragEnded: (DragGesture.Value) -> Void
     @State private var isHovering = false
 
     private var snapshot: SwitchSnapshot {
@@ -505,7 +550,8 @@ private struct ControlRow: View {
                 kind: kind,
                 title: store.switchTitle(kind),
                 snapshot: snapshot,
-                dragProvider: dragProvider
+                dragChanged: dragChanged,
+                dragEnded: dragEnded
             )
                 .layoutPriority(1)
 
@@ -851,7 +897,8 @@ private struct RowIdentityContent: View {
     let kind: SwitchKind
     let title: String
     let snapshot: SwitchSnapshot
-    let dragProvider: (() -> NSItemProvider)?
+    let dragChanged: (DragGesture.Value) -> Void
+    let dragEnded: (DragGesture.Value) -> Void
 
     var body: some View {
         HStack(spacing: 9) {
@@ -880,20 +927,20 @@ private struct RowIdentityContent: View {
             }
         }
         .contentShape(Rectangle())
-        .modifier(ConditionalDragModifier(dragProvider: dragProvider))
+        .modifier(DashboardRowDragModifier(onChanged: dragChanged, onEnded: dragEnded))
     }
 }
 
-private struct ConditionalDragModifier: ViewModifier {
-    let dragProvider: (() -> NSItemProvider)?
+private struct DashboardRowDragModifier: ViewModifier {
+    let onChanged: (DragGesture.Value) -> Void
+    let onEnded: (DragGesture.Value) -> Void
 
-    @ViewBuilder
     func body(content: Content) -> some View {
-        if let dragProvider {
-            content.onDrag(dragProvider)
-        } else {
-            content
-        }
+        content.highPriorityGesture(
+            DragGesture(minimumDistance: 4, coordinateSpace: .named(DashboardLayout.coordinateSpaceName))
+                .onChanged(onChanged)
+                .onEnded(onEnded)
+        )
     }
 }
 
@@ -5480,84 +5527,6 @@ private extension SwitchKind {
             return "Toggles macOS Low Power Mode when this Mac reports support for it."
         case .energyMode:
             return "Use the Energy Mode options panel to choose the power mode this switch toggles."
-        }
-    }
-}
-
-private struct DashboardDropDelegate: DropDelegate {
-    let item: SwitchKind
-    let store: SwitchStore
-    let rowHeight: CGFloat
-    let topInset: CGFloat
-    @Binding var dragging: SwitchKind?
-    @Binding var placement: DashboardDropPlacement?
-
-    func dropEntered(info: DropInfo) {
-        updatePlacement(using: info)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        updatePlacement(using: info)
-        return DropProposal(operation: .move)
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        updatePlacement(using: info)
-        guard let source = dragging else {
-            clearDragState()
-            return false
-        }
-        guard let target = placement, target.item != source else {
-            clearDragState()
-            return true
-        }
-
-        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
-            switch target.position {
-            case .before:
-                store.move(source, before: target.item)
-            case .after:
-                store.move(source, after: target.item)
-            }
-            dragging = nil
-            placement = nil
-        }
-        return true
-    }
-
-    func dropExited(info: DropInfo) {
-        guard placement?.item == item else { return }
-        withAnimation(.easeOut(duration: 0.10)) {
-            placement = nil
-        }
-    }
-
-    private func updatePlacement(using info: DropInfo) {
-        guard let dragging, dragging != item else {
-            if placement?.item == item {
-                withAnimation(.easeOut(duration: 0.10)) {
-                    placement = nil
-                }
-            }
-            return
-        }
-
-        let next = DashboardDropPlacement(item: item, position: position(for: info))
-        guard placement != next else { return }
-        withAnimation(.spring(response: 0.22, dampingFraction: 0.82)) {
-            placement = next
-        }
-    }
-
-    private func position(for info: DropInfo) -> DashboardDropPlacement.Position {
-        let rowY = info.location.y - topInset
-        return rowY > rowHeight / 2 ? .after : .before
-    }
-
-    private func clearDragState() {
-        withAnimation(.easeOut(duration: 0.10)) {
-            dragging = nil
-            placement = nil
         }
     }
 }
