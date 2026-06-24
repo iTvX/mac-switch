@@ -105,6 +105,12 @@ struct DashboardView: View {
         .overlay(alignment: .topLeading) {
             if let kind = dashboardQuickMenuKind,
                let rowFrame = dashboardRowFrames[kind] {
+                DashboardQuickMenuDismissLayer {
+                    closeQuickMenu()
+                }
+                .frame(width: panelSize.width, height: panelSize.height)
+                .zIndex(39)
+
                 DashboardRowQuickMenu(
                     hideDisabledReason: hideFromMenuDisabledReason(for: kind),
                     configure: {
@@ -694,6 +700,48 @@ private struct DashboardQuickMenuButton: View {
         .buttonStyle(.plain)
         .disabled(isDisabled)
         .onHover { isHovering = $0 }
+    }
+}
+
+private struct DashboardQuickMenuDismissLayer: NSViewRepresentable {
+    let dismiss: () -> Void
+
+    func makeNSView(context: Context) -> DashboardQuickMenuDismissLayerView {
+        let view = DashboardQuickMenuDismissLayerView()
+        view.dismiss = dismiss
+        return view
+    }
+
+    func updateNSView(_ nsView: DashboardQuickMenuDismissLayerView, context: Context) {
+        nsView.dismiss = dismiss
+    }
+}
+
+private final class DashboardQuickMenuDismissLayerView: NSView {
+    var dismiss: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        dismiss?()
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        dismiss?()
+    }
+
+    override func otherMouseDown(with event: NSEvent) {
+        dismiss?()
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        dismiss?()
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 
