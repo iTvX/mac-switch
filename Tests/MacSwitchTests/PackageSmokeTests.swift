@@ -120,9 +120,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("private struct DashboardDropPlacement: Equatable"))
         XCTAssertTrue(views.contains("private struct DashboardDropSlot: View"))
         XCTAssertTrue(views.contains("private struct RowIdentityContent: View"))
-        XCTAssertTrue(views.contains("private struct ConditionalDragModifier: ViewModifier"))
+        XCTAssertTrue(views.contains("private struct DashboardDragPreview: View"))
+        XCTAssertTrue(views.contains("private struct ConditionalDragModifier<Preview: View>: ViewModifier"))
         XCTAssertFalse(reorderRowSource.contains(".onDrag"))
-        XCTAssertTrue(dragModifierSource.contains("content.onDrag(dragProvider)"))
+        XCTAssertTrue(dragModifierSource.contains("content.onDrag(dragProvider, preview: preview)"))
         XCTAssertTrue(controlRowSource.contains("RowIdentityContent("))
         XCTAssertTrue(controlRowSource.contains("let isDragging: Bool"))
         XCTAssertTrue(controlRowSource.contains("let dragProvider: (() -> NSItemProvider)?"))
@@ -1027,7 +1028,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardDropDelegateSource.contains("return rowY > rowHeight / 2 ? .after : .before"))
         XCTAssertTrue(dashboardDropDelegateSource.contains("store.move(source, before: target.item)"))
         XCTAssertTrue(dashboardDropDelegateSource.contains("store.move(source, after: target.item)"))
-        XCTAssertTrue(dashboardDropDelegateSource.contains("withAnimation(.spring(response: 0.24, dampingFraction: 0.86))"))
+        XCTAssertTrue(dashboardDropDelegateSource.contains("withAnimation(.interactiveSpring(response: 0.20, dampingFraction: 0.90, blendDuration: 0.05))"))
+        XCTAssertTrue(dashboardDropDelegateSource.contains("finishSuccessfulDrop(source: source)"))
+        XCTAssertTrue(dashboardDropDelegateSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + 0.055)"))
         XCTAssertFalse(placementUpdateSource.contains("store.move("))
     }
 
