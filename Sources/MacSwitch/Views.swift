@@ -7,6 +7,7 @@ enum DashboardLayout {
     static let minHeight: CGFloat = 278
     static let maxHeight: CGFloat = 438
     static let cornerRadius: CGFloat = 18
+    static let coordinateSpaceName = "MacSwitchDashboardCoordinateSpace"
 
     static func size(visibleCount: Int, showsError: Bool) -> NSSize {
         NSSize(width: width, height: height(visibleCount: visibleCount, showsError: showsError))
@@ -27,6 +28,8 @@ struct DashboardView: View {
     @ObservedObject var store: SwitchStore
     @State private var dashboardDragging: SwitchKind?
     @State private var dashboardDropPlacement: DashboardDropPlacement?
+    @State private var dashboardQuickMenuKind: SwitchKind?
+    @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
 
     private var panelSize: NSSize {
         DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)
@@ -60,7 +63,8 @@ struct DashboardView: View {
                                     store: store,
                                     showsSeparator: index < store.visibleKinds.count - 1,
                                     dragging: $dashboardDragging,
-                                    dropPlacement: $dashboardDropPlacement
+                                    dropPlacement: $dashboardDropPlacement,
+                                    quickMenuKind: $dashboardQuickMenuKind
                                 )
                             }
                         }
@@ -98,8 +102,72 @@ struct DashboardView: View {
                 .blendMode(.screen)
                 .allowsHitTesting(false)
         }
+        .overlay(alignment: .topLeading) {
+            if let kind = dashboardQuickMenuKind,
+               let rowFrame = dashboardRowFrames[kind] {
+                DashboardRowQuickMenu(
+                    hideDisabledReason: hideFromMenuDisabledReason(for: kind),
+                    configure: {
+                        closeQuickMenu()
+                        openSettingsDetail(for: kind)
+                    },
+                    hideFromMenu: {
+                        closeQuickMenu()
+                        store.setEnabled(kind, false)
+                    }
+                )
+                .position(quickMenuPosition(for: rowFrame))
+                .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
+                .zIndex(40)
+            }
+        }
+        .coordinateSpace(name: DashboardLayout.coordinateSpaceName)
+        .onPreferenceChange(DashboardRowFramePreferenceKey.self) { frames in
+            dashboardRowFrames = frames
+        }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
+        .onChange(of: store.visibleKinds) { _, visibleKinds in
+            guard let dashboardQuickMenuKind, !visibleKinds.contains(dashboardQuickMenuKind) else { return }
+            self.dashboardQuickMenuKind = nil
+        }
+    }
+
+    private func quickMenuPosition(for rowFrame: CGRect) -> CGPoint {
+        let halfWidth = DashboardRowQuickMenu.width / 2
+        let halfHeight = DashboardRowQuickMenu.approximateHeight / 2
+        let x = min(
+            panelSize.width - halfWidth - 10,
+            max(halfWidth + 10, rowFrame.maxX - halfWidth - 4)
+        )
+        let y = min(
+            panelSize.height - halfHeight - 10,
+            max(halfHeight + 10, rowFrame.midY)
+        )
+        return CGPoint(x: x, y: y)
+    }
+
+    private func hideFromMenuDisabledReason(for kind: SwitchKind) -> String? {
+        if store.visibleKinds.count <= 1 {
+            return "Keep at least one item"
+        }
+        if store.isCustomizationBusy(kind) {
+            return "Finish current action first"
+        }
+        return nil
+    }
+
+    private func openSettingsDetail(for kind: SwitchKind) {
+        store.preferredCustomizeKind = kind
+        store.preferredPreferencesTab = "customize"
+        NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
+        store.clearLastError()
+    }
+
+    private func closeQuickMenu() {
+        withAnimation(.easeOut(duration: 0.10)) {
+            dashboardQuickMenuKind = nil
+        }
     }
 }
 
@@ -109,6 +177,7 @@ private struct DashboardReorderRow: View {
     let showsSeparator: Bool
     @Binding var dragging: SwitchKind?
     @Binding var dropPlacement: DashboardDropPlacement?
+    @Binding var quickMenuKind: SwitchKind?
 
     private var snapshot: SwitchSnapshot {
         store.snapshots[kind] ?? .off
@@ -130,10 +199,12 @@ private struct DashboardReorderRow: View {
                 store: store,
                 showsSeparator: showsSeparator,
                 isDragging: dragging == kind,
+                quickMenuKind: $quickMenuKind,
                 dragProvider: {
                     withAnimation(.easeOut(duration: 0.12)) {
                         dragging = kind
                         dropPlacement = nil
+                        quickMenuKind = nil
                     }
                     return NSItemProvider(object: kind.rawValue as NSString)
                 }
@@ -141,6 +212,7 @@ private struct DashboardReorderRow: View {
             DashboardDropSlot(isVisible: showsDropAfter)
         }
         .contentShape(Rectangle())
+        .zIndex(quickMenuKind == kind ? 20 : dragging == kind ? 10 : 0)
         .onDrop(
             of: [UTType.text],
             delegate: DashboardDropDelegate(
@@ -163,6 +235,14 @@ private struct DashboardDropPlacement: Equatable {
 
     let item: SwitchKind
     let position: Position
+}
+
+private struct DashboardRowFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [SwitchKind: CGRect] = [:]
+
+    static func reduce(value: inout [SwitchKind: CGRect], nextValue: () -> [SwitchKind: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
 }
 
 private struct DashboardDropSlot: View {
@@ -353,6 +433,7 @@ private struct ControlRow: View {
     @ObservedObject var store: SwitchStore
     let showsSeparator: Bool
     let isDragging: Bool
+    @Binding var quickMenuKind: SwitchKind?
     let dragProvider: (() -> NSItemProvider)?
     @State private var isHovering = false
 
@@ -366,6 +447,10 @@ private struct ControlRow: View {
 
     private var isRunning: Bool {
         store.isActionBusy(kind)
+    }
+
+    private var isQuickMenuPresented: Bool {
+        quickMenuKind == kind
     }
 
     private var rowFixMessage: String? {
@@ -433,8 +518,16 @@ private struct ControlRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(rowFill)
         )
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: DashboardRowFramePreferenceKey.self,
+                    value: [kind: proxy.frame(in: .named(DashboardLayout.coordinateSpaceName))]
+                )
+            }
+        }
         .overlay {
-            if isHovering || snapshot.isOn || isDragging {
+            if isHovering || snapshot.isOn || isDragging || isQuickMenuPresented {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .stroke(Color.white.opacity(0.16), lineWidth: 1)
             }
@@ -448,37 +541,35 @@ private struct ControlRow: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .contextMenu {
-            Button {
-                openSettingsDetail()
-            } label: {
-                Label("Settings...", systemImage: "slider.horizontal.3")
+        .overlay {
+            DashboardRightClickDetector {
+                withAnimation(.snappy(duration: 0.16)) {
+                    quickMenuKind = kind
+                }
             }
-
-            Button(role: .destructive) {
-                store.setEnabled(kind, false)
-            } label: {
-                Label("Remove from Menu", systemImage: "eye.slash")
-            }
-            .disabled(store.isCustomizationBusy(kind) || store.visibleKinds.count <= 1)
         }
+        .simultaneousGesture(TapGesture().onEnded {
+            guard isQuickMenuPresented else { return }
+            withAnimation(.easeOut(duration: 0.10)) {
+                quickMenuKind = nil
+            }
+        })
         .onHover { isHovering = $0 }
+        .onDisappear {
+            if isQuickMenuPresented {
+                quickMenuKind = nil
+            }
+        }
         .opacity(rowOpacity)
+        .animation(.snappy(duration: 0.16), value: isQuickMenuPresented)
         .animation(.easeOut(duration: 0.12), value: isDragging)
-    }
-
-    private func openSettingsDetail() {
-        store.preferredCustomizeKind = kind
-        store.preferredPreferencesTab = "customize"
-        NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
-        store.clearLastError()
     }
 
     private var rowFill: Color {
         if isDragging {
             return DashboardColors.rowDragFill
         }
-        if isHovering {
+        if isHovering || isQuickMenuPresented {
             return DashboardColors.rowHoverFill
         }
         if snapshot.isOn {
@@ -499,6 +590,150 @@ private struct ControlRow: View {
 
     fileprivate static func rowHeight(for snapshot: SwitchSnapshot) -> CGFloat {
         snapshot.warning != nil || snapshot.subtitle != nil ? 49 : 43
+    }
+}
+
+private struct DashboardRowQuickMenu: View {
+    static let width: CGFloat = 178
+    static let approximateHeight: CGFloat = 84
+
+    let hideDisabledReason: String?
+    let configure: () -> Void
+    let hideFromMenu: () -> Void
+
+    var body: some View {
+        VStack(spacing: 3) {
+            DashboardQuickMenuButton(
+                symbol: "slider.horizontal.3",
+                title: "Configure",
+                subtitle: nil,
+                isDisabled: false,
+                action: configure
+            )
+
+            Rectangle()
+                .fill(DashboardColors.separator)
+                .frame(height: 1)
+                .padding(.horizontal, 7)
+
+            DashboardQuickMenuButton(
+                symbol: "eye.slash",
+                title: "Hide from Menu",
+                subtitle: hideDisabledReason,
+                isDisabled: hideDisabledReason != nil,
+                action: hideFromMenu
+            )
+        }
+        .padding(6)
+        .frame(width: Self.width)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.22), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+    }
+}
+
+private struct DashboardQuickMenuButton: View {
+    let symbol: String
+    let title: String
+    let subtitle: String?
+    let isDisabled: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            guard !isDisabled else { return }
+            action()
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .frame(width: 18)
+                    .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.55) : Color.accentColor)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.62) : .primary)
+
+                    if let subtitle {
+                        Text(subtitle)
+                            .font(.system(size: 10.2, weight: .medium))
+                            .foregroundStyle(DashboardColors.subtleText.opacity(isDisabled ? 0.62 : 0.86))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(!isDisabled && isHovering ? DashboardColors.controlHoverFill : Color.clear)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .onHover { isHovering = $0 }
+    }
+}
+
+private struct DashboardRightClickDetector: NSViewRepresentable {
+    let onRightClick: () -> Void
+
+    func makeNSView(context: Context) -> DashboardRightClickDetectorView {
+        let view = DashboardRightClickDetectorView()
+        view.onRightClick = onRightClick
+        return view
+    }
+
+    func updateNSView(_ nsView: DashboardRightClickDetectorView, context: Context) {
+        nsView.onRightClick = onRightClick
+    }
+}
+
+private final class DashboardRightClickDetectorView: NSView {
+    var onRightClick: (() -> Void)?
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard bounds.contains(point),
+              Self.shouldHandleRightClickEvent(window?.currentEvent ?? NSApp.currentEvent)
+        else { return nil }
+        return self
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        onRightClick?()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            onRightClick?()
+        } else {
+            super.mouseDown(with: event)
+        }
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    private static func shouldHandleRightClickEvent(_ event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        if event.type == .rightMouseDown {
+            return true
+        }
+        return event.type == .leftMouseDown && event.modifierFlags.contains(.control)
     }
 }
 
