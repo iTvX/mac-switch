@@ -131,6 +131,9 @@ struct DashboardView: View {
             guard let dashboardQuickMenuKind, !visibleKinds.contains(dashboardQuickMenuKind) else { return }
             self.dashboardQuickMenuKind = nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: .resetMacSwitchDashboardTransientState)) { _ in
+            resetTransientState()
+        }
     }
 
     private func quickMenuPosition(for rowFrame: CGRect) -> CGPoint {
@@ -168,6 +171,12 @@ struct DashboardView: View {
         withAnimation(.easeOut(duration: 0.10)) {
             dashboardQuickMenuKind = nil
         }
+    }
+
+    private func resetTransientState() {
+        dashboardDragging = nil
+        dashboardDropPlacement = nil
+        dashboardQuickMenuKind = nil
     }
 }
 

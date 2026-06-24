@@ -138,6 +138,11 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains("private func quickMenuPosition(for rowFrame: CGRect)"))
         XCTAssertTrue(dashboardSource.contains("private func hideFromMenuDisabledReason(for kind: SwitchKind) -> String?"))
         XCTAssertTrue(dashboardSource.contains("private func openSettingsDetail(for kind: SwitchKind)"))
+        XCTAssertTrue(dashboardSource.contains("onReceive(NotificationCenter.default.publisher(for: .resetMacSwitchDashboardTransientState))"))
+        XCTAssertTrue(dashboardSource.contains("private func resetTransientState()"))
+        XCTAssertTrue(dashboardSource.contains("dashboardDragging = nil"))
+        XCTAssertTrue(dashboardSource.contains("dashboardDropPlacement = nil"))
+        XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuKind = nil"))
         XCTAssertTrue(views.contains("private struct DashboardRowFramePreferenceKey: PreferenceKey"))
         XCTAssertTrue(views.contains("static let coordinateSpaceName = \"MacSwitchDashboardCoordinateSpace\""))
         XCTAssertTrue(controlRowSource.contains("@Binding var quickMenuKind: SwitchKind?"))
@@ -2485,6 +2490,16 @@ final class PackageSmokeTests: XCTestCase {
             from: "private func showDashboard(relativeTo button:",
             to: "private func hideDashboard()"
         )
+        let dashboardHideSource = try extract(
+            appDelegate,
+            from: "private func hideDashboard()",
+            to: "private func makeDashboardWindow()"
+        )
+        let dashboardSmokeSource = try extract(
+            appDelegate,
+            from: "private func showDashboardForSmokeTest()",
+            to: "private func scheduleDashboardRefreshAfterOpen()"
+        )
         let dashboardRefreshSource = try extract(
             appDelegate,
             from: "private func scheduleDashboardRefreshAfterOpen()",
@@ -2521,6 +2536,11 @@ final class PackageSmokeTests: XCTestCase {
             to: "func snapshot(for kind:"
         )
 
+        XCTAssertTrue(model.contains("resetMacSwitchDashboardTransientState"))
+        XCTAssertTrue(appDelegate.contains("private func resetDashboardTransientState()"))
+        XCTAssertTrue(dashboardOpenSource.contains("resetDashboardTransientState()"))
+        XCTAssertTrue(dashboardHideSource.contains("resetDashboardTransientState()"))
+        XCTAssertTrue(dashboardSmokeSource.contains("resetDashboardTransientState()"))
         XCTAssertTrue(dashboardOpenSource.contains("scheduleDashboardRefreshAfterOpen()"))
         XCTAssertFalse(dashboardOpenSource.contains("store.refreshVisibleAsync()"), "dashboard click path should draw first, then refresh")
         XCTAssertTrue(dashboardRefreshSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + 0.06)"))
