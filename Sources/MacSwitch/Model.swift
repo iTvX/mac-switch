@@ -5,6 +5,7 @@ import SwiftUI
 extension Notification.Name {
     static let openMacSwitchPreferences = Notification.Name("openMacSwitchPreferences")
     static let setMacSwitchPreferencesLayout = Notification.Name("setMacSwitchPreferencesLayout")
+    static let resetMacSwitchDashboardTransientState = Notification.Name("resetMacSwitchDashboardTransientState")
     static let quitMacSwitch = Notification.Name("quitMacSwitch")
 }
 

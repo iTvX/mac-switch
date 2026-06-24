@@ -281,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showDashboard(relativeTo button: NSStatusBarButton) {
         let window = dashboardWindow ?? makeDashboardWindow()
         dashboardWindow = window
+        resetDashboardTransientState()
         let size = currentDashboardSize
         window.setContentSize(size)
         window.setFrameOrigin(dashboardOrigin(relativeTo: button, size: size))
@@ -291,8 +292,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func hideDashboard() {
+        resetDashboardTransientState()
         dashboardWindow?.orderOut(nil)
         removeDashboardEventMonitors()
+    }
+
+    private func resetDashboardTransientState() {
+        NotificationCenter.default.post(name: .resetMacSwitchDashboardTransientState, object: nil)
     }
 
     private func makeDashboardWindow() -> DashboardPanel {
@@ -337,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showDashboardForSmokeTest() {
         let window = dashboardWindow ?? makeDashboardWindow()
         dashboardWindow = window
+        resetDashboardTransientState()
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         let visibleFrame = screen.visibleFrame
         let size = currentDashboardSize
