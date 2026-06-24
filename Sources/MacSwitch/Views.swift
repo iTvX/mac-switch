@@ -880,37 +880,17 @@ private struct RowIdentityContent: View {
             }
         }
         .contentShape(Rectangle())
-        .modifier(ConditionalDragModifier(dragProvider: dragProvider) {
-            DashboardDragPreview(kind: kind, snapshot: snapshot)
-        })
+        .modifier(ConditionalDragModifier(dragProvider: dragProvider))
     }
 }
 
-private struct DashboardDragPreview: View {
-    let kind: SwitchKind
-    let snapshot: SwitchSnapshot
-
-    var body: some View {
-        SwitchGlyph(kind: kind, snapshot: snapshot)
-            .frame(width: 34, height: 34)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(Color.white.opacity(0.32), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.16), radius: 10, y: 5)
-            .accessibilityLabel(Text(kind.title))
-    }
-}
-
-private struct ConditionalDragModifier<Preview: View>: ViewModifier {
+private struct ConditionalDragModifier: ViewModifier {
     let dragProvider: (() -> NSItemProvider)?
-    @ViewBuilder let preview: () -> Preview
 
     @ViewBuilder
     func body(content: Content) -> some View {
         if let dragProvider {
-            content.onDrag(dragProvider, preview: preview)
+            content.onDrag(dragProvider)
         } else {
             content
         }
@@ -5532,16 +5512,16 @@ private struct DashboardDropDelegate: DropDelegate {
             return true
         }
 
-        withAnimation(.interactiveSpring(response: 0.20, dampingFraction: 0.90, blendDuration: 0.05)) {
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.86)) {
             switch target.position {
             case .before:
                 store.move(source, before: target.item)
             case .after:
                 store.move(source, after: target.item)
             }
+            dragging = nil
             placement = nil
         }
-        finishSuccessfulDrop(source: source)
         return true
     }
 
@@ -5578,16 +5558,6 @@ private struct DashboardDropDelegate: DropDelegate {
         withAnimation(.easeOut(duration: 0.10)) {
             dragging = nil
             placement = nil
-        }
-    }
-
-    private func finishSuccessfulDrop(source: SwitchKind) {
-        let draggingBinding = $dragging
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.055) {
-            guard draggingBinding.wrappedValue == source else { return }
-            withAnimation(.easeOut(duration: 0.09)) {
-                draggingBinding.wrappedValue = nil
-            }
         }
     }
 }
