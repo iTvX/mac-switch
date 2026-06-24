@@ -111,6 +111,7 @@ struct DashboardView: View {
                     closeQuickMenu()
                 }
                 .ignoredEventNumber(dashboardQuickMenuOpeningEventNumber)
+                .rightClickPassthrough(rowFrames: dashboardRowFrames, panelHeight: panelSize.height)
                 .frame(width: panelSize.width, height: panelSize.height)
                 .zIndex(39)
 
@@ -711,17 +712,23 @@ private struct DashboardQuickMenuButton: View {
 private struct DashboardQuickMenuDismissLayer: NSViewRepresentable {
     let dismiss: () -> Void
     var ignoredEventNumber: Int? = nil
+    var rightClickPassthroughRowFrames: [SwitchKind: CGRect] = [:]
+    var rightClickPassthroughPanelHeight: CGFloat = 0
 
     func makeNSView(context: Context) -> DashboardQuickMenuDismissLayerView {
         let view = DashboardQuickMenuDismissLayerView()
         view.dismiss = dismiss
         view.ignoredEventNumber = ignoredEventNumber
+        view.rightClickPassthroughRowFrames = rightClickPassthroughRowFrames
+        view.rightClickPassthroughPanelHeight = rightClickPassthroughPanelHeight
         return view
     }
 
     func updateNSView(_ nsView: DashboardQuickMenuDismissLayerView, context: Context) {
         nsView.dismiss = dismiss
         nsView.ignoredEventNumber = ignoredEventNumber
+        nsView.rightClickPassthroughRowFrames = rightClickPassthroughRowFrames
+        nsView.rightClickPassthroughPanelHeight = rightClickPassthroughPanelHeight
     }
 
     func ignoredEventNumber(_ eventNumber: Int?) -> Self {
@@ -729,14 +736,26 @@ private struct DashboardQuickMenuDismissLayer: NSViewRepresentable {
         copy.ignoredEventNumber = eventNumber
         return copy
     }
+
+    func rightClickPassthrough(rowFrames: [SwitchKind: CGRect], panelHeight: CGFloat) -> Self {
+        var copy = self
+        copy.rightClickPassthroughRowFrames = rowFrames
+        copy.rightClickPassthroughPanelHeight = panelHeight
+        return copy
+    }
 }
 
 private final class DashboardQuickMenuDismissLayerView: NSView {
     var dismiss: (() -> Void)?
     var ignoredEventNumber: Int?
+    var rightClickPassthroughRowFrames: [SwitchKind: CGRect] = [:]
+    var rightClickPassthroughPanelHeight: CGFloat = 0
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
+        if shouldPassRightClickThrough(at: point, event: window?.currentEvent ?? NSApp.currentEvent) {
+            return nil
+        }
+        return bounds.contains(point) ? self : nil
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -762,6 +781,20 @@ private final class DashboardQuickMenuDismissLayerView: NSView {
     private func dismissUnlessOpeningEvent(_ event: NSEvent) {
         guard event.eventNumber != ignoredEventNumber else { return }
         dismiss?()
+    }
+
+    private func shouldPassRightClickThrough(at point: NSPoint, event: NSEvent?) -> Bool {
+        guard isRightClickEvent(event), bounds.contains(point) else { return false }
+        let swiftUIPoint = CGPoint(x: point.x, y: rightClickPassthroughPanelHeight - point.y)
+        return rightClickPassthroughRowFrames.values.contains { $0.contains(swiftUIPoint) }
+    }
+
+    private func isRightClickEvent(_ event: NSEvent?) -> Bool {
+        guard let event else { return false }
+        if event.type == .rightMouseDown {
+            return true
+        }
+        return event.type == .leftMouseDown && event.modifierFlags.contains(.control)
     }
 }
 
