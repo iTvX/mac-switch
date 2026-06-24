@@ -448,9 +448,30 @@ private struct ControlRow: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contextMenu {
+            Button {
+                openSettingsDetail()
+            } label: {
+                Label("Settings...", systemImage: "slider.horizontal.3")
+            }
+
+            Button(role: .destructive) {
+                store.setEnabled(kind, false)
+            } label: {
+                Label("Remove from Menu", systemImage: "eye.slash")
+            }
+            .disabled(store.isCustomizationBusy(kind) || store.visibleKinds.count <= 1)
+        }
         .onHover { isHovering = $0 }
         .opacity(rowOpacity)
         .animation(.easeOut(duration: 0.12), value: isDragging)
+    }
+
+    private func openSettingsDetail() {
+        store.preferredCustomizeKind = kind
+        store.preferredPreferencesTab = "customize"
+        NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
+        store.clearLastError()
     }
 
     private var rowFill: Color {
