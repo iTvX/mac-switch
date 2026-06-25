@@ -71,7 +71,7 @@ struct DashboardView: View {
                                     store: store,
                                     showsSeparator: index < dashboardDisplayKinds.count - 1,
                                     isDragging: dashboardDragState?.kind == kind,
-                                    dragOffset: dashboardDragOffset(for: kind),
+                                    isPlaceholder: dashboardDragState?.kind == kind,
                                     quickMenuKind: $dashboardQuickMenuKind,
                                     quickMenuOpeningEventNumber: $dashboardQuickMenuOpeningEventNumber,
                                     dragChanged: { value in
@@ -116,6 +116,17 @@ struct DashboardView: View {
                 .stroke(DashboardColors.highlight, lineWidth: 1)
                 .blendMode(.screen)
                 .allowsHitTesting(false)
+        }
+        .overlay(alignment: .topLeading) {
+            if let dragState = dashboardDragState {
+                DashboardFloatingDragRow(
+                    kind: dragState.kind,
+                    store: store,
+                    initialFrame: dragState.initialFrame,
+                    translationY: dragState.translationY
+                )
+                .zIndex(35)
+            }
         }
         .overlay(alignment: .topLeading) {
             if let kind = dashboardQuickMenuKind,
@@ -208,14 +219,6 @@ struct DashboardView: View {
         dashboardVisualKinds = visibleKinds
     }
 
-    private func dashboardDragOffset(for kind: SwitchKind) -> CGFloat {
-        guard let dragState = dashboardDragState, dragState.kind == kind else { return 0 }
-        guard let frame = dashboardRowFrames[kind] else {
-            return dragState.draggedCenterY - dragState.initialCenterY
-        }
-        return dragState.draggedCenterY - frame.midY
-    }
-
     private func updateDashboardDrag(kind: SwitchKind, value: DragGesture.Value) {
         let visibleKinds = store.visibleKinds
         guard visibleKinds.contains(kind) else { return }
@@ -224,19 +227,27 @@ struct DashboardView: View {
             dashboardVisualKinds = visibleKinds
         }
 
-        let initialCenterY = dashboardDragState?.initialCenterY ?? dashboardRowFrames[kind]?.midY ?? value.startLocation.y
-        let draggedCenterY = initialCenterY + value.translation.height
-        dashboardDragState = DashboardDragState(kind: kind, initialCenterY: initialCenterY, draggedCenterY: draggedCenterY)
+        let rowHeight = ControlRow.rowHeight(for: store.snapshots[kind] ?? .off)
+        let dragState = dashboardDragState ?? DashboardDragState(
+            kind: kind,
+            initialOrder: dashboardDisplayKinds,
+            frozenFrames: dashboardRowFrames,
+            initialFrame: dashboardRowFrames[kind] ?? CGRect(
+                x: 7,
+                y: max(0, value.startLocation.y - rowHeight / 2),
+                width: panelSize.width - 14,
+                height: rowHeight
+            ),
+            translationY: 0
+        )
+        let updatedDragState = dragState.withTranslation(value.translation.height)
+        dashboardDragState = updatedDragState
 
         dashboardQuickMenuKind = nil
         dashboardQuickMenuOpeningEventNumber = nil
 
-        let currentOrder = dashboardDisplayKinds
-        let reordered = dashboardReorderedKinds(
-            dragging: kind,
-            draggedCenterY: draggedCenterY,
-            currentOrder: currentOrder
-        )
+        let currentOrder = dashboardVisualKinds
+        let reordered = dashboardReorderedKinds(using: updatedDragState)
         guard reordered != currentOrder else { return }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06)) {
@@ -263,15 +274,12 @@ struct DashboardView: View {
         }
     }
 
-    private func dashboardReorderedKinds(
-        dragging kind: SwitchKind,
-        draggedCenterY: CGFloat,
-        currentOrder: [SwitchKind]
-    ) -> [SwitchKind] {
-        let otherKinds = currentOrder.filter { $0 != kind }
+    private func dashboardReorderedKinds(using dragState: DashboardDragState) -> [SwitchKind] {
+        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
         var insertionIndex = otherKinds.count
         for (index, candidate) in otherKinds.enumerated() {
-            guard let frame = dashboardRowFrames[candidate] else { continue }
+            guard let frame = dragState.frozenFrames[candidate] else { continue }
             if draggedCenterY < frame.midY {
                 insertionIndex = index
                 break
@@ -279,7 +287,7 @@ struct DashboardView: View {
         }
 
         var reordered = otherKinds
-        reordered.insert(kind, at: min(insertionIndex, reordered.count))
+        reordered.insert(dragState.kind, at: min(insertionIndex, reordered.count))
         return reordered
     }
 
@@ -296,7 +304,7 @@ private struct DashboardReorderRow: View {
     @ObservedObject var store: SwitchStore
     let showsSeparator: Bool
     let isDragging: Bool
-    let dragOffset: CGFloat
+    let isPlaceholder: Bool
     @Binding var quickMenuKind: SwitchKind?
     @Binding var quickMenuOpeningEventNumber: Int?
     let dragChanged: (DragGesture.Value) -> Void
@@ -308,22 +316,60 @@ private struct DashboardReorderRow: View {
             store: store,
             showsSeparator: showsSeparator,
             isDragging: isDragging,
+            reportsFrame: true,
             quickMenuKind: $quickMenuKind,
             quickMenuOpeningEventNumber: $quickMenuOpeningEventNumber,
             dragChanged: dragChanged,
             dragEnded: dragEnded
         )
         .contentShape(Rectangle())
-        .offset(y: dragOffset)
-        .animation(nil, value: dragOffset)
+        .opacity(isPlaceholder ? 0 : 1)
         .zIndex(quickMenuKind == kind ? 20 : isDragging ? 10 : 0)
+    }
+}
+
+private struct DashboardFloatingDragRow: View {
+    let kind: SwitchKind
+    @ObservedObject var store: SwitchStore
+    let initialFrame: CGRect
+    let translationY: CGFloat
+
+    var body: some View {
+        ControlRow(
+            kind: kind,
+            store: store,
+            showsSeparator: false,
+            isDragging: true,
+            reportsFrame: false,
+            quickMenuKind: Binding<SwitchKind?>.constant(nil),
+            quickMenuOpeningEventNumber: Binding<Int?>.constant(nil),
+            dragChanged: { _ in },
+            dragEnded: { _ in }
+        )
+        .frame(width: initialFrame.width, height: initialFrame.height)
+        .position(x: initialFrame.midX, y: initialFrame.midY + translationY)
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 7)
+        .allowsHitTesting(false)
+        .transition(.opacity)
     }
 }
 
 private struct DashboardDragState: Equatable {
     let kind: SwitchKind
-    let initialCenterY: CGFloat
-    let draggedCenterY: CGFloat
+    let initialOrder: [SwitchKind]
+    let frozenFrames: [SwitchKind: CGRect]
+    let initialFrame: CGRect
+    let translationY: CGFloat
+
+    func withTranslation(_ translationY: CGFloat) -> DashboardDragState {
+        DashboardDragState(
+            kind: kind,
+            initialOrder: initialOrder,
+            frozenFrames: frozenFrames,
+            initialFrame: initialFrame,
+            translationY: translationY
+        )
+    }
 }
 
 private struct DashboardRowFramePreferenceKey: PreferenceKey {
@@ -501,6 +547,7 @@ private struct ControlRow: View {
     @ObservedObject var store: SwitchStore
     let showsSeparator: Bool
     let isDragging: Bool
+    let reportsFrame: Bool
     @Binding var quickMenuKind: SwitchKind?
     @Binding var quickMenuOpeningEventNumber: Int?
     let dragChanged: (DragGesture.Value) -> Void
@@ -593,7 +640,7 @@ private struct ControlRow: View {
             GeometryReader { proxy in
                 Color.clear.preference(
                     key: DashboardRowFramePreferenceKey.self,
-                    value: [kind: proxy.frame(in: .named(DashboardLayout.coordinateSpaceName))]
+                    value: reportsFrame ? [kind: proxy.frame(in: .named(DashboardLayout.coordinateSpaceName))] : [:]
                 )
             }
         }
