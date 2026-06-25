@@ -667,15 +667,14 @@ private struct ControlRow: View {
                     store.trigger(kind)
                 }
             } else {
-                Toggle("", isOn: Binding(
-                    get: { snapshot.isOn },
-                    set: { _ in store.toggle(kind) }
-                ))
-                .toggleStyle(.switch)
-                .controlSize(.small)
-                .labelsHidden()
-                .disabled(!snapshot.isAvailable || isRunning)
-                .opacity(snapshot.isAvailable && !isRunning ? 1 : 0.52)
+                DashboardSwitchButton(
+                    title: store.switchTitle(kind),
+                    isOn: snapshot.isOn,
+                    isEnabled: snapshot.isAvailable && !isRunning,
+                    action: {
+                        store.toggle(kind)
+                    }
+                )
             }
         }
         .padding(.horizontal, 9)
@@ -752,6 +751,62 @@ private struct ControlRow: View {
 
     fileprivate static func rowHeight(for snapshot: SwitchSnapshot) -> CGFloat {
         snapshot.warning != nil || snapshot.subtitle != nil ? 49 : 43
+    }
+}
+
+private struct DashboardSwitchButton: View {
+    let title: String
+    let isOn: Bool
+    let isEnabled: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            guard isEnabled else { return }
+            action()
+        } label: {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(trackFill)
+                    .overlay(
+                        Capsule()
+                            .stroke(trackStroke, lineWidth: 0.7)
+                    )
+
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: 20, height: 20)
+                    .shadow(color: .black.opacity(isOn ? 0.20 : 0.16), radius: 2.8, y: 1.2)
+                    .offset(x: isOn ? 22 : 2)
+            }
+            .frame(width: 44, height: 24)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.58)
+        .onHover { isHovering = $0 }
+        .animation(.snappy(duration: 0.16), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: isHovering)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
+    }
+
+    private var trackFill: Color {
+        if isOn {
+            return Color.accentColor
+        }
+        return isHovering && isEnabled
+            ? Color.primary.opacity(0.16)
+            : Color.primary.opacity(0.105)
+    }
+
+    private var trackStroke: Color {
+        if isOn {
+            return Color.white.opacity(0.16)
+        }
+        return Color.white.opacity(isHovering && isEnabled ? 0.34 : 0.22)
     }
 }
 
