@@ -670,8 +670,7 @@ private struct ControlRow: View {
                 DashboardSwitchButton(
                     title: store.switchTitle(kind),
                     isOn: snapshot.isOn,
-                    isAvailable: snapshot.isAvailable,
-                    isBusy: isRunning,
+                    isEnabled: snapshot.isAvailable && !isRunning,
                     action: {
                         store.toggle(kind)
                     }
@@ -747,7 +746,7 @@ private struct ControlRow: View {
         if !snapshot.isAvailable {
             return 0.70
         }
-        return isRunning ? 0.92 : 1
+        return isRunning ? 0.78 : 1
     }
 
     fileprivate static func rowHeight(for snapshot: SwitchSnapshot) -> CGFloat {
@@ -758,22 +757,14 @@ private struct ControlRow: View {
 private struct DashboardSwitchButton: View {
     let title: String
     let isOn: Bool
-    let isAvailable: Bool
-    let isBusy: Bool
+    let isEnabled: Bool
     let action: () -> Void
     @State private var isHovering = false
-    @State private var visualIsOn = false
-    @State private var pendingVisualTarget: Bool?
-    @State private var latestSystemIsOn = false
-    @State private var latestIsBusy = false
-    @State private var interactionID = 0
-
-    private static let thumbAnimation = Animation.spring(response: 0.30, dampingFraction: 0.84, blendDuration: 0.02)
-    private static let trackAnimation = Animation.easeOut(duration: 0.24)
 
     var body: some View {
         Button {
-            performOptimisticToggle()
+            guard isEnabled else { return }
+            action()
         } label: {
             ZStack(alignment: .leading) {
                 Capsule()
@@ -782,117 +773,40 @@ private struct DashboardSwitchButton: View {
                         Capsule()
                             .stroke(trackStroke, lineWidth: 0.7)
                     )
-                    .animation(Self.trackAnimation, value: visualIsOn)
-                    .animation(.easeOut(duration: 0.14), value: isHovering)
 
                 Circle()
                     .fill(Color.white)
                     .frame(width: 20, height: 20)
-                    .shadow(color: .black.opacity(visualIsOn ? 0.20 : 0.16), radius: 2.8, y: 1.2)
-                    .offset(x: visualIsOn ? 22 : 2)
-                    .animation(Self.thumbAnimation, value: visualIsOn)
+                    .shadow(color: .black.opacity(isOn ? 0.20 : 0.16), radius: 2.8, y: 1.2)
+                    .offset(x: isOn ? 22 : 2)
             }
             .frame(width: 44, height: 24)
             .contentShape(Capsule())
         }
-        .buttonStyle(DashboardSwitchButtonStyle(isEnabled: canInteract))
-        .disabled(!canInteract)
-        .opacity(switchOpacity)
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.58)
         .onHover { isHovering = $0 }
-        .onAppear {
-            visualIsOn = isOn
-            latestSystemIsOn = isOn
-            latestIsBusy = isBusy
-        }
-        .onChange(of: isOn) { _, newValue in
-            latestSystemIsOn = newValue
-            reconcileVisualStateWhenReady()
-        }
-        .onChange(of: isBusy) { _, newValue in
-            latestIsBusy = newValue
-            reconcileVisualStateWhenReady()
-        }
-        .onChange(of: isAvailable) { _, newValue in
-            guard !newValue else { return }
-            pendingVisualTarget = nil
-            animateVisualState(to: latestSystemIsOn)
-        }
+        .animation(.snappy(duration: 0.16), value: isOn)
+        .animation(.easeOut(duration: 0.12), value: isHovering)
         .accessibilityLabel(Text(title))
-        .accessibilityValue(Text(visualIsOn ? "On" : "Off"))
-    }
-
-    private var canInteract: Bool {
-        isAvailable && !isBusy
-    }
-
-    private var switchOpacity: Double {
-        if !isAvailable {
-            return 0.58
-        }
-        return isBusy ? 0.92 : 1
+        .accessibilityValue(Text(isOn ? "On" : "Off"))
     }
 
     private var trackFill: Color {
-        if visualIsOn {
+        if isOn {
             return Color.accentColor
         }
-        return isHovering && canInteract
+        return isHovering && isEnabled
             ? Color.primary.opacity(0.16)
             : Color.primary.opacity(0.105)
     }
 
     private var trackStroke: Color {
-        if visualIsOn {
+        if isOn {
             return Color.white.opacity(0.16)
         }
-        return Color.white.opacity(isHovering && canInteract ? 0.34 : 0.22)
-    }
-
-    private func performOptimisticToggle() {
-        guard canInteract else { return }
-        let target = !visualIsOn
-        interactionID += 1
-        pendingVisualTarget = target
-        animateVisualState(to: target)
-        action()
-        scheduleFallbackReconcile(for: target, interactionID: interactionID)
-    }
-
-    private func reconcileVisualStateWhenReady() {
-        guard !latestIsBusy else { return }
-        if pendingVisualTarget == nil || pendingVisualTarget == latestSystemIsOn {
-            pendingVisualTarget = nil
-        }
-        animateVisualState(to: latestSystemIsOn)
-    }
-
-    private func animateVisualState(to newValue: Bool) {
-        guard visualIsOn != newValue else { return }
-        withAnimation(Self.thumbAnimation) {
-            visualIsOn = newValue
-        }
-    }
-
-    private func scheduleFallbackReconcile(for target: Bool, interactionID: Int) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
-            guard self.interactionID == interactionID,
-                  self.pendingVisualTarget == target,
-                  !self.latestIsBusy,
-                  self.latestSystemIsOn != target
-            else { return }
-            self.pendingVisualTarget = nil
-            self.animateVisualState(to: self.latestSystemIsOn)
-        }
-    }
-}
-
-private struct DashboardSwitchButtonStyle: ButtonStyle {
-    let isEnabled: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && isEnabled ? 0.985 : 1)
-            .animation(.easeOut(duration: 0.08), value: configuration.isPressed)
+        return Color.white.opacity(isHovering && isEnabled ? 0.34 : 0.22)
     }
 }
 
