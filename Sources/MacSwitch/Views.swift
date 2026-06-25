@@ -7,6 +7,7 @@ enum DashboardLayout {
     static let maxHeight: CGFloat = 438
     static let cornerRadius: CGFloat = 18
     static let coordinateSpaceName = "MacSwitchDashboardCoordinateSpace"
+    static let reorderHysteresis: CGFloat = 4
 
     static func size(visibleCount: Int, showsError: Bool) -> NSSize {
         NSSize(width: width, height: height(visibleCount: visibleCount, showsError: showsError))
@@ -227,20 +228,24 @@ struct DashboardView: View {
             dashboardVisualKinds = visibleKinds
         }
 
-        let rowHeight = ControlRow.rowHeight(for: store.snapshots[kind] ?? .off)
+        let rowFrames = dashboardRowFrames
+        guard dashboardDragState != nil || visibleKinds.allSatisfy({ rowFrames[$0] != nil }),
+              let initialFrame = dashboardDragState?.initialFrame ?? rowFrames[kind]
+        else { return }
+
+        let initialOrder = dashboardDisplayKinds
         let dragState = dashboardDragState ?? DashboardDragState(
             kind: kind,
-            initialOrder: dashboardDisplayKinds,
-            frozenFrames: dashboardRowFrames,
-            initialFrame: dashboardRowFrames[kind] ?? CGRect(
-                x: 7,
-                y: max(0, value.startLocation.y - rowHeight / 2),
-                width: panelSize.width - 14,
-                height: rowHeight
-            ),
-            translationY: 0
+            initialOrder: initialOrder,
+            frozenFrames: rowFrames,
+            initialFrame: initialFrame,
+            translationY: 0,
+            targetIndex: initialOrder.firstIndex(of: kind) ?? 0
         )
-        let updatedDragState = dragState.withTranslation(value.translation.height)
+        let translatedDragState = dragState.withTranslation(value.translation.height)
+        let updatedDragState = translatedDragState.withTargetIndex(
+            dashboardInsertionIndex(using: translatedDragState)
+        )
         dashboardDragState = updatedDragState
 
         dashboardQuickMenuKind = nil
@@ -275,6 +280,39 @@ struct DashboardView: View {
     }
 
     private func dashboardReorderedKinds(using dragState: DashboardDragState) -> [SwitchKind] {
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
+        var reordered = otherKinds
+        reordered.insert(dragState.kind, at: min(dragState.targetIndex, reordered.count))
+        return reordered
+    }
+
+    private func dashboardInsertionIndex(using dragState: DashboardDragState) -> Int {
+        let rawIndex = dashboardRawInsertionIndex(using: dragState)
+        let currentIndex = min(dragState.targetIndex, dragState.initialOrder.count - 1)
+        guard rawIndex != currentIndex else { return rawIndex }
+
+        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
+        guard !otherKinds.isEmpty else { return rawIndex }
+
+        if rawIndex > currentIndex {
+            let boundaryIndex = min(max(rawIndex - 1, 0), otherKinds.count - 1)
+            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
+               draggedCenterY < frame.midY + DashboardLayout.reorderHysteresis {
+                return currentIndex
+            }
+        } else {
+            let boundaryIndex = min(max(rawIndex, 0), otherKinds.count - 1)
+            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
+               draggedCenterY > frame.midY - DashboardLayout.reorderHysteresis {
+                return currentIndex
+            }
+        }
+
+        return rawIndex
+    }
+
+    private func dashboardRawInsertionIndex(using dragState: DashboardDragState) -> Int {
         let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
         let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
         var insertionIndex = otherKinds.count
@@ -285,10 +323,7 @@ struct DashboardView: View {
                 break
             }
         }
-
-        var reordered = otherKinds
-        reordered.insert(dragState.kind, at: min(insertionIndex, reordered.count))
-        return reordered
+        return insertionIndex
     }
 
     private func resetTransientState() {
@@ -360,6 +395,7 @@ private struct DashboardDragState: Equatable {
     let frozenFrames: [SwitchKind: CGRect]
     let initialFrame: CGRect
     let translationY: CGFloat
+    let targetIndex: Int
 
     func withTranslation(_ translationY: CGFloat) -> DashboardDragState {
         DashboardDragState(
@@ -367,7 +403,19 @@ private struct DashboardDragState: Equatable {
             initialOrder: initialOrder,
             frozenFrames: frozenFrames,
             initialFrame: initialFrame,
-            translationY: translationY
+            translationY: translationY,
+            targetIndex: targetIndex
+        )
+    }
+
+    func withTargetIndex(_ targetIndex: Int) -> DashboardDragState {
+        DashboardDragState(
+            kind: kind,
+            initialOrder: initialOrder,
+            frozenFrames: frozenFrames,
+            initialFrame: initialFrame,
+            translationY: translationY,
+            targetIndex: targetIndex
         )
     }
 }
