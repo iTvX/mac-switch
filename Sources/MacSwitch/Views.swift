@@ -2407,35 +2407,7 @@ private struct GeneralPreferencesView: View {
                     }
                 }
 
-                SettingsGroup("Modes") {
-                    ForEach(Array(SwitchModeDefinition.builtIn.enumerated()), id: \.element.id) { index, mode in
-                        SettingsRow(
-                            title: mode.title,
-                            subtitle: mode.subtitle
-                        ) {
-                            HStack(spacing: 8) {
-                                SettingsPill(
-                                    text: store.modeStatusText(for: mode),
-                                    color: store.isModeActive(mode.id)
-                                        ? Color.accentColor
-                                        : (store.enabledModeIDs.contains(mode.id) ? Color.secondary : Color.gray)
-                                )
-
-                                Toggle("", isOn: Binding(
-                                    get: { store.enabledModeIDs.contains(mode.id) },
-                                    set: { store.setModeVisible(mode.id, $0) }
-                                ))
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .disabled(store.isModeBusy(mode))
-                            }
-                        }
-
-                        if index < SwitchModeDefinition.builtIn.count - 1 {
-                            SettingsDivider()
-                        }
-                    }
-                }
+                ModesSettingsSection(store: store)
 
                 SettingsGroup(store.text(.permissions), defaultExpanded: true) {
                     SettingsRow(
@@ -2626,6 +2598,441 @@ private struct GeneralPreferencesView: View {
             return .orange
         }
         return store.startAtLogin ? .green : .secondary
+    }
+}
+
+private struct ModesSettingsSection: View {
+    @ObservedObject var store: SwitchStore
+    @State private var expandedCustomModeID: SwitchModeID?
+
+    var body: some View {
+        SettingsGroup("Modes") {
+            HStack(spacing: 10) {
+                SettingsPill(text: "\(store.visibleModes.count) visible", color: Color.accentColor)
+
+                Text("Create one-click workflows from your own switch combinations.")
+                    .font(.system(size: 11.6, weight: .medium))
+                    .foregroundStyle(PreferencesColors.subtleText)
+                    .lineLimit(2)
+
+                Spacer(minLength: 0)
+
+                Button {
+                    expandedCustomModeID = store.createCustomMode()
+                } label: {
+                    Label("Add Mode", systemImage: "plus")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+
+            SettingsDivider()
+
+            ForEach(Array(SwitchModeDefinition.builtIn.enumerated()), id: \.element.id) { index, mode in
+                BuiltInModeSettingsRow(mode: mode, store: store)
+
+                if index < SwitchModeDefinition.builtIn.count - 1 || !store.customModes.isEmpty {
+                    SettingsDivider()
+                }
+            }
+
+            if !store.customModes.isEmpty {
+                HStack {
+                    Text("CUSTOM")
+                        .font(.system(size: 10.2, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(store.customModes.count)")
+                        .font(.system(size: 10.2, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(PreferencesColors.surface)
+
+                SettingsDivider()
+
+                ForEach(Array(store.customModes.enumerated()), id: \.element.id) { index, mode in
+                    CustomModeEditor(
+                        mode: mode,
+                        store: store,
+                        isExpanded: Binding(
+                            get: { expandedCustomModeID == mode.id },
+                            set: { expanded in
+                                if expanded {
+                                    expandedCustomModeID = mode.id
+                                } else if expandedCustomModeID == mode.id {
+                                    expandedCustomModeID = nil
+                                }
+                            }
+                        )
+                    )
+
+                    if index < store.customModes.count - 1 {
+                        SettingsDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+private struct BuiltInModeSettingsRow: View {
+    let mode: SwitchModeDefinition
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        SettingsRow(
+            title: mode.title,
+            subtitle: mode.subtitle
+        ) {
+            HStack(spacing: 8) {
+                SettingsPill(
+                    text: store.modeStatusText(for: mode),
+                    color: statusColor
+                )
+
+                Toggle("", isOn: Binding(
+                    get: { store.enabledModeIDs.contains(mode.id) },
+                    set: { store.setModeVisible(mode.id, $0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(store.isModeBusy(mode))
+            }
+        }
+    }
+
+    private var statusColor: Color {
+        if store.isModeActive(mode.id) {
+            return Color.accentColor
+        }
+        return store.enabledModeIDs.contains(mode.id) ? Color.secondary : Color.gray
+    }
+}
+
+private struct CustomModeEditor: View {
+    let mode: SwitchModeDefinition
+    @ObservedObject var store: SwitchStore
+    @Binding var isExpanded: Bool
+    @State private var draftTitle = ""
+    @State private var draftSubtitle = ""
+    @State private var draftSymbolName = "slider.horizontal.3"
+
+    private static let modeEligibleSwitches = SwitchKind.allCases.filter { !$0.isMomentaryAction }
+    private static let iconChoices: [ModeIconChoice] = [
+        ModeIconChoice(symbol: "slider.horizontal.3", title: "Controls"),
+        ModeIconChoice(symbol: "rectangle.on.rectangle.angled", title: "Presentation"),
+        ModeIconChoice(symbol: "target", title: "Focus"),
+        ModeIconChoice(symbol: "person.2.wave.2", title: "Meeting"),
+        ModeIconChoice(symbol: "sparkles.rectangle.stack", title: "Clean"),
+        ModeIconChoice(symbol: "moon.stars.fill", title: "Night"),
+        ModeIconChoice(symbol: "display", title: "Display"),
+        ModeIconChoice(symbol: "cup.and.saucer.fill", title: "Awake"),
+        ModeIconChoice(symbol: "briefcase.fill", title: "Work")
+    ]
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: mode.symbolName)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 15.5, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .background(Color.accentColor.opacity(0.11), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(mode.title.isEmpty ? "Custom Mode" : mode.title)
+                        .font(.system(size: 12.8, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(mode.subtitle.isEmpty ? "Custom workflow" : mode.subtitle)
+                        .font(.system(size: 10.8, weight: .regular))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 0)
+
+                SettingsPill(text: store.modeStatusText(for: mode), color: statusColor)
+
+                Toggle("", isOn: Binding(
+                    get: { store.enabledModeIDs.contains(mode.id) },
+                    set: { store.setModeVisible(mode.id, $0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(store.isModeBusy(mode) || mode.items.isEmpty)
+
+                Button(role: .destructive) {
+                    if isExpanded {
+                        isExpanded = false
+                    }
+                    store.deleteCustomMode(mode.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .disabled(store.isModeBusy(mode))
+                .help("Delete mode")
+
+                Button {
+                    withAnimation(.snappy(duration: 0.20)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 18, height: 22)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isExpanded ? PreferencesColors.selected.opacity(0.55) : Color.clear)
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    if !isEditable {
+                        Label("Turn this mode off before editing its switches.", systemImage: "lock.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    HStack(alignment: .bottom, spacing: 10) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Name")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            TextField("Custom Mode", text: $draftTitle)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit(commitMetadataChanges)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Icon")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Picker("", selection: $draftSymbolName) {
+                                ForEach(Self.iconChoices) { choice in
+                                    Label(choice.title, systemImage: choice.symbol)
+                                        .tag(choice.symbol)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(width: 142)
+                        }
+
+                        Button {
+                            commitMetadataChanges()
+                        } label: {
+                            Label("Save", systemImage: "checkmark")
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(!hasMetadataChanges || !isEditable)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Description")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("Custom workflow", text: $draftSubtitle)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(commitMetadataChanges)
+                    }
+
+                    HStack {
+                        Text("Switch targets")
+                            .font(.system(size: 11.2, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        SettingsPill(text: "\(mode.items.count) selected", color: mode.items.isEmpty ? .orange : .secondary)
+                    }
+                    .padding(.top, 2)
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(Self.modeEligibleSwitches.enumerated()), id: \.element.id) { index, kind in
+                            CustomModeSwitchTargetRow(kind: kind, modeID: mode.id, store: store)
+
+                            if index < Self.modeEligibleSwitches.count - 1 {
+                                Rectangle()
+                                    .fill(PreferencesColors.separator)
+                                    .frame(height: 1)
+                                    .padding(.leading, 44)
+                            }
+                        }
+                    }
+                    .background(PreferencesColors.subduedFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .onAppear {
+            syncDrafts()
+        }
+        .onChange(of: mode.id) { _, _ in
+            syncDrafts()
+        }
+    }
+
+    private var statusColor: Color {
+        if store.isModeActive(mode.id) {
+            return Color.accentColor
+        }
+        if mode.items.isEmpty {
+            return .orange
+        }
+        return store.enabledModeIDs.contains(mode.id) ? Color.secondary : Color.gray
+    }
+
+    private var isEditable: Bool {
+        !store.isModeActive(mode.id) && !store.isModeBusy(mode)
+    }
+
+    private var hasMetadataChanges: Bool {
+        draftTitle != mode.title ||
+            draftSubtitle != mode.subtitle ||
+            draftSymbolName != mode.symbolName
+    }
+
+    private func syncDrafts() {
+        let currentMode = store.customModes.first(where: { $0.id == mode.id }) ?? mode
+        draftTitle = currentMode.title
+        draftSubtitle = currentMode.subtitle
+        draftSymbolName = currentMode.symbolName
+    }
+
+    private func commitMetadataChanges() {
+        guard isEditable else { return }
+        updateMode { updated in
+            updated.title = draftTitle
+            updated.subtitle = draftSubtitle
+            updated.symbolName = draftSymbolName
+        }
+        DispatchQueue.main.async {
+            syncDrafts()
+        }
+    }
+
+    private func updateMode(_ mutate: (inout SwitchModeDefinition) -> Void) {
+        guard var updated = store.customModes.first(where: { $0.id == mode.id }) else { return }
+        mutate(&updated)
+        store.updateCustomMode(updated)
+    }
+}
+
+private struct ModeIconChoice: Identifiable {
+    let symbol: String
+    let title: String
+    var id: String { symbol }
+}
+
+private struct CustomModeSwitchTargetRow: View {
+    let kind: SwitchKind
+    let modeID: SwitchModeID
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(
+                get: { isIncluded },
+                set: setIncluded
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .frame(width: 20)
+            .disabled(!isEditable)
+
+            Image(systemName: kind.modernSymbol)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(kind.accentColor)
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 20, height: 20)
+
+            Text(store.switchTitle(kind))
+                .font(.system(size: 11.8, weight: .medium))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Picker("", selection: Binding(
+                get: { targetIsOn },
+                set: setTarget
+            )) {
+                Text("On").tag(true)
+                Text("Off").tag(false)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 82)
+            .disabled(!isIncluded || !isEditable)
+            .opacity(isIncluded ? 1 : 0.30)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .opacity(isEditable || isIncluded ? 1 : 0.70)
+    }
+
+    private var mode: SwitchModeDefinition? {
+        store.customModes.first { $0.id == modeID }
+    }
+
+    private var currentItem: SwitchModeItem? {
+        mode?.items.first { $0.kind == kind }
+    }
+
+    private var isIncluded: Bool {
+        currentItem != nil
+    }
+
+    private var targetIsOn: Bool {
+        currentItem?.targetIsOn ?? true
+    }
+
+    private var isEditable: Bool {
+        guard let mode else { return false }
+        return !store.isModeActive(mode.id) && !store.isModeBusy(mode)
+    }
+
+    private func setIncluded(_ include: Bool) {
+        guard isEditable else { return }
+        updateMode { updated in
+            if include {
+                guard !updated.items.contains(where: { $0.kind == kind }) else { return }
+                updated.items.append(SwitchModeItem(kind: kind, targetIsOn: true))
+            } else {
+                updated.items.removeAll { $0.kind == kind }
+            }
+        }
+    }
+
+    private func setTarget(_ targetIsOn: Bool) {
+        guard isEditable else { return }
+        updateMode { updated in
+            if let index = updated.items.firstIndex(where: { $0.kind == kind }) {
+                updated.items[index].targetIsOn = targetIsOn
+            } else {
+                updated.items.append(SwitchModeItem(kind: kind, targetIsOn: targetIsOn))
+            }
+        }
+    }
+
+    private func updateMode(_ mutate: (inout SwitchModeDefinition) -> Void) {
+        guard var updated = mode else { return }
+        mutate(&updated)
+        store.updateCustomMode(updated)
     }
 }
 
