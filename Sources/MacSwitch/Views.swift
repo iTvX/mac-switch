@@ -2998,6 +2998,9 @@ private struct AboutPreferencesView: View {
         guard softwareUpdates.isAvailable else {
             return "Available in the signed app bundle."
         }
+        if softwareUpdates.hasPendingChannelSwitch {
+            return "Check for updates to switch this install to the \(softwareUpdates.updateChannel.title) channel."
+        }
         let channel = "\(softwareUpdates.updateChannel.title) channel"
         if let lastUpdateCheckDate = softwareUpdates.lastUpdateCheckDate {
             return "\(channel). Last checked \(lastUpdateCheckDate.formatted(date: .abbreviated, time: .shortened))."
