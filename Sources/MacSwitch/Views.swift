@@ -9,18 +9,17 @@ enum DashboardLayout {
     static let coordinateSpaceName = "MacSwitchDashboardCoordinateSpace"
     static let reorderHysteresis: CGFloat = 4
 
-    static func size(visibleCount: Int, visibleModeCount: Int = 0, showsError: Bool) -> NSSize {
-        NSSize(width: width, height: height(visibleCount: visibleCount, visibleModeCount: visibleModeCount, showsError: showsError))
+    static func size(visibleCount: Int, showsError: Bool) -> NSSize {
+        NSSize(width: width, height: height(visibleCount: visibleCount, showsError: showsError))
     }
 
-    static func height(visibleCount: Int, visibleModeCount: Int = 0, showsError: Bool) -> CGFloat {
+    static func height(visibleCount: Int, showsError: Bool) -> CGFloat {
         let clampedVisibleCount = max(visibleCount, 1)
         let headerHeight: CGFloat = 48
         let footerHeight: CGFloat = 44
         let rowHeight: CGFloat = 49
-        let modesHeight: CGFloat = visibleModeCount > 0 ? 43 : 0
         let errorHeight: CGFloat = showsError ? 50 : 0
-        let contentHeight = headerHeight + footerHeight + modesHeight + CGFloat(clampedVisibleCount) * rowHeight + errorHeight + 12
+        let contentHeight = headerHeight + footerHeight + CGFloat(clampedVisibleCount) * rowHeight + errorHeight + 12
         return min(maxHeight, max(minHeight, ceil(contentHeight)))
     }
 }
@@ -34,11 +33,7 @@ struct DashboardView: View {
     @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
 
     private var panelSize: NSSize {
-        DashboardLayout.size(
-            visibleCount: store.visibleKinds.count,
-            visibleModeCount: store.visibleModes.count,
-            showsError: store.lastError != nil
-        )
+        DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)
     }
 
     private var activeCount: Int {
@@ -71,11 +66,6 @@ struct DashboardView: View {
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 0) {
-                            if !store.visibleModes.isEmpty {
-                                DashboardModesStrip(store: store)
-                                    .padding(.bottom, 4)
-                            }
-
                             ForEach(Array(dashboardDisplayKinds.enumerated()), id: \.element.id) { index, kind in
                                 DashboardReorderRow(
                                     kind: kind,
@@ -473,83 +463,6 @@ private struct EmptyDashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
-    }
-}
-
-private struct DashboardModesStrip: View {
-    @ObservedObject var store: SwitchStore
-
-    var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(store.visibleModes) { mode in
-                    DashboardModeButton(
-                        mode: mode,
-                        isActive: store.isModeActive(mode.id),
-                        isBusy: store.isModeBusy(mode),
-                        action: {
-                            store.toggleMode(mode)
-                        }
-                    )
-                }
-            }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 2)
-        }
-        .frame(height: 34)
-    }
-}
-
-private struct DashboardModeButton: View {
-    let mode: SwitchModeDefinition
-    let isActive: Bool
-    let isBusy: Bool
-    let action: () -> Void
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: mode.symbolName)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .frame(width: 13)
-                Text(mode.compactTitle)
-                    .font(.system(size: 10.6, weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.78)
-            }
-            .foregroundStyle(isActive ? Color.accentColor : DashboardColors.subtleText)
-            .frame(minWidth: 58, maxWidth: 76, minHeight: 27)
-            .padding(.horizontal, 8)
-            .background(
-                Capsule()
-                    .fill(backgroundFill)
-            )
-            .overlay(
-                Capsule()
-                    .stroke(borderFill, lineWidth: 1)
-            )
-            .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .disabled(isBusy)
-        .opacity(isBusy ? 0.62 : 1)
-        .help(mode.subtitle)
-        .onHover { isHovering = $0 }
-    }
-
-    private var backgroundFill: Color {
-        if isActive {
-            return Color.accentColor.opacity(0.17)
-        }
-        if isHovering {
-            return DashboardColors.controlHoverFill
-        }
-        return DashboardColors.controlFill.opacity(0.82)
-    }
-
-    private var borderFill: Color {
-        isActive ? Color.accentColor.opacity(0.28) : Color.white.opacity(isHovering ? 0.26 : 0.16)
     }
 }
 
@@ -2404,36 +2317,6 @@ private struct GeneralPreferencesView: View {
                         .labelsHidden()
                         .pickerStyle(.menu)
                         .frame(width: 178)
-                    }
-                }
-
-                SettingsGroup("Modes") {
-                    ForEach(Array(SwitchModeDefinition.builtIn.enumerated()), id: \.element.id) { index, mode in
-                        SettingsRow(
-                            title: mode.title,
-                            subtitle: mode.subtitle
-                        ) {
-                            HStack(spacing: 8) {
-                                SettingsPill(
-                                    text: store.modeStatusText(for: mode),
-                                    color: store.isModeActive(mode.id)
-                                        ? Color.accentColor
-                                        : (store.enabledModeIDs.contains(mode.id) ? Color.secondary : Color.gray)
-                                )
-
-                                Toggle("", isOn: Binding(
-                                    get: { store.enabledModeIDs.contains(mode.id) },
-                                    set: { store.setModeVisible(mode.id, $0) }
-                                ))
-                                .labelsHidden()
-                                .toggleStyle(.switch)
-                                .disabled(store.isModeBusy(mode))
-                            }
-                        }
-
-                        if index < SwitchModeDefinition.builtIn.count - 1 {
-                            SettingsDivider()
-                        }
                     }
                 }
 

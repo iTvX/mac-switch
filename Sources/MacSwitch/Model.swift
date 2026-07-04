@@ -121,103 +121,6 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum SwitchModeID: String, CaseIterable, Codable, Identifiable {
-    case presentation
-    case focus
-    case meeting
-    case cleanDesktop
-
-    var id: String { rawValue }
-}
-
-struct SwitchModeDefinition: Identifiable, Equatable {
-    let id: SwitchModeID
-    let title: String
-    let subtitle: String
-    let symbolName: String
-    let items: [SwitchModeItem]
-
-    static let builtIn: [SwitchModeDefinition] = [
-        SwitchModeDefinition(
-            id: .presentation,
-            title: "Presentation",
-            subtitle: "Stay awake, silence alerts, and clean the desktop.",
-            symbolName: "rectangle.on.rectangle.angled",
-            items: [
-                SwitchModeItem(kind: .keepAwake, targetIsOn: true),
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true),
-                SwitchModeItem(kind: .hideDesktopIcons, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .focus,
-            title: "Focus",
-            subtitle: "Reduce visual noise for deep work.",
-            symbolName: "target",
-            items: [
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true),
-                SwitchModeItem(kind: .darkMode, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .meeting,
-            title: "Meeting",
-            subtitle: "Keep the Mac awake and mute interruptions.",
-            symbolName: "person.2.wave.2",
-            items: [
-                SwitchModeItem(kind: .keepAwake, targetIsOn: true),
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .cleanDesktop,
-            title: "Clean Desk",
-            subtitle: "Hide desktop clutter and keep hidden files hidden.",
-            symbolName: "sparkles.rectangle.stack",
-            items: [
-                SwitchModeItem(kind: .hideDesktopIcons, targetIsOn: true),
-                SwitchModeItem(kind: .hideWidgets, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true),
-                SwitchModeItem(kind: .showHiddenFiles, targetIsOn: false)
-            ]
-        )
-    ]
-
-    var compactTitle: String {
-        switch id {
-        case .presentation: return "Present"
-        case .focus: return "Focus"
-        case .meeting: return "Meet"
-        case .cleanDesktop: return "Clean"
-        }
-    }
-}
-
-struct SwitchModeItem: Equatable {
-    let kind: SwitchKind
-    let targetIsOn: Bool
-}
-
-struct ActiveSwitchModeSession: Codable, Equatable {
-    let modeID: SwitchModeID
-    private let rawOriginalStates: [String: Bool]
-
-    init(modeID: SwitchModeID, originalStates: [SwitchKind: Bool]) {
-        self.modeID = modeID
-        self.rawOriginalStates = Dictionary(uniqueKeysWithValues: originalStates.map { ($0.key.rawValue, $0.value) })
-    }
-
-    var originalKinds: [SwitchKind] {
-        rawOriginalStates.keys.compactMap(SwitchKind.init(rawValue:))
-    }
-
-    func originalState(for kind: SwitchKind) -> Bool? {
-        rawOriginalStates[kind.rawValue]
-    }
-}
-
 enum KeepAwakeDuration: String, CaseIterable, Codable, Identifiable {
     case indefinitely
     case fiveMinutes
@@ -649,14 +552,6 @@ final class SwitchStore: ObservableObject {
         didSet { saveEnabledKinds() }
     }
 
-    @Published var enabledModeIDs: Set<SwitchModeID> {
-        didSet { saveEnabledModeIDs() }
-    }
-
-    @Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession] {
-        didSet { saveActiveModeSessions() }
-    }
-
     @Published var shortcuts: [SwitchKind: HotKeyShortcut] {
         didSet {
             saveShortcuts()
@@ -767,10 +662,6 @@ final class SwitchStore: ObservableObject {
         Self.normalizedOrder(orderedKinds).filter { enabledKinds.contains($0) }
     }
 
-    var visibleModes: [SwitchModeDefinition] {
-        SwitchModeDefinition.builtIn.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }
-    }
-
     var effectiveLanguage: AppLanguage {
         appLanguage.effectiveLanguage
     }
@@ -807,15 +698,6 @@ final class SwitchStore: ObservableObject {
             enabledKinds = Set(fullDefaultOrder.filter(\.defaultEnabled))
         }
         defaults.set(Self.customizationDefaultsVersion, forKey: DefaultsKey.customizationDefaultsVersion)
-
-        let storedModeIDs = defaults.stringArray(forKey: DefaultsKey.enabledModeIDs)?
-            .compactMap(SwitchModeID.init(rawValue:))
-        if let storedModeIDs {
-            enabledModeIDs = Set(storedModeIDs)
-        } else {
-            enabledModeIDs = Set(SwitchModeID.allCases)
-        }
-        activeModeSessions = Self.loadActiveModeSessions(from: defaults)
 
         shortcuts = Self.loadShortcuts(from: defaults)
 
@@ -1052,105 +934,6 @@ final class SwitchStore: ObservableObject {
             return "Updating..."
         }
         return enabledKinds.contains(kind) ? "Shown in menu" : "Hidden"
-    }
-
-    func isModeActive(_ modeID: SwitchModeID) -> Bool {
-        activeModeSessions[modeID] != nil
-    }
-
-    func isModeBusy(_ mode: SwitchModeDefinition) -> Bool {
-        mode.items.contains { isActionBusy($0.kind) }
-    }
-
-    func modeStatusText(for mode: SwitchModeDefinition) -> String {
-        if isModeActive(mode.id) {
-            return "Active"
-        }
-        if isModeBusy(mode) {
-            return "Updating..."
-        }
-        return enabledModeIDs.contains(mode.id) ? "Shown in menu" : "Hidden"
-    }
-
-    func setModeVisible(_ modeID: SwitchModeID, _ visible: Bool) {
-        if visible {
-            enabledModeIDs.insert(modeID)
-        } else {
-            if let mode = SwitchModeDefinition.builtIn.first(where: { $0.id == modeID }),
-               isModeActive(modeID) {
-                guard !isModeBusy(mode) else {
-                    lastError = "Finish the current switch update before hiding this mode."
-                    return
-                }
-                deactivateMode(mode)
-            }
-            enabledModeIDs.remove(modeID)
-        }
-    }
-
-    func toggleMode(_ mode: SwitchModeDefinition) {
-        if isModeActive(mode.id) {
-            deactivateMode(mode)
-        } else {
-            activateMode(mode)
-        }
-    }
-
-    private func activateMode(_ mode: SwitchModeDefinition) {
-        guard activeModeSessions.isEmpty else {
-            lastError = "Turn off the current mode before starting another mode."
-            return
-        }
-        guard !isModeBusy(mode) else {
-            lastError = "Finish the current switch update before changing modes."
-            return
-        }
-
-        let originalStates = Dictionary(uniqueKeysWithValues: mode.items.map { item in
-            (item.kind, snapshots[item.kind]?.isOn ?? false)
-        })
-        activeModeSessions[mode.id] = ActiveSwitchModeSession(modeID: mode.id, originalStates: originalStates)
-        clearLastErrorIfPrefixed("Mode")
-
-        var skippedTitles: [String] = []
-        for item in mode.items {
-            guard ensureSwitchAvailable(item.kind) else {
-                skippedTitles.append(item.kind.title)
-                continue
-            }
-            guard snapshots[item.kind]?.isOn != item.targetIsOn else { continue }
-            set(item.kind, enabled: item.targetIsOn)
-        }
-
-        if !skippedTitles.isEmpty {
-            lastError = "Mode \"\(mode.title)\" skipped unavailable switches: \(skippedTitles.joined(separator: ", "))."
-        }
-    }
-
-    private func deactivateMode(_ mode: SwitchModeDefinition) {
-        guard let session = activeModeSessions[mode.id] else { return }
-        guard !isModeBusy(mode) else {
-            lastError = "Finish the current switch update before turning off this mode."
-            return
-        }
-
-        activeModeSessions.removeValue(forKey: mode.id)
-        clearLastErrorIfPrefixed("Mode")
-
-        var skippedTitles: [String] = []
-        for kind in session.originalKinds {
-            guard let originalState = session.originalState(for: kind) else { continue }
-            guard ensureSwitchAvailable(kind) else {
-                skippedTitles.append(kind.title)
-                continue
-            }
-            guard snapshots[kind]?.isOn != originalState else { continue }
-            set(kind, enabled: originalState)
-        }
-
-        if !skippedTitles.isEmpty {
-            lastError = "Mode \"\(mode.title)\" could not restore unavailable switches: \(skippedTitles.joined(separator: ", "))."
-        }
     }
 
     func toggle(_ kind: SwitchKind) {
@@ -1682,17 +1465,6 @@ final class SwitchStore: ObservableObject {
         defaults.set(orderedEnabled.map(\.rawValue), forKey: DefaultsKey.enabledKinds)
     }
 
-    private func saveEnabledModeIDs() {
-        let ordered = SwitchModeID.allCases.filter { enabledModeIDs.contains($0) }
-        defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.enabledModeIDs)
-    }
-
-    private func saveActiveModeSessions() {
-        let orderedSessions = SwitchModeID.allCases.compactMap { activeModeSessions[$0] }
-        guard let data = try? JSONEncoder().encode(orderedSessions) else { return }
-        defaults.set(data, forKey: DefaultsKey.activeModeSessions)
-    }
-
     private func updateDoNotDisturbExpiration(enabled: Bool) {
         if enabled, let endDate = doNotDisturbDuration.endDate() {
             defaults.set(endDate, forKey: DefaultsKey.doNotDisturbEndDate)
@@ -1954,22 +1726,6 @@ final class SwitchStore: ObservableObject {
         return loaded
     }
 
-    private static func loadActiveModeSessions(from defaults: UserDefaults) -> [SwitchModeID: ActiveSwitchModeSession] {
-        guard let data = defaults.data(forKey: DefaultsKey.activeModeSessions),
-              let sessions = try? JSONDecoder().decode([ActiveSwitchModeSession].self, from: data)
-        else { return [:] }
-
-        let validModeIDs = Set(SwitchModeID.allCases)
-        let validSwitchKinds = Set(SwitchKind.allCases)
-        var loaded: [SwitchModeID: ActiveSwitchModeSession] = [:]
-        for session in sessions where validModeIDs.contains(session.modeID) {
-            let hasKnownSwitches = session.originalKinds.contains { validSwitchKinds.contains($0) }
-            guard hasKnownSwitches else { continue }
-            loaded[session.modeID] = session
-        }
-        return loaded
-    }
-
     private static func deduplicatedKinds(_ kinds: [SwitchKind]) -> [SwitchKind] {
         var seen: Set<SwitchKind> = []
         return kinds.filter { seen.insert($0).inserted }
@@ -2015,8 +1771,6 @@ private enum DefaultsKey {
     static let menuBarIcon = "app.menuBarIcon"
     static let appLanguage = "app.language"
     static let shortcuts = "switch.shortcuts"
-    static let enabledModeIDs = "switch.modes.enabled"
-    static let activeModeSessions = "switch.modes.activeSessions"
     static let customizationDefaultsVersion = "switch.customizationDefaultsVersion"
 }
 

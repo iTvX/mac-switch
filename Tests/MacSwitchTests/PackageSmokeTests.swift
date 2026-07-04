@@ -167,10 +167,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains("dashboardVisualKinds = store.visibleKinds"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuKind = nil"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuOpeningEventNumber = nil"))
-        XCTAssertTrue(dashboardSource.contains("DashboardModesStrip(store: store)"))
-        XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
-        XCTAssertTrue(views.contains("private struct DashboardModeButton"))
-        XCTAssertTrue(views.contains("store.toggleMode(mode)"))
         XCTAssertTrue(views.contains("private struct DashboardRowFramePreferenceKey: PreferenceKey"))
         XCTAssertTrue(views.contains("static let coordinateSpaceName = \"MacSwitchDashboardCoordinateSpace\""))
         XCTAssertTrue(controlRowSource.contains("@Binding var quickMenuKind: SwitchKind?"))
@@ -224,7 +220,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(views.contains("Move Up"))
         XCTAssertFalse(views.contains("Move Down"))
         XCTAssertTrue(appDelegate.contains("private var currentDashboardSize: NSSize"))
-        XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
+        XCTAssertTrue(appDelegate.contains("DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)"))
         XCTAssertTrue(appDelegate.contains("window.setContentSize(size)"))
         XCTAssertTrue(appDelegate.contains("resizeVisibleDashboardKeepingTopEdge()"))
         XCTAssertTrue(appDelegate.contains("let hostingView = NSHostingView(rootView: DashboardView(store: store))"))
@@ -240,61 +236,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(views.contains("PaletteToggleStyle"))
         XCTAssertTrue(views.contains("private struct DashboardBandBackground"))
         XCTAssertTrue(views.contains("LinearGradient("))
-    }
-
-    func testSwitchModesAreBuiltInRestorableAndSafeByDefault() throws {
-        let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
-        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
-        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
-        let modeDefinitionSource = try extract(
-            model,
-            from: "struct SwitchModeDefinition",
-            to: "enum KeepAwakeDuration"
-        )
-        let storeSource = try extract(
-            model,
-            from: "final class SwitchStore",
-            to: "private enum DefaultsKey"
-        )
-        let generalSource = try extract(
-            views,
-            from: "private struct GeneralPreferencesView",
-            to: "private enum AppLinks"
-        )
-
-        XCTAssertTrue(model.contains("enum SwitchModeID: String, CaseIterable, Codable, Identifiable"))
-        XCTAssertTrue(modeDefinitionSource.contains("id: .presentation"))
-        XCTAssertTrue(modeDefinitionSource.contains("id: .focus"))
-        XCTAssertTrue(modeDefinitionSource.contains("id: .meeting"))
-        XCTAssertTrue(modeDefinitionSource.contains("id: .cleanDesktop"))
-        XCTAssertTrue(modeDefinitionSource.contains("SwitchModeItem(kind: .keepAwake, targetIsOn: true)"))
-        XCTAssertTrue(modeDefinitionSource.contains("SwitchModeItem(kind: .doNotDisturb, targetIsOn: true)"))
-        XCTAssertTrue(modeDefinitionSource.contains("SwitchModeItem(kind: .showHiddenFiles, targetIsOn: false)"))
-        XCTAssertFalse(modeDefinitionSource.contains(".emptyTrash"))
-        XCTAssertFalse(modeDefinitionSource.contains(".ejectDisk"))
-        XCTAssertFalse(modeDefinitionSource.contains(".emptyPasteboard"))
-        XCTAssertFalse(modeDefinitionSource.contains(".lockScreen"))
-        XCTAssertTrue(model.contains("struct ActiveSwitchModeSession: Codable, Equatable"))
-        XCTAssertTrue(storeSource.contains("@Published var enabledModeIDs: Set<SwitchModeID>"))
-        XCTAssertTrue(storeSource.contains("@Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession]"))
-        XCTAssertTrue(storeSource.contains("var visibleModes: [SwitchModeDefinition]"))
-        XCTAssertTrue(storeSource.contains("enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil"))
-        XCTAssertTrue(storeSource.contains("func toggleMode(_ mode: SwitchModeDefinition)"))
-        XCTAssertTrue(storeSource.contains("Turn off the current mode before starting another mode."))
-        XCTAssertTrue(storeSource.contains("Finish the current switch update before hiding this mode."))
-        XCTAssertTrue(storeSource.contains("deactivateMode(mode)"))
-        XCTAssertTrue(storeSource.contains("activeModeSessions[mode.id] = ActiveSwitchModeSession(modeID: mode.id, originalStates: originalStates)"))
-        XCTAssertTrue(storeSource.contains("activeModeSessions.removeValue(forKey: mode.id)"))
-        XCTAssertTrue(storeSource.contains("private func saveActiveModeSessions()"))
-        XCTAssertTrue(model.contains("static let enabledModeIDs = \"switch.modes.enabled\""))
-        XCTAssertTrue(model.contains("static let activeModeSessions = \"switch.modes.activeSessions\""))
-        XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
-        XCTAssertTrue(views.contains("private struct DashboardModeButton"))
-        XCTAssertTrue(generalSource.contains("SettingsGroup(\"Modes\")"))
-        XCTAssertTrue(generalSource.contains("store.setModeVisible(mode.id, $0)"))
-        XCTAssertTrue(appDelegate.contains("store.$enabledModeIDs"))
-        XCTAssertTrue(appDelegate.contains("store.$activeModeSessions"))
-        XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
     }
 
     func testPreferencesWindowIsResizableAndScreenClamped() throws {
