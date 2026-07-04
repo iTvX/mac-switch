@@ -42,6 +42,11 @@ if [[ -z "$expected_appcast_version" || -z "$expected_enclosure_url" ]]; then
     exit 1
 fi
 
+expected_appcast_version="$("$ROOT_DIR/Scripts/appcast_item_tool.py" version \
+    --appcast "$APPCAST_PATH" \
+    --expected-url "$expected_enclosure_url" \
+    --expected-channel "$APPCAST_EXPECTED_CHANNEL")"
+
 if ! gh release view "$APPCAST_RELEASE_TAG" >/dev/null 2>&1; then
     if ! git rev-parse -q --verify "refs/tags/$APPCAST_RELEASE_TAG" >/dev/null; then
         git tag "$APPCAST_RELEASE_TAG" "${GITHUB_SHA:-HEAD}"
@@ -63,12 +68,18 @@ for attempt in $(seq 1 "$APPCAST_VERIFY_ATTEMPTS"); do
         -H 'Pragma: no-cache' \
         "$APPCAST_PUBLIC_URL" || true)"
 
-    if grep -Fq "<sparkle:version>$expected_appcast_version</sparkle:version>" <<< "$remote_appcast" &&
-        grep -Fq "$expected_enclosure_url" <<< "$remote_appcast" &&
-        { [[ -z "$APPCAST_EXPECTED_CHANNEL" ]] || grep -Fq "<sparkle:channel>$APPCAST_EXPECTED_CHANNEL</sparkle:channel>" <<< "$remote_appcast"; }; then
+    remote_appcast_path="$(mktemp)"
+    printf '%s' "$remote_appcast" > "$remote_appcast_path"
+    if "$ROOT_DIR/Scripts/appcast_item_tool.py" verify \
+        --appcast "$remote_appcast_path" \
+        --expected-url "$expected_enclosure_url" \
+        --expected-channel "$APPCAST_EXPECTED_CHANNEL" \
+        --expected-version "$expected_appcast_version"; then
+        rm -f "$remote_appcast_path"
         echo "Verified public appcast feed: $APPCAST_PUBLIC_URL"
         exit 0
     fi
+    rm -f "$remote_appcast_path"
 
     if [[ "$attempt" -lt "$APPCAST_VERIFY_ATTEMPTS" ]]; then
         echo "Public appcast is not current yet; retrying in ${APPCAST_VERIFY_DELAY_SECONDS}s ($attempt/$APPCAST_VERIFY_ATTEMPTS)."
