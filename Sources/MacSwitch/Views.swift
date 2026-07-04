@@ -1211,7 +1211,7 @@ private struct KeepAwakeDurationMenu: View {
     var body: some View {
         Menu {
             Button(KeepAwakeDuration.indefinitely.menuTitle) {
-                store.keepAwakeDuration = .indefinitely
+                store.setKeepAwakeDuration(.indefinitely)
             }
 
             Divider()
@@ -1233,7 +1233,7 @@ private struct KeepAwakeDurationMenu: View {
 
             ForEach(KeepAwakeDuration.allCases.filter { $0 != .indefinitely }) { duration in
                 Button(duration.menuTitle) {
-                    store.keepAwakeDuration = duration
+                    store.setKeepAwakeDuration(duration)
                 }
             }
         } label: {
@@ -4577,7 +4577,10 @@ private struct KeepAwakePreferencesPanel: View {
             Text("Default activation duration:")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-            Picker("", selection: $store.keepAwakeDuration) {
+            Picker("", selection: Binding(
+                get: { store.keepAwakeDuration },
+                set: { store.setKeepAwakeDuration($0) }
+            )) {
                 ForEach(KeepAwakeDuration.allCases) { duration in
                     Text(duration.menuTitle).tag(duration)
                 }

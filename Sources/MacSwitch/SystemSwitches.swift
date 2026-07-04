@@ -407,6 +407,14 @@ final class SystemSwitchController {
         }
     }
 
+    func setKeepAwake(enabled: Bool, duration: TimeInterval?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error = keepAwake.setEnabled(enabled, duration: duration)
+        return SwitchOperationResult(
+            snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration),
+            error: error
+        )
+    }
+
     func performXcodeClean(progress: @escaping (Double) -> Void) -> SwitchOperationResult {
         xcodeClean.perform(progress: progress)
     }
