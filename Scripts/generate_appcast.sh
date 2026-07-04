@@ -44,24 +44,28 @@ fi
 
 rm -rf "$APPCAST_DIR"
 mkdir -p "$APPCAST_DIR"
+EXISTING_APPCAST_PATH="$APPCAST_DIR/existing-appcast.xml"
+GENERATED_APPCAST_DIR="$APPCAST_DIR/generated"
+GENERATED_APPCAST_PATH="$GENERATED_APPCAST_DIR/appcast.xml"
 if [[ -n "$APPCAST_EXISTING_URL" ]]; then
     if curl -fsSL \
         -H 'Cache-Control: no-cache' \
         -H 'Pragma: no-cache' \
         "$APPCAST_EXISTING_URL" \
-        -o "$APPCAST_PATH"; then
+        -o "$EXISTING_APPCAST_PATH"; then
         echo "Seeded appcast from: $APPCAST_EXISTING_URL"
     else
-        rm -f "$APPCAST_PATH"
+        rm -f "$EXISTING_APPCAST_PATH"
         echo "No existing appcast was available at: $APPCAST_EXISTING_URL"
     fi
 fi
-cp "$ZIP_PATH" "$APPCAST_DIR/$UPDATE_ASSET_NAME"
+mkdir -p "$GENERATED_APPCAST_DIR"
+cp "$ZIP_PATH" "$GENERATED_APPCAST_DIR/$UPDATE_ASSET_NAME"
 
 GENERATE_ARGS=(
     --download-url-prefix "$DOWNLOAD_URL_PREFIX"
     --maximum-versions "$APPCAST_MAXIMUM_VERSIONS"
-    -o "$APPCAST_PATH"
+    -o "$GENERATED_APPCAST_PATH"
 )
 
 if [[ -n "$APPCAST_CHANNEL" ]]; then
@@ -77,7 +81,23 @@ fi
 run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
     --account "$SPARKLE_ACCOUNT" \
     "${GENERATE_ARGS[@]}" \
-    "$APPCAST_DIR"
+    "$GENERATED_APPCAST_DIR"
+
+expected_enclosure_url="${DOWNLOAD_URL_PREFIX}${UPDATE_ASSET_NAME}"
+if [[ -s "$EXISTING_APPCAST_PATH" ]]; then
+    "$ROOT_DIR/Scripts/appcast_item_tool.py" merge \
+        --existing "$EXISTING_APPCAST_PATH" \
+        --incoming "$GENERATED_APPCAST_PATH" \
+        --output "$APPCAST_PATH" \
+        --expected-url "$expected_enclosure_url" \
+        --expected-channel "$APPCAST_CHANNEL"
+else
+    cp "$GENERATED_APPCAST_PATH" "$APPCAST_PATH"
+    "$ROOT_DIR/Scripts/appcast_item_tool.py" verify \
+        --appcast "$APPCAST_PATH" \
+        --expected-url "$expected_enclosure_url" \
+        --expected-channel "$APPCAST_CHANNEL"
+fi
 
 test -s "$APPCAST_PATH"
 echo "Generated appcast: $APPCAST_PATH"

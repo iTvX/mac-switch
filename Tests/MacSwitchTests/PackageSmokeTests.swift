@@ -698,6 +698,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appcastScript.contains("APPCAST_CHANNEL"))
         XCTAssertTrue(appcastScript.contains("APPCAST_MAXIMUM_VERSIONS"))
         XCTAssertTrue(appcastScript.contains("--channel \"$APPCAST_CHANNEL\""))
+        XCTAssertTrue(appcastScript.contains("appcast_item_tool.py\" merge"))
+        XCTAssertTrue(appcastScript.contains("expected_enclosure_url=\"${DOWNLOAD_URL_PREFIX}${UPDATE_ASSET_NAME}\""))
         XCTAssertTrue(appcastScript.contains("GITHUB_REPOSITORY"))
         XCTAssertTrue(appcastScript.contains("https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/"))
         XCTAssertTrue(appcastScript.contains("Mac.Switch.zip"))
@@ -711,10 +713,69 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(publishScript.contains("APPCAST_VERIFY_ATTEMPTS=\"${APPCAST_VERIFY_ATTEMPTS:-60}\""))
         XCTAssertTrue(publishScript.contains("expected_appcast_version"))
         XCTAssertTrue(publishScript.contains("expected_enclosure_url"))
-        XCTAssertTrue(publishScript.contains("<sparkle:channel>$APPCAST_EXPECTED_CHANNEL</sparkle:channel>"))
+        XCTAssertTrue(publishScript.contains("appcast_item_tool.py\" version"))
+        XCTAssertTrue(publishScript.contains("appcast_item_tool.py\" verify"))
+        XCTAssertFalse(publishScript.contains("<sparkle:channel>$APPCAST_EXPECTED_CHANNEL</sparkle:channel>"))
         XCTAssertTrue(publishScript.contains("gh release upload \"$APPCAST_RELEASE_TAG\" \"$APPCAST_PATH\" --clobber"))
         XCTAssertTrue(publishScript.contains("curl -fsSL"))
         XCTAssertTrue(publishScript.contains("Public appcast did not match generated appcast"))
+    }
+
+    func testAppcastItemToolPreservesStableAndBetaItemsWithSharedBuild() throws {
+        let fileManager = FileManager.default
+        let tempDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: tempDir) }
+
+        let stableURL = "https://updates.example.invalid/v1.0.0-20260704131627/Mac.Switch.zip"
+        let betaURL = "https://updates.example.invalid/v1.0.0-beta.3/Mac.Switch.zip"
+        let existing = tempDir.appendingPathComponent("existing.xml")
+        let incoming = tempDir.appendingPathComponent("incoming.xml")
+        let merged = tempDir.appendingPathComponent("merged.xml")
+        try appcastXML(items: [
+            appcastItem(title: "1.0.0", version: "20260704131627", channel: nil, url: stableURL),
+            appcastItem(title: "1.0.0-beta.1", version: "20260704121536", channel: "beta", url: "https://updates.example.invalid/v1.0.0-beta.1/Mac.Switch.zip")
+        ]).write(to: existing, atomically: true, encoding: .utf8)
+        try appcastXML(items: [
+            appcastItem(title: "1.0.0-beta.3", version: "20260704131627", channel: "beta", url: betaURL)
+        ]).write(to: incoming, atomically: true, encoding: .utf8)
+
+        let tool = packageRoot.appendingPathComponent("Scripts/appcast_item_tool.py")
+        let mergeResult = try run("/usr/bin/python3", [
+            tool.path,
+            "merge",
+            "--existing", existing.path,
+            "--incoming", incoming.path,
+            "--output", merged.path,
+            "--expected-url", betaURL,
+            "--expected-channel", "beta"
+        ], timeout: 5)
+
+        XCTAssertEqual(mergeResult.status, 0, mergeResult.combinedOutput)
+        let mergedXML = try String(contentsOf: merged)
+        XCTAssertTrue(mergedXML.contains(stableURL))
+        XCTAssertTrue(mergedXML.contains(betaURL))
+        XCTAssertTrue(mergedXML.contains("<sparkle:version>20260704131627</sparkle:version>"))
+        XCTAssertTrue(mergedXML.contains("<sparkle:channel>beta</sparkle:channel>"))
+
+        let stableVerify = try run("/usr/bin/python3", [
+            tool.path,
+            "verify",
+            "--appcast", merged.path,
+            "--expected-url", stableURL,
+            "--expected-version", "20260704131627"
+        ], timeout: 5)
+        XCTAssertEqual(stableVerify.status, 0, stableVerify.combinedOutput)
+
+        let betaVerify = try run("/usr/bin/python3", [
+            tool.path,
+            "verify",
+            "--appcast", merged.path,
+            "--expected-url", betaURL,
+            "--expected-channel", "beta",
+            "--expected-version", "20260704131627"
+        ], timeout: 5)
+        XCTAssertEqual(betaVerify.status, 0, betaVerify.combinedOutput)
     }
 
     func testSourceAvailableTreeDoesNotExposePrivateOrCompetitorReferences() throws {
@@ -2853,6 +2914,32 @@ final class PackageSmokeTests: XCTestCase {
 
     private func ascii(_ bytes: [UInt8]) -> String {
         String(decoding: bytes, as: UTF8.self)
+    }
+
+    private func appcastXML(items: [String]) -> String {
+        """
+        <?xml version="1.0" standalone="yes"?>
+        <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+            <channel>
+                <title>Mac Switch</title>
+        \(items.joined(separator: "\n"))
+            </channel>
+        </rss>
+        """
+    }
+
+    private func appcastItem(title: String, version: String, channel: String?, url: String) -> String {
+        let channelLine = channel.map { "            <sparkle:channel>\($0)</sparkle:channel>\n" } ?? ""
+        return """
+                <item>
+                    <title>\(title)</title>
+                    <pubDate>Sat, 04 Jul 2026 06:19:51 -0700</pubDate>
+        \(channelLine)            <sparkle:version>\(version)</sparkle:version>
+                    <sparkle:shortVersionString>\(title)</sparkle:shortVersionString>
+                    <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+                    <enclosure url="\(url)" length="1" type="application/octet-stream" sparkle:edSignature="test"/>
+                </item>
+        """
     }
 
     private func pngColorType(at url: URL) throws -> UInt8 {
