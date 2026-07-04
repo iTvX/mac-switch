@@ -7,6 +7,9 @@ APPCAST_RELEASE_TAG="${APPCAST_RELEASE_TAG:-appcast}"
 APPCAST_RELEASE_TITLE="${APPCAST_RELEASE_TITLE:-Mac Switch Appcast}"
 APPCAST_RELEASE_NOTES="${APPCAST_RELEASE_NOTES:-Stable Sparkle appcast feed for official Mac Switch releases.}"
 APPCAST_PUBLIC_URL="${APPCAST_PUBLIC_URL:-}"
+APPCAST_EXPECTED_RELEASE_TAG="${APPCAST_EXPECTED_RELEASE_TAG:-}"
+APPCAST_EXPECTED_ASSET_NAME="${APPCAST_EXPECTED_ASSET_NAME:-Mac.Switch.zip}"
+APPCAST_EXPECTED_CHANNEL="${APPCAST_EXPECTED_CHANNEL:-}"
 APPCAST_VERIFY_ATTEMPTS="${APPCAST_VERIFY_ATTEMPTS:-24}"
 APPCAST_VERIFY_DELAY_SECONDS="${APPCAST_VERIFY_DELAY_SECONDS:-5}"
 
@@ -25,6 +28,14 @@ fi
 
 expected_appcast_version="$(sed -n 's|.*<sparkle:version>\([^<][^<]*\)</sparkle:version>.*|\1|p' "$APPCAST_PATH" | head -n 1)"
 expected_enclosure_url="$(sed -n 's|.*<enclosure url="\([^"]*\)".*|\1|p' "$APPCAST_PATH" | head -n 1)"
+
+if [[ -n "$APPCAST_EXPECTED_RELEASE_TAG" ]]; then
+    if [[ -z "${GITHUB_REPOSITORY:-}" ]]; then
+        echo "Set GITHUB_REPOSITORY when using APPCAST_EXPECTED_RELEASE_TAG." >&2
+        exit 1
+    fi
+    expected_enclosure_url="https://github.com/$GITHUB_REPOSITORY/releases/download/$APPCAST_EXPECTED_RELEASE_TAG/$APPCAST_EXPECTED_ASSET_NAME"
+fi
 
 if [[ -z "$expected_appcast_version" || -z "$expected_enclosure_url" ]]; then
     echo "Appcast is missing sparkle:version or enclosure URL." >&2
@@ -53,7 +64,8 @@ for attempt in $(seq 1 "$APPCAST_VERIFY_ATTEMPTS"); do
         "$APPCAST_PUBLIC_URL" || true)"
 
     if grep -Fq "<sparkle:version>$expected_appcast_version</sparkle:version>" <<< "$remote_appcast" &&
-        grep -Fq "$expected_enclosure_url" <<< "$remote_appcast"; then
+        grep -Fq "$expected_enclosure_url" <<< "$remote_appcast" &&
+        { [[ -z "$APPCAST_EXPECTED_CHANNEL" ]] || grep -Fq "<sparkle:channel>$APPCAST_EXPECTED_CHANNEL</sparkle:channel>" <<< "$remote_appcast"; }; then
         echo "Verified public appcast feed: $APPCAST_PUBLIC_URL"
         exit 0
     fi
@@ -66,4 +78,7 @@ done
 
 echo "Public appcast did not match generated appcast at $APPCAST_PUBLIC_URL." >&2
 echo "Expected sparkle:version $expected_appcast_version and enclosure $expected_enclosure_url." >&2
+if [[ -n "$APPCAST_EXPECTED_CHANNEL" ]]; then
+    echo "Expected sparkle:channel $APPCAST_EXPECTED_CHANNEL." >&2
+fi
 exit 1

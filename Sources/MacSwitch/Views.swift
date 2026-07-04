@@ -2864,6 +2864,23 @@ private struct AboutPreferencesView: View {
                     SettingsDivider()
 
                     SettingsRow(
+                        title: "Update Channel",
+                        subtitle: softwareUpdates.updateChannel.subtitle
+                    ) {
+                        Picker("", selection: $softwareUpdates.updateChannel) {
+                            ForEach(SoftwareUpdateChannel.allCases) { channel in
+                                Text(channel.title).tag(channel)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .frame(width: 132)
+                        .disabled(!softwareUpdates.isAvailable)
+                    }
+
+                    SettingsDivider()
+
+                    SettingsRow(
                         title: "Automatically Check"
                     ) {
                         Toggle("", isOn: $softwareUpdates.automaticallyChecksForUpdates)
@@ -2981,10 +2998,11 @@ private struct AboutPreferencesView: View {
         guard softwareUpdates.isAvailable else {
             return "Available in the signed app bundle."
         }
+        let channel = "\(softwareUpdates.updateChannel.title) channel"
         if let lastUpdateCheckDate = softwareUpdates.lastUpdateCheckDate {
-            return "Last checked \(lastUpdateCheckDate.formatted(date: .abbreviated, time: .shortened))."
+            return "\(channel). Last checked \(lastUpdateCheckDate.formatted(date: .abbreviated, time: .shortened))."
         }
-        return "Check the official release feed for a newer notarized build."
+        return "\(channel). Check the official release feed for a newer notarized build."
     }
 
     private func copyDiagnostics() {

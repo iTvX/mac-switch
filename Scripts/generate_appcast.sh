@@ -8,6 +8,9 @@ RELEASE_TAG="${RELEASE_TAG:?Set RELEASE_TAG to the GitHub release tag for this u
 APPCAST_DIR="${APPCAST_DIR:-$BUILD_DIR/Appcast}"
 APPCAST_PATH="${APPCAST_PATH:-$APPCAST_DIR/appcast.xml}"
 UPDATE_ASSET_NAME="${UPDATE_ASSET_NAME:-Mac.Switch.zip}"
+APPCAST_EXISTING_URL="${APPCAST_EXISTING_URL:-}"
+APPCAST_CHANNEL="${APPCAST_CHANNEL:-}"
+APPCAST_MAXIMUM_VERSIONS="${APPCAST_MAXIMUM_VERSIONS:-0}"
 SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-com.maxyu.macswitch.sparkle}"
 SPARKLE_BIN_DIR="${SPARKLE_BIN_DIR:-$ROOT_DIR/.build/artifacts/sparkle/Sparkle/bin}"
 SPARKLE_VIA_LAUNCHCTL="${SPARKLE_VIA_LAUNCHCTL:-0}"
@@ -41,13 +44,29 @@ fi
 
 rm -rf "$APPCAST_DIR"
 mkdir -p "$APPCAST_DIR"
+if [[ -n "$APPCAST_EXISTING_URL" ]]; then
+    if curl -fsSL \
+        -H 'Cache-Control: no-cache' \
+        -H 'Pragma: no-cache' \
+        "$APPCAST_EXISTING_URL" \
+        -o "$APPCAST_PATH"; then
+        echo "Seeded appcast from: $APPCAST_EXISTING_URL"
+    else
+        rm -f "$APPCAST_PATH"
+        echo "No existing appcast was available at: $APPCAST_EXISTING_URL"
+    fi
+fi
 cp "$ZIP_PATH" "$APPCAST_DIR/$UPDATE_ASSET_NAME"
 
 GENERATE_ARGS=(
     --download-url-prefix "$DOWNLOAD_URL_PREFIX"
-    --maximum-versions 1
+    --maximum-versions "$APPCAST_MAXIMUM_VERSIONS"
     -o "$APPCAST_PATH"
 )
+
+if [[ -n "$APPCAST_CHANNEL" ]]; then
+    GENERATE_ARGS+=(--channel "$APPCAST_CHANNEL")
+fi
 
 if [[ -n "${SPARKLE_PRIVATE_KEY:-}" ]]; then
     echo "SPARKLE_PRIVATE_KEY environment signing is no longer supported for release appcasts." >&2

@@ -18,6 +18,14 @@ on:
         required: true
         default: false
         type: boolean
+      update_channel:
+        description: "Sparkle update channel for this release"
+        required: true
+        default: stable
+        type: choice
+        options:
+          - stable
+          - beta
 
 permissions:
   contents: write
@@ -47,8 +55,12 @@ jobs:
           create_tag=false
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="${{ inputs.tag }}"
+            prerelease="${{ inputs.prerelease }}"
+            update_channel="${{ inputs.update_channel }}"
           else
             create_tag=true
+            prerelease=false
+            update_channel=stable
             short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
             if [[ ! "$short_version" =~ ^[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
               echo "::error::CFBundleShortVersionString must look like 1.0.0 or 1.0.0-beta.1"
@@ -60,6 +72,15 @@ jobs:
               sleep 1
               tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
             done
+          fi
+
+          if [[ "$update_channel" != "stable" && "$update_channel" != "beta" ]]; then
+            echo "::error::Update channel must be stable or beta"
+            exit 1
+          fi
+          if [[ "$update_channel" == "beta" && "$prerelease" != "true" ]]; then
+            echo "::error::Beta channel releases must be marked as prerelease"
+            exit 1
           fi
 
           if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
@@ -81,12 +102,18 @@ jobs:
           default_branch="${GITHUB_DEFAULT_BRANCH:-main}"
           git fetch --no-tags origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
           if ! git merge-base --is-ancestor "$tag_commit" "origin/$default_branch"; then
-            echo "::error::Release tag $tag must point to a commit reachable from $default_branch"
-            exit 1
+            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$prerelease" == "true" && "$update_channel" == "beta" && "$tag" == *beta* ]]; then
+              echo "Allowing beta prerelease tag $tag outside $default_branch"
+            else
+              echo "::error::Release tag $tag must point to a commit reachable from $default_branch"
+              exit 1
+            fi
           fi
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "create_tag=$create_tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "update_channel=$update_channel" >> "$GITHUB_OUTPUT"
 
       - name: Run Swift tests
         run: |
@@ -127,7 +154,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
-          PRERELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          PRERELEASE: ${{ steps.release_tag.outputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,10 +174,15 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+          APPCAST_EXISTING_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
+          APPCAST_CHANNEL: ${{ steps.release_tag.outputs.update_channel == 'beta' && 'beta' || '' }}
+          APPCAST_MAXIMUM_VERSIONS: "0"
         run: ./Scripts/generate_appcast.sh
 
       - name: Publish Sparkle appcast
         env:
           GH_TOKEN: ${{ github.token }}
           APPCAST_RELEASE_TAG: appcast
+          APPCAST_EXPECTED_RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          APPCAST_EXPECTED_CHANNEL: ${{ steps.release_tag.outputs.update_channel == 'beta' && 'beta' || '' }}
         run: ./Scripts/publish_appcast.sh
