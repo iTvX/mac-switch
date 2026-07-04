@@ -217,17 +217,18 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     }
 
     fileprivate func channelSwitchComparisonOverride(versionA: String, versionB: String) -> ComparisonResult? {
-        guard versionA != versionB else { return .orderedSame }
-
         channelSwitchLock.lock()
+        let target = channelSwitchTarget
         let updateVersion = channelSwitchUpdateVersion
         channelSwitchLock.unlock()
 
-        guard let updateVersion, !bundleVersion.isEmpty else { return nil }
+        guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }
         if versionA == bundleVersion, versionB == updateVersion {
+            // Channel switching can install a different package with the same CFBundleVersion.
+            // Sparkle asks whether the selected item is newer by comparing host -> item.
             return .orderedAscending
         }
-        if versionA == updateVersion, versionB == bundleVersion {
+        if updateVersion != bundleVersion, versionA == updateVersion, versionB == bundleVersion {
             return .orderedDescending
         }
         return nil
