@@ -617,7 +617,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(publishScript.contains("APPCAST_EXPECTED_CHANNEL"))
         XCTAssertTrue(publishScript.contains("APPCAST_PUBLIC_URL"))
         XCTAssertTrue(publishScript.contains("GITHUB_REPOSITORY"))
-        XCTAssertTrue(publishScript.contains("APPCAST_VERIFY_ATTEMPTS"))
+        XCTAssertTrue(publishScript.contains("APPCAST_VERIFY_ATTEMPTS=\"${APPCAST_VERIFY_ATTEMPTS:-60}\""))
         XCTAssertTrue(publishScript.contains("expected_appcast_version"))
         XCTAssertTrue(publishScript.contains("expected_enclosure_url"))
         XCTAssertTrue(publishScript.contains("<sparkle:channel>$APPCAST_EXPECTED_CHANNEL</sparkle:channel>"))
