@@ -954,6 +954,63 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(controllerTerminationSource.contains("screenCleaner.setEnabled(false)"))
     }
 
+    func testKeepAwakeIntentRestoresAfterUpdateRelaunch() throws {
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let initSource = try extract(
+            model,
+            from: "init(controller: SystemSwitchController = SystemSwitchController())",
+            to: "func setEnabled(_ kind: SwitchKind, _ enabled: Bool)"
+        )
+        let durationSource = try extract(
+            model,
+            from: "func setKeepAwakeDuration(_ duration: KeepAwakeDuration)",
+            to: "func move(_ source: SwitchKind, before target: SwitchKind)"
+        )
+        let applySetSource = try extract(
+            model,
+            from: "private func applySetResult",
+            to: "@discardableResult\n    private func ensureSwitchAvailable"
+        )
+        let restoreSource = try extract(
+            model,
+            from: "private func persistKeepAwakeRestoreState",
+            to: "private func enforceDarkModeScheduleAsync"
+        )
+        let controllerSource = try extract(
+            switches,
+            from: "func set(_ kind: SwitchKind, enabled: Bool, keepAwakeDuration: KeepAwakeDuration)",
+            to: "func performXcodeClean"
+        )
+
+        XCTAssertTrue(model.contains("static let keepAwakeActive = \"switch.keepAwake.active\""))
+        XCTAssertTrue(model.contains("static let keepAwakeEndDate = \"switch.keepAwake.endDate\""))
+        XCTAssertTrue(model.contains("private var keepAwakeRestoreEndDate: Date?"))
+        XCTAssertTrue(initSource.contains("restoreKeepAwakeIfNeeded()"))
+        XCTAssertTrue(initSource.contains("if kind == .keepAwake"))
+        XCTAssertTrue(initSource.contains("clearKeepAwakeRestoreState()"))
+        XCTAssertTrue(durationSource.contains("keepAwakeDuration = duration"))
+        XCTAssertTrue(durationSource.contains("snapshots[.keepAwake]?.isOn == true"))
+        XCTAssertTrue(durationSource.contains("set(.keepAwake, enabled: true)"))
+        XCTAssertTrue(durationSource.contains("refreshAsync(.keepAwake)"))
+        XCTAssertTrue(applySetSource.contains("persistKeepAwakeRestoreState("))
+        XCTAssertTrue(applySetSource.contains("restoredEndDate: restoredEndDate"))
+        XCTAssertTrue(restoreSource.contains("defaults.set(true, forKey: DefaultsKey.keepAwakeActive)"))
+        XCTAssertTrue(restoreSource.contains("defaults.set(Date().addingTimeInterval(duration), forKey: DefaultsKey.keepAwakeEndDate)"))
+        XCTAssertTrue(restoreSource.contains("defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date"))
+        XCTAssertTrue(restoreSource.contains("guard remaining > 0 else"))
+        XCTAssertTrue(restoreSource.contains("restoreKeepAwake(duration: restoreDuration, endDate: restoreEndDate)"))
+        XCTAssertTrue(restoreSource.contains("keepAwakeRestoreEndDate = endDate"))
+        XCTAssertTrue(restoreSource.contains("controller.setKeepAwake("))
+        XCTAssertTrue(controllerSource.contains("func setKeepAwake(enabled: Bool, duration: TimeInterval?, defaultDuration: KeepAwakeDuration)"))
+        XCTAssertTrue(controllerSource.contains("keepAwake.setEnabled(enabled, duration: duration)"))
+        XCTAssertTrue(controllerSource.contains("snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration)"))
+        XCTAssertFalse(views.contains("store.keepAwakeDuration ="))
+        XCTAssertTrue(views.contains("store.setKeepAwakeDuration(.indefinitely)"))
+        XCTAssertTrue(views.contains("set: { store.setKeepAwakeDuration($0) }"))
+    }
+
     func testHiddenStatefulSwitchesAreRemovedOnlyAfterSuccessfulDeactivation() throws {
         let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))

@@ -651,6 +651,7 @@ final class SwitchStore: ObservableObject {
     private var doNotDisturbExpirationWorkItem: DispatchWorkItem?
     private var scheduledFollowUpRefreshes: Set<SwitchKind> = []
     private var pendingHideAfterDeactivation: Set<SwitchKind> = []
+    private var keepAwakeRestoreEndDate: Date?
 
     private enum HidePreparationResult {
         case readyToHide
@@ -737,6 +738,9 @@ final class SwitchStore: ObservableObject {
 
         controller.onExternalChange = { [weak self] kind in
             DispatchQueue.main.async {
+                if kind == .keepAwake {
+                    self?.clearKeepAwakeRestoreState()
+                }
                 self?.refresh(kind)
             }
         }
@@ -750,6 +754,7 @@ final class SwitchStore: ObservableObject {
         }
 
         refreshVisibleAsync()
+        restoreKeepAwakeIfNeeded()
         enforceDarkModeScheduleAsync()
         scheduleDoNotDisturbExpirationMonitorFromDefaults()
         enforceDoNotDisturbExpirationAsync()
@@ -785,6 +790,16 @@ final class SwitchStore: ObservableObject {
             case .readyToHide:
                 hideKindFromDashboard(kind)
             }
+        }
+    }
+
+    func setKeepAwakeDuration(_ duration: KeepAwakeDuration) {
+        guard keepAwakeDuration != duration else { return }
+        keepAwakeDuration = duration
+        if snapshots[.keepAwake]?.isOn == true {
+            set(.keepAwake, enabled: true)
+        } else {
+            refreshAsync(.keepAwake)
         }
     }
 
@@ -1102,6 +1117,15 @@ final class SwitchStore: ObservableObject {
         actionsInProgress.remove(kind)
         if result.error == nil, kind == .doNotDisturb {
             updateDoNotDisturbExpiration(enabled: enabled)
+        }
+        if kind == .keepAwake {
+            let restoredEndDate = keepAwakeRestoreEndDate
+            keepAwakeRestoreEndDate = nil
+            persistKeepAwakeRestoreState(
+                enabled: enabled,
+                snapshot: result.snapshot,
+                restoredEndDate: restoredEndDate
+            )
         }
         var snapshot = decoratedSnapshot(result.snapshot, for: kind)
         let failureTitle = Self.operationFailureTitle(for: kind, enabled: enabled)
@@ -1475,6 +1499,81 @@ final class SwitchStore: ObservableObject {
         }
     }
 
+    private func persistKeepAwakeRestoreState(
+        enabled: Bool,
+        snapshot: SwitchSnapshot,
+        restoredEndDate: Date? = nil
+    ) {
+        guard enabled, snapshot.isOn else {
+            clearKeepAwakeRestoreState()
+            return
+        }
+
+        defaults.set(true, forKey: DefaultsKey.keepAwakeActive)
+        if let restoredEndDate {
+            defaults.set(restoredEndDate, forKey: DefaultsKey.keepAwakeEndDate)
+        } else if let duration = keepAwakeDuration.seconds {
+            defaults.set(Date().addingTimeInterval(duration), forKey: DefaultsKey.keepAwakeEndDate)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.keepAwakeEndDate)
+        }
+    }
+
+    private func clearKeepAwakeRestoreState() {
+        defaults.removeObject(forKey: DefaultsKey.keepAwakeActive)
+        defaults.removeObject(forKey: DefaultsKey.keepAwakeEndDate)
+    }
+
+    private func restoreKeepAwakeIfNeeded() {
+        guard defaults.bool(forKey: DefaultsKey.keepAwakeActive) else {
+            defaults.removeObject(forKey: DefaultsKey.keepAwakeEndDate)
+            return
+        }
+
+        let restoreDuration: TimeInterval?
+        let restoreEndDate: Date?
+        if let endDate = defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date {
+            let remaining = endDate.timeIntervalSinceNow
+            guard remaining > 0 else {
+                clearKeepAwakeRestoreState()
+                return
+            }
+            restoreDuration = remaining
+            restoreEndDate = endDate
+        } else {
+            restoreDuration = nil
+            restoreEndDate = nil
+        }
+
+        restoreKeepAwake(duration: restoreDuration, endDate: restoreEndDate)
+    }
+
+    private func restoreKeepAwake(duration: TimeInterval?, endDate: Date?) {
+        guard !isActionBusy(.keepAwake) else { return }
+        invalidatePendingSnapshot(for: .keepAwake)
+        let actionVersion = nextActionVersion(for: .keepAwake)
+        actionsInProgress.insert(.keepAwake)
+        keepAwakeRestoreEndDate = endDate
+        let defaultDuration = keepAwakeDuration
+        let controller = self.controller
+
+        actionQueue.async { [weak self] in
+            let result = controller.setKeepAwake(
+                enabled: true,
+                duration: duration,
+                defaultDuration: defaultDuration
+            )
+            DispatchQueue.main.async {
+                self?.applySetResult(
+                    result,
+                    for: .keepAwake,
+                    enabled: true,
+                    actionVersion: actionVersion
+                )
+            }
+        }
+    }
+
     private func enforceDarkModeScheduleAsync() {
         guard darkModeScheduleMode != .manual else { return }
         guard !darkModeScheduleEnforcementInFlight else { return }
@@ -1763,6 +1862,8 @@ private enum DefaultsKey {
     static let order = "switch.order"
     static let enabledKinds = "switch.enabledKinds"
     static let keepAwakeDuration = "switch.keepAwakeDuration"
+    static let keepAwakeActive = "switch.keepAwake.active"
+    static let keepAwakeEndDate = "switch.keepAwake.endDate"
     static let doNotDisturbDuration = "switch.doNotDisturb.duration"
     static let doNotDisturbEndDate = "switch.doNotDisturb.endDate"
     static let darkModeScheduleMode = "switch.darkMode.scheduleMode"
