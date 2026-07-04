@@ -41,6 +41,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             .dropFirst()
             .sink { [weak self] _ in self?.resizeVisibleDashboardKeepingTopEdge() }
             .store(in: &cancellables)
+        store.$enabledModeIDs
+            .dropFirst()
+            .sink { [weak self] _ in self?.resizeVisibleDashboardKeepingTopEdge() }
+            .store(in: &cancellables)
+        store.$activeModeSessions
+            .dropFirst()
+            .sink { [weak self] _ in self?.resizeVisibleDashboardKeepingTopEdge() }
+            .store(in: &cancellables)
         store.$lastError
             .dropFirst()
             .sink { [weak self] _ in self?.resizeVisibleDashboardKeepingTopEdge() }
@@ -386,7 +394,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private var currentDashboardSize: NSSize {
-        DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)
+        DashboardLayout.size(
+            visibleCount: store.visibleKinds.count,
+            visibleModeCount: store.visibleModes.count,
+            showsError: store.lastError != nil
+        )
     }
 
     private func dashboardOrigin(relativeTo button: NSStatusBarButton, size: NSSize) -> NSPoint {
