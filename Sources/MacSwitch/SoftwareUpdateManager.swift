@@ -150,6 +150,10 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
             setChannelSwitchTarget(target, updateVersion: nil)
             return SUAppcastItem.empty()
         }
+        guard canInstall(item) else {
+            setChannelSwitchTarget(target, updateVersion: nil)
+            return SUAppcastItem.empty()
+        }
 
         setChannelSwitchTarget(target, updateVersion: item.versionString)
         return item
@@ -234,6 +238,11 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
         return matchingItems.max { lhs, rhs in
             SUStandardVersionComparator.default.compareVersion(lhs.versionString, toVersion: rhs.versionString) == .orderedAscending
         }
+    }
+
+    private func canInstall(_ item: SUAppcastItem) -> Bool {
+        guard !bundleVersion.isEmpty else { return true }
+        return SUStandardVersionComparator.default.compareVersion(bundleVersion, toVersion: item.versionString) != .orderedDescending
     }
 }
 
