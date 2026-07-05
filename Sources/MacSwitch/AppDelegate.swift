@@ -129,11 +129,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let controller = NSHostingController(rootView: PreferencesView(store: store))
             let window = NSWindow(
                 contentRect: NSRect(origin: .zero, size: initialContentSize),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.contentViewController = controller
+            window.contentViewController = makePreferencesContentController(
+                hostingController: controller,
+                initialContentSize: initialContentSize
+            )
             window.title = "Preferences"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
@@ -227,6 +230,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         let contentSize = NSSize(width: contentWidth, height: contentHeight)
         return window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+    }
+
+    private func makePreferencesContentController(
+        hostingController: NSHostingController<PreferencesView>,
+        initialContentSize: NSSize
+    ) -> NSViewController {
+        let containerController = NSViewController()
+        let containerView = NSView(frame: NSRect(origin: .zero, size: initialContentSize))
+        containerController.view = containerView
+
+        containerController.addChild(hostingController)
+        let hostedView = hostingController.view
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(hostedView)
+
+        let topHandle = PreferencesVerticalResizeHandleView(edge: .top)
+        let bottomHandle = PreferencesVerticalResizeHandleView(edge: .bottom)
+        for handle in [topHandle, bottomHandle] {
+            handle.translatesAutoresizingMaskIntoConstraints = false
+            handle.resizeHandler = { [weak self] edge, initialFrame, deltaY in
+                self?.resizePreferencesWindowVertically(edge: edge, initialFrame: initialFrame, deltaY: deltaY)
+            }
+            containerView.addSubview(handle)
+        }
+
+        NSLayoutConstraint.activate([
+            hostedView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            topHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            topHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            topHandle.topAnchor.constraint(equalTo: containerView.topAnchor),
+            topHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness),
+            bottomHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            bottomHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            bottomHandle.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            bottomHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness)
+        ])
+
+        return containerController
+    }
+
+    private func resizePreferencesWindowVertically(
+        edge: PreferencesVerticalResizeEdge,
+        initialFrame: NSRect,
+        deltaY: CGFloat
+    ) {
+        guard let window = preferencesWindow else { return }
+        applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
+
+        let proposedHeight: CGFloat
+        switch edge {
+        case .top:
+            proposedHeight = initialFrame.height + deltaY
+        case .bottom:
+            proposedHeight = initialFrame.height - deltaY
+        }
+
+        let maximumHeight = min(
+            window.maxSize.height,
+            maximumPreferencesFrameHeight(for: window, edge: edge, initialFrame: initialFrame)
+        )
+        let targetHeight = min(max(proposedHeight, window.minSize.height), maximumHeight)
+        let targetSize = constrainedPreferencesFrameSize(
+            for: window,
+            proposedFrameSize: NSSize(width: initialFrame.width, height: targetHeight)
+        )
+        var frame = initialFrame
+        frame.size = targetSize
+        frame.origin.x = initialFrame.minX
+        if edge == .bottom {
+            frame.origin.y = initialFrame.maxY - targetSize.height
+        }
+
+        window.setFrame(frame, display: true)
+    }
+
+    private func maximumPreferencesFrameHeight(
+        for window: NSWindow,
+        edge: PreferencesVerticalResizeEdge,
+        initialFrame: NSRect
+    ) -> CGFloat {
+        guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
+            return CGFloat.greatestFiniteMagnitude
+        }
+        let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
+        switch edge {
+        case .top:
+            return max(window.minSize.height, visibleFrame.maxY - initialFrame.minY)
+        case .bottom:
+            return max(window.minSize.height, initialFrame.maxY - visibleFrame.minY)
+        }
     }
 
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
@@ -520,6 +616,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let eventPoint = buttonWindow.convertPoint(toScreen: event.locationInWindow)
         let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil)).insetBy(dx: -4, dy: -4)
         return buttonFrame.contains(eventPoint)
+    }
+}
+
+private enum PreferencesVerticalResizeEdge {
+    case top
+    case bottom
+}
+
+private final class PreferencesVerticalResizeHandleView: NSView {
+    static let handleThickness: CGFloat = 8
+
+    let edge: PreferencesVerticalResizeEdge
+    var resizeHandler: ((PreferencesVerticalResizeEdge, NSRect, CGFloat) -> Void)?
+    private var initialMouseY: CGFloat = 0
+    private var initialFrame: NSRect = .zero
+
+    init(edge: PreferencesVerticalResizeEdge) {
+        self.edge = edge
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window else { return }
+        initialMouseY = NSEvent.mouseLocation.y
+        initialFrame = window.frame
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let deltaY = NSEvent.mouseLocation.y - initialMouseY
+        resizeHandler?(edge, initialFrame, deltaY)
     }
 }
 
