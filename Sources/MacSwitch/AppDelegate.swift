@@ -237,25 +237,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hostedView.translatesAutoresizingMaskIntoConstraints = false
         containerView.addSubview(hostedView)
 
-        let topHandle = PreferencesVerticalResizeHandleView(edge: .top)
         let bottomHandle = PreferencesVerticalResizeHandleView(edge: .bottom)
-        for handle in [topHandle, bottomHandle] {
-            handle.translatesAutoresizingMaskIntoConstraints = false
-            handle.resizeHandler = { [weak self] edge, initialFrame, deltaY in
-                self?.resizePreferencesWindowVertically(edge: edge, initialFrame: initialFrame, deltaY: deltaY)
-            }
-            containerView.addSubview(handle)
+        bottomHandle.translatesAutoresizingMaskIntoConstraints = false
+        bottomHandle.resizeHandler = { [weak self] initialFrame, deltaY in
+            self?.resizePreferencesWindowFromBottom(initialFrame: initialFrame, deltaY: deltaY)
         }
+        containerView.addSubview(bottomHandle)
 
         NSLayoutConstraint.activate([
             hostedView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             hostedView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             hostedView.topAnchor.constraint(equalTo: containerView.topAnchor),
             hostedView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
-            topHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
-            topHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
-            topHandle.topAnchor.constraint(equalTo: containerView.topAnchor),
-            topHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness),
             bottomHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             bottomHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             bottomHandle.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
@@ -265,25 +258,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return containerController
     }
 
-    private func resizePreferencesWindowVertically(
-        edge: PreferencesVerticalResizeEdge,
-        initialFrame: NSRect,
-        deltaY: CGFloat
-    ) {
+    private func resizePreferencesWindowFromBottom(initialFrame: NSRect, deltaY: CGFloat) {
         guard let window = preferencesWindow else { return }
         applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
 
-        let proposedHeight: CGFloat
-        switch edge {
-        case .top:
-            proposedHeight = initialFrame.height + deltaY
-        case .bottom:
-            proposedHeight = initialFrame.height - deltaY
-        }
-
+        let proposedHeight = initialFrame.height - deltaY
         let maximumHeight = min(
             window.maxSize.height,
-            maximumPreferencesFrameHeight(for: window, edge: edge, initialFrame: initialFrame)
+            maximumPreferencesFrameHeightFromBottom(for: window, initialFrame: initialFrame)
         )
         let targetHeight = min(max(proposedHeight, window.minSize.height), maximumHeight)
         let targetSize = constrainedPreferencesFrameSize(
@@ -293,28 +275,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var frame = initialFrame
         frame.size = targetSize
         frame.origin.x = initialFrame.minX
-        if edge == .bottom {
-            frame.origin.y = initialFrame.maxY - targetSize.height
-        }
+        frame.origin.y = initialFrame.maxY - targetSize.height
 
         window.setFrame(frame, display: true)
     }
 
-    private func maximumPreferencesFrameHeight(
+    private func maximumPreferencesFrameHeightFromBottom(
         for window: NSWindow,
-        edge: PreferencesVerticalResizeEdge,
         initialFrame: NSRect
     ) -> CGFloat {
         guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
             return CGFloat.greatestFiniteMagnitude
         }
         let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
-        switch edge {
-        case .top:
-            return max(window.minSize.height, visibleFrame.maxY - initialFrame.minY)
-        case .bottom:
-            return max(window.minSize.height, initialFrame.maxY - visibleFrame.minY)
-        }
+        return max(window.minSize.height, initialFrame.maxY - visibleFrame.minY)
     }
 
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
@@ -608,15 +582,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 }
 
 private enum PreferencesVerticalResizeEdge {
-    case top
     case bottom
 }
 
 private final class PreferencesVerticalResizeHandleView: NSView {
     static let handleThickness: CGFloat = 8
+    private static let verticalResizeCursor = NSCursor(
+        image: verticalResizeCursorImage(),
+        hotSpot: NSPoint(x: 8, y: 11)
+    )
 
     let edge: PreferencesVerticalResizeEdge
-    var resizeHandler: ((PreferencesVerticalResizeEdge, NSRect, CGFloat) -> Void)?
+    var resizeHandler: ((NSRect, CGFloat) -> Void)?
     private var initialMouseY: CGFloat = 0
     private var initialFrame: NSRect = .zero
 
@@ -633,7 +610,7 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     override var acceptsFirstResponder: Bool { false }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeUpDown)
+        addCursorRect(bounds, cursor: Self.verticalResizeCursor)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -644,7 +621,45 @@ private final class PreferencesVerticalResizeHandleView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let deltaY = NSEvent.mouseLocation.y - initialMouseY
-        resizeHandler?(edge, initialFrame, deltaY)
+        resizeHandler?(initialFrame, deltaY)
+    }
+
+    private static func verticalResizeCursorImage() -> NSImage {
+        let size = NSSize(width: 16, height: 22)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        NSColor.white.setStroke()
+        let outline = NSBezierPath()
+        outline.lineWidth = 3.5
+        outline.lineCapStyle = .round
+        outline.lineJoinStyle = .round
+        drawVerticalResizeCursor(in: outline)
+        outline.stroke()
+
+        NSColor.black.setStroke()
+        let glyph = NSBezierPath()
+        glyph.lineWidth = 1.8
+        glyph.lineCapStyle = .round
+        glyph.lineJoinStyle = .round
+        drawVerticalResizeCursor(in: glyph)
+        glyph.stroke()
+
+        image.unlockFocus()
+        return image
+    }
+
+    private static func drawVerticalResizeCursor(in path: NSBezierPath) {
+        path.move(to: NSPoint(x: 8, y: 2.5))
+        path.line(to: NSPoint(x: 8, y: 19.5))
+
+        path.move(to: NSPoint(x: 4.5, y: 16))
+        path.line(to: NSPoint(x: 8, y: 19.5))
+        path.line(to: NSPoint(x: 11.5, y: 16))
+
+        path.move(to: NSPoint(x: 4.5, y: 6))
+        path.line(to: NSPoint(x: 8, y: 2.5))
+        path.line(to: NSPoint(x: 11.5, y: 6))
     }
 }
 
