@@ -18,9 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var dashboardWindow: DashboardPanel?
     private var preferencesWindow: NSWindow?
     private var preferencesLayoutMode: PreferencesLayoutMode = .compact
+    private var preferencesResizeState: PreferencesResizeState?
+    private var preferencesResizeTimer: Timer?
+    private var preferencesWindowWasMovableByBackground = true
     private var cancellables: Set<AnyCancellable> = []
     private var dashboardLocalEventMonitor: Any?
     private var dashboardGlobalEventMonitor: Any?
+
+    private struct PreferencesResizeState {
+        let initialFrame: NSRect
+        var deltaY: CGFloat
+        var appliedFrame: NSRect?
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(Self.requiresRegularActivation ? .regular : .accessory)
@@ -239,8 +248,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let bottomHandle = PreferencesVerticalResizeHandleView(edge: .bottom)
         bottomHandle.translatesAutoresizingMaskIntoConstraints = false
-        bottomHandle.resizeHandler = { [weak self] initialFrame, deltaY in
-            self?.resizePreferencesWindowFromBottom(initialFrame: initialFrame, deltaY: deltaY)
+        bottomHandle.resizeBegan = { [weak self] initialFrame in
+            self?.beginPreferencesWindowResize(initialFrame: initialFrame)
+        }
+        bottomHandle.resizeChanged = { [weak self] initialFrame, deltaY in
+            self?.queuePreferencesWindowResizeFromBottom(initialFrame: initialFrame, deltaY: deltaY)
+        }
+        bottomHandle.resizeEnded = { [weak self] in
+            self?.endPreferencesWindowResize()
         }
         containerView.addSubview(bottomHandle)
 
@@ -258,16 +273,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return containerController
     }
 
-    private func resizePreferencesWindowFromBottom(initialFrame: NSRect, deltaY: CGFloat) {
+    private func beginPreferencesWindowResize(initialFrame: NSRect) {
         guard let window = preferencesWindow else { return }
         applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
 
+        preferencesWindowWasMovableByBackground = window.isMovableByWindowBackground
+        window.isMovableByWindowBackground = false
+        window.contentView?.viewWillStartLiveResize()
+        preferencesResizeState = PreferencesResizeState(initialFrame: initialFrame, deltaY: 0, appliedFrame: nil)
+        startPreferencesResizeTimer()
+    }
+
+    private func queuePreferencesWindowResizeFromBottom(initialFrame: NSRect, deltaY: CGFloat) {
+        if preferencesResizeState == nil {
+            beginPreferencesWindowResize(initialFrame: initialFrame)
+        }
+        preferencesResizeState?.deltaY = deltaY
+    }
+
+    private func flushQueuedPreferencesResize(display: Bool = false) {
+        guard let window = preferencesWindow,
+              var state = preferencesResizeState
+        else { return }
+
+        let frame = preferencesWindowResizeFrameFromBottom(
+            for: window,
+            initialFrame: state.initialFrame,
+            deltaY: state.deltaY
+        )
+        guard state.appliedFrame != frame else { return }
+
+        state.appliedFrame = frame
+        preferencesResizeState = state
+        window.setFrame(frame, display: display)
+        if !display {
+            window.contentView?.needsLayout = true
+            window.contentView?.needsDisplay = true
+        }
+    }
+
+    private func endPreferencesWindowResize() {
+        guard preferencesResizeState != nil else { return }
+        flushQueuedPreferencesResize(display: true)
+        preferencesResizeTimer?.invalidate()
+        preferencesResizeTimer = nil
+
+        if let window = preferencesWindow {
+            window.contentView?.viewDidEndLiveResize()
+            window.isMovableByWindowBackground = preferencesWindowWasMovableByBackground
+        }
+        preferencesResizeState = nil
+    }
+
+    private func startPreferencesResizeTimer() {
+        preferencesResizeTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.flushQueuedPreferencesResize()
+        }
+        timer.tolerance = 1.0 / 240.0
+        preferencesResizeTimer = timer
+        RunLoop.main.add(timer, forMode: .default)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    private func preferencesWindowResizeFrameFromBottom(
+        for window: NSWindow,
+        initialFrame: NSRect,
+        deltaY: CGFloat
+    ) -> NSRect {
         let proposedHeight = initialFrame.height - deltaY
         let maximumHeight = min(
             window.maxSize.height,
             maximumPreferencesFrameHeightFromBottom(for: window, initialFrame: initialFrame)
         )
-        let targetHeight = min(max(proposedHeight, window.minSize.height), maximumHeight)
+        let targetHeight = pixelAligned(
+            min(max(proposedHeight, window.minSize.height), maximumHeight),
+            for: window
+        )
         let targetSize = constrainedPreferencesFrameSize(
             for: window,
             proposedFrameSize: NSSize(width: initialFrame.width, height: targetHeight)
@@ -277,7 +359,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         frame.origin.x = initialFrame.minX
         frame.origin.y = initialFrame.maxY - targetSize.height
 
-        window.setFrame(frame, display: true)
+        return frame
+    }
+
+    private func pixelAligned(_ value: CGFloat, for window: NSWindow) -> CGFloat {
+        let scale = max(window.backingScaleFactor, 1)
+        return (value * scale).rounded() / scale
     }
 
     private func maximumPreferencesFrameHeightFromBottom(
@@ -376,12 +463,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        endPreferencesWindowResize()
         store.prepareForTermination()
         removeDashboardEventMonitors()
     }
 
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === preferencesWindow {
+            endPreferencesWindowResize()
             preferencesWindow = nil
         }
     }
@@ -593,9 +682,12 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     )
 
     let edge: PreferencesVerticalResizeEdge
-    var resizeHandler: ((NSRect, CGFloat) -> Void)?
+    var resizeBegan: ((NSRect) -> Void)?
+    var resizeChanged: ((NSRect, CGFloat) -> Void)?
+    var resizeEnded: (() -> Void)?
     private var initialMouseY: CGFloat = 0
     private var initialFrame: NSRect = .zero
+    private var isDragging = false
 
     init(edge: PreferencesVerticalResizeEdge) {
         self.edge = edge
@@ -617,11 +709,22 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         guard let window else { return }
         initialMouseY = NSEvent.mouseLocation.y
         initialFrame = window.frame
+        isDragging = true
+        resizeBegan?(initialFrame)
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
         let deltaY = NSEvent.mouseLocation.y - initialMouseY
-        resizeHandler?(initialFrame, deltaY)
+        resizeChanged?(initialFrame, deltaY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        isDragging = false
+        let deltaY = NSEvent.mouseLocation.y - initialMouseY
+        resizeChanged?(initialFrame, deltaY)
+        resizeEnded?()
     }
 
     private static func verticalResizeCursorImage() -> NSImage {
