@@ -216,6 +216,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         window.maxSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: maxContentSize)).size
     }
 
+    private func constrainedPreferencesFrameSize(for window: NSWindow, proposedFrameSize: NSSize) -> NSSize {
+        let contentWidth = preferencesContentSize(for: preferencesLayoutMode).width
+        let proposedContentHeight = window.contentRect(
+            forFrameRect: NSRect(origin: .zero, size: proposedFrameSize)
+        ).height
+        let contentHeight = min(
+            max(proposedContentHeight, preferencesMinimumContentHeight),
+            preferencesMaximumContentHeight(for: window)
+        )
+        let contentSize = NSSize(width: contentWidth, height: contentHeight)
+        return window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+    }
+
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
         guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
             return CGFloat.greatestFiniteMagnitude
@@ -309,6 +322,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if notification.object as? NSWindow === preferencesWindow {
             preferencesWindow = nil
         }
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard sender === preferencesWindow else { return frameSize }
+        return constrainedPreferencesFrameSize(for: sender, proposedFrameSize: frameSize)
     }
 
     private func updateStatusIcon(_ icon: MenuBarIcon) {
