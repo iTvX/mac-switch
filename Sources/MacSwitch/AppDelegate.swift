@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private let preferencesCompactContentSize = NSSize(width: 580, height: 440)
     private let preferencesExpandedContentSize = NSSize(width: 980, height: 460)
+    private let preferencesMinimumContentHeight: CGFloat = 390
     private let store = SwitchStore()
     private let softwareUpdates = SoftwareUpdateManager.shared
     private var statusItem: NSStatusItem?
@@ -120,7 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let controller = NSHostingController(rootView: PreferencesView(store: store))
             let window = NSWindow(
                 contentRect: NSRect(origin: .zero, size: initialContentSize),
-                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
@@ -134,7 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.backgroundColor = .clear
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.minSize = NSSize(width: 540, height: 390)
+            applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
             window.setContentSize(initialContentSize)
             centerPreferencesWindow(window)
             preferencesWindow = window
@@ -157,7 +158,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func resizePreferencesWindow(layoutMode: PreferencesLayoutMode, animate: Bool) {
         guard let window = preferencesWindow else { return }
         preferencesLayoutMode = layoutMode
-        let targetContentSize = preferencesContentSize(for: layoutMode)
+        applyPreferencesResizeConstraints(to: window, layoutMode: layoutMode)
+        let baseContentSize = preferencesContentSize(for: layoutMode)
+        let currentContentHeight = window.contentView?.bounds.height ?? baseContentSize.height
+        let targetContentHeight = min(
+            max(baseContentSize.height, currentContentHeight),
+            window.contentMaxSize.height
+        )
+        let targetContentSize = NSSize(width: baseContentSize.width, height: targetContentHeight)
         let targetFrameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: targetContentSize)).size
         var frame = window.frame
         let fixedLeftEdge = frame.minX
@@ -183,6 +191,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         window.setFrame(frame, display: true, animate: animate)
+    }
+
+    private func applyPreferencesResizeConstraints(to window: NSWindow, layoutMode: PreferencesLayoutMode) {
+        let contentWidth = preferencesContentSize(for: layoutMode).width
+        let maximumContentHeight = preferencesMaximumContentHeight(for: window)
+        let minContentSize = NSSize(width: contentWidth, height: preferencesMinimumContentHeight)
+        let maxContentSize = NSSize(
+            width: contentWidth,
+            height: max(maximumContentHeight, preferencesMinimumContentHeight)
+        )
+
+        window.contentMinSize = minContentSize
+        window.contentMaxSize = maxContentSize
+        window.minSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: minContentSize)).size
+        window.maxSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: maxContentSize)).size
+    }
+
+    private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
+        guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
+            return CGFloat.greatestFiniteMagnitude
+        }
+        let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
+        return window.contentRect(forFrameRect: NSRect(origin: .zero, size: visibleFrame.size)).height
     }
 
     private func initialPreferencesLayoutMode() -> PreferencesLayoutMode {
@@ -217,6 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func keepPreferencesWindowVisible(_ window: NSWindow) {
         guard let screen = Self.preferredScreenForPreferences() else { return }
+        applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
         let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
         var frame = window.frame
         frame.size.width = min(frame.width, visibleFrame.width)
