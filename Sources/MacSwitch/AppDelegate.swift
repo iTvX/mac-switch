@@ -126,6 +126,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 defer: false
             )
             window.contentViewController = controller
+            installPreferencesHorizontalResizeSuppressors(on: window)
             window.title = "Preferences"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
@@ -219,6 +220,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         let contentSize = NSSize(width: contentWidth, height: contentHeight)
         return window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+    }
+
+    private func installPreferencesHorizontalResizeSuppressors(on window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+        let leftEdge = HorizontalResizeCursorSuppressorView()
+        let rightEdge = HorizontalResizeCursorSuppressorView()
+
+        for edge in [leftEdge, rightEdge] {
+            edge.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(edge)
+        }
+
+        NSLayoutConstraint.activate([
+            leftEdge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            leftEdge.topAnchor.constraint(equalTo: contentView.topAnchor),
+            leftEdge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            leftEdge.widthAnchor.constraint(equalToConstant: HorizontalResizeCursorSuppressorView.edgeWidth),
+            rightEdge.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            rightEdge.topAnchor.constraint(equalTo: contentView.topAnchor),
+            rightEdge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            rightEdge.widthAnchor.constraint(equalToConstant: HorizontalResizeCursorSuppressorView.edgeWidth)
+        ])
     }
 
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
@@ -508,6 +531,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let eventPoint = buttonWindow.convertPoint(toScreen: event.locationInWindow)
         let buttonFrame = buttonWindow.convertToScreen(button.convert(button.bounds, to: nil)).insetBy(dx: -4, dy: -4)
         return buttonFrame.contains(eventPoint)
+    }
+}
+
+private final class HorizontalResizeCursorSuppressorView: NSView {
+    static let edgeWidth: CGFloat = 6
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        bounds.contains(point) ? self : nil
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .arrow)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        NSCursor.arrow.set()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        NSCursor.arrow.set()
     }
 }
 
