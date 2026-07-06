@@ -18,9 +18,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var dashboardWindow: DashboardPanel?
     private var preferencesWindow: NSWindow?
     private var preferencesLayoutMode: PreferencesLayoutMode = .compact
+    private var preferencesResizeState: PreferencesResizeState?
+    private var preferencesResizeTimer: Timer?
+    private var preferencesWindowWasMovableByBackground = true
     private var cancellables: Set<AnyCancellable> = []
     private var dashboardLocalEventMonitor: Any?
     private var dashboardGlobalEventMonitor: Any?
+
+    private struct PreferencesResizeState {
+        let initialFrame: NSRect
+        var deltaY: CGFloat
+        var appliedFrame: NSRect?
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(Self.requiresRegularActivation ? .regular : .accessory)
@@ -121,12 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let controller = NSHostingController(rootView: PreferencesView(store: store))
             let window = NSWindow(
                 contentRect: NSRect(origin: .zero, size: initialContentSize),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.contentViewController = controller
-            installPreferencesHorizontalResizeSuppressors(on: window)
+            window.contentViewController = makePreferencesContentController(
+                hostingController: controller,
+                initialContentSize: initialContentSize
+            )
             window.title = "Preferences"
             window.titleVisibility = .hidden
             window.titlebarAppearsTransparent = true
@@ -222,26 +233,149 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
     }
 
-    private func installPreferencesHorizontalResizeSuppressors(on window: NSWindow) {
-        guard let contentView = window.contentView else { return }
-        let leftEdge = HorizontalResizeCursorSuppressorView()
-        let rightEdge = HorizontalResizeCursorSuppressorView()
+    private func makePreferencesContentController(
+        hostingController: NSHostingController<PreferencesView>,
+        initialContentSize: NSSize
+    ) -> NSViewController {
+        let containerController = NSViewController()
+        let containerView = NSView(frame: NSRect(origin: .zero, size: initialContentSize))
+        containerController.view = containerView
 
-        for edge in [leftEdge, rightEdge] {
-            edge.translatesAutoresizingMaskIntoConstraints = false
-            contentView.addSubview(edge)
+        containerController.addChild(hostingController)
+        let hostedView = hostingController.view
+        hostedView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(hostedView)
+
+        let bottomHandle = PreferencesVerticalResizeHandleView(edge: .bottom)
+        bottomHandle.translatesAutoresizingMaskIntoConstraints = false
+        bottomHandle.resizeBegan = { [weak self] initialFrame in
+            self?.beginPreferencesWindowResize(initialFrame: initialFrame)
         }
+        bottomHandle.resizeChanged = { [weak self] initialFrame, deltaY in
+            self?.queuePreferencesWindowResizeFromBottom(initialFrame: initialFrame, deltaY: deltaY)
+        }
+        bottomHandle.resizeEnded = { [weak self] in
+            self?.endPreferencesWindowResize()
+        }
+        containerView.addSubview(bottomHandle)
 
         NSLayoutConstraint.activate([
-            leftEdge.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            leftEdge.topAnchor.constraint(equalTo: contentView.topAnchor),
-            leftEdge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            leftEdge.widthAnchor.constraint(equalToConstant: HorizontalResizeCursorSuppressorView.edgeWidth),
-            rightEdge.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            rightEdge.topAnchor.constraint(equalTo: contentView.topAnchor),
-            rightEdge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            rightEdge.widthAnchor.constraint(equalToConstant: HorizontalResizeCursorSuppressorView.edgeWidth)
+            hostedView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            hostedView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            hostedView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            hostedView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            bottomHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            bottomHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            bottomHandle.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            bottomHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness)
         ])
+
+        return containerController
+    }
+
+    private func beginPreferencesWindowResize(initialFrame: NSRect) {
+        guard let window = preferencesWindow else { return }
+        applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
+
+        preferencesWindowWasMovableByBackground = window.isMovableByWindowBackground
+        window.isMovableByWindowBackground = false
+        window.contentView?.viewWillStartLiveResize()
+        preferencesResizeState = PreferencesResizeState(initialFrame: initialFrame, deltaY: 0, appliedFrame: nil)
+        startPreferencesResizeTimer()
+    }
+
+    private func queuePreferencesWindowResizeFromBottom(initialFrame: NSRect, deltaY: CGFloat) {
+        if preferencesResizeState == nil {
+            beginPreferencesWindowResize(initialFrame: initialFrame)
+        }
+        preferencesResizeState?.deltaY = deltaY
+    }
+
+    private func flushQueuedPreferencesResize(display: Bool = false) {
+        guard let window = preferencesWindow,
+              var state = preferencesResizeState
+        else { return }
+
+        let frame = preferencesWindowResizeFrameFromBottom(
+            for: window,
+            initialFrame: state.initialFrame,
+            deltaY: state.deltaY
+        )
+        guard state.appliedFrame != frame else { return }
+
+        state.appliedFrame = frame
+        preferencesResizeState = state
+        window.setFrame(frame, display: display)
+        if !display {
+            window.contentView?.needsLayout = true
+            window.contentView?.needsDisplay = true
+        }
+    }
+
+    private func endPreferencesWindowResize() {
+        guard preferencesResizeState != nil else { return }
+        flushQueuedPreferencesResize(display: true)
+        preferencesResizeTimer?.invalidate()
+        preferencesResizeTimer = nil
+
+        if let window = preferencesWindow {
+            window.contentView?.viewDidEndLiveResize()
+            window.isMovableByWindowBackground = preferencesWindowWasMovableByBackground
+        }
+        preferencesResizeState = nil
+    }
+
+    private func startPreferencesResizeTimer() {
+        preferencesResizeTimer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            self?.flushQueuedPreferencesResize()
+        }
+        timer.tolerance = 1.0 / 240.0
+        preferencesResizeTimer = timer
+        RunLoop.main.add(timer, forMode: .default)
+        RunLoop.main.add(timer, forMode: .eventTracking)
+    }
+
+    private func preferencesWindowResizeFrameFromBottom(
+        for window: NSWindow,
+        initialFrame: NSRect,
+        deltaY: CGFloat
+    ) -> NSRect {
+        let proposedHeight = initialFrame.height - deltaY
+        let maximumHeight = min(
+            window.maxSize.height,
+            maximumPreferencesFrameHeightFromBottom(for: window, initialFrame: initialFrame)
+        )
+        let targetHeight = pixelAligned(
+            min(max(proposedHeight, window.minSize.height), maximumHeight),
+            for: window
+        )
+        let targetSize = constrainedPreferencesFrameSize(
+            for: window,
+            proposedFrameSize: NSSize(width: initialFrame.width, height: targetHeight)
+        )
+        var frame = initialFrame
+        frame.size = targetSize
+        frame.origin.x = initialFrame.minX
+        frame.origin.y = initialFrame.maxY - targetSize.height
+
+        return frame
+    }
+
+    private func pixelAligned(_ value: CGFloat, for window: NSWindow) -> CGFloat {
+        let scale = max(window.backingScaleFactor, 1)
+        return (value * scale).rounded() / scale
+    }
+
+    private func maximumPreferencesFrameHeightFromBottom(
+        for window: NSWindow,
+        initialFrame: NSRect
+    ) -> CGFloat {
+        guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
+            return CGFloat.greatestFiniteMagnitude
+        }
+        let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
+        return max(window.minSize.height, initialFrame.maxY - visibleFrame.minY)
     }
 
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
@@ -329,12 +463,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        endPreferencesWindowResize()
         store.prepareForTermination()
         removeDashboardEventMonitors()
     }
 
     func windowWillClose(_ notification: Notification) {
         if notification.object as? NSWindow === preferencesWindow {
+            endPreferencesWindowResize()
             preferencesWindow = nil
         }
     }
@@ -534,33 +670,99 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
-private final class HorizontalResizeCursorSuppressorView: NSView {
-    static let edgeWidth: CGFloat = 6
+private enum PreferencesVerticalResizeEdge {
+    case bottom
+}
+
+private final class PreferencesVerticalResizeHandleView: NSView {
+    static let handleThickness: CGFloat = 8
+    private static let verticalResizeCursor = NSCursor(
+        image: verticalResizeCursorImage(),
+        hotSpot: NSPoint(x: 8, y: 11)
+    )
+
+    let edge: PreferencesVerticalResizeEdge
+    var resizeBegan: ((NSRect) -> Void)?
+    var resizeChanged: ((NSRect, CGFloat) -> Void)?
+    var resizeEnded: (() -> Void)?
+    private var initialMouseY: CGFloat = 0
+    private var initialFrame: NSRect = .zero
+    private var isDragging = false
+
+    init(edge: PreferencesVerticalResizeEdge) {
+        self.edge = edge
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override var acceptsFirstResponder: Bool { false }
 
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
-    }
-
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .arrow)
-    }
-
-    override func cursorUpdate(with event: NSEvent) {
-        NSCursor.arrow.set()
+        addCursorRect(bounds, cursor: Self.verticalResizeCursor)
     }
 
     override func mouseDown(with event: NSEvent) {
-        NSCursor.arrow.set()
+        guard let window else { return }
+        initialMouseY = NSEvent.mouseLocation.y
+        initialFrame = window.frame
+        isDragging = true
+        resizeBegan?(initialFrame)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        NSCursor.arrow.set()
+        guard isDragging else { return }
+        let deltaY = NSEvent.mouseLocation.y - initialMouseY
+        resizeChanged?(initialFrame, deltaY)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard isDragging else { return }
+        isDragging = false
+        let deltaY = NSEvent.mouseLocation.y - initialMouseY
+        resizeChanged?(initialFrame, deltaY)
+        resizeEnded?()
+    }
+
+    private static func verticalResizeCursorImage() -> NSImage {
+        let size = NSSize(width: 16, height: 22)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        NSColor.white.setStroke()
+        let outline = NSBezierPath()
+        outline.lineWidth = 3.5
+        outline.lineCapStyle = .round
+        outline.lineJoinStyle = .round
+        drawVerticalResizeCursor(in: outline)
+        outline.stroke()
+
+        NSColor.black.setStroke()
+        let glyph = NSBezierPath()
+        glyph.lineWidth = 1.8
+        glyph.lineCapStyle = .round
+        glyph.lineJoinStyle = .round
+        drawVerticalResizeCursor(in: glyph)
+        glyph.stroke()
+
+        image.unlockFocus()
+        return image
+    }
+
+    private static func drawVerticalResizeCursor(in path: NSBezierPath) {
+        path.move(to: NSPoint(x: 8, y: 2.5))
+        path.line(to: NSPoint(x: 8, y: 19.5))
+
+        path.move(to: NSPoint(x: 4.5, y: 16))
+        path.line(to: NSPoint(x: 8, y: 19.5))
+        path.line(to: NSPoint(x: 11.5, y: 16))
+
+        path.move(to: NSPoint(x: 4.5, y: 6))
+        path.line(to: NSPoint(x: 8, y: 2.5))
+        path.line(to: NSPoint(x: 11.5, y: 6))
     }
 }
 
