@@ -136,6 +136,8 @@ enum L10nKey: String, CaseIterable {
     case menuBar
     case menuBarIcon
     case menuBarUtility
+    case modes
+    case modesSubtitle
     case needsAccess
     case noSwitchAdded
     case off
@@ -270,6 +272,8 @@ enum L10n {
             .menuBar: "Menu Bar",
             .menuBarIcon: "Menu Bar Icon",
             .menuBarUtility: "Menu bar utility",
+            .modes: "Modes",
+            .modesSubtitle: "Create, review, and customize one-click workflows.",
             .needsAccess: "Needs Access",
             .noSwitchAdded: "No Switch Added",
             .off: "Off",
@@ -314,6 +318,8 @@ enum L10n {
             .menuBar: "菜单栏",
             .menuBarIcon: "菜单栏图标",
             .menuBarUtility: "菜单栏工具",
+            .modes: "模式",
+            .modesSubtitle: "创建、查看并自定义一键工作流。",
             .needsAccess: "需要权限",
             .noSwitchAdded: "未添加开关",
             .off: "关",
@@ -358,6 +364,8 @@ enum L10n {
             .menuBar: "選單列",
             .menuBarIcon: "選單列圖示",
             .menuBarUtility: "選單列工具",
+            .modes: "模式",
+            .modesSubtitle: "建立、查看並自訂一鍵工作流程。",
             .needsAccess: "需要權限",
             .noSwitchAdded: "尚未加入開關",
             .off: "關",
@@ -400,6 +408,8 @@ enum L10n {
             .menuBar: "Barra de menús",
             .menuBarIcon: "Icono de la barra",
             .menuBarUtility: "Utilidad de barra de menús",
+            .modes: "Modos",
+            .modesSubtitle: "Crea, revisa y personaliza flujos de trabajo con un clic.",
             .needsAccess: "Necesita acceso",
             .noSwitchAdded: "No hay interruptores",
             .off: "Desactivado",
@@ -442,6 +452,8 @@ enum L10n {
             .menuBar: "メニューバー",
             .menuBarIcon: "メニューバーアイコン",
             .menuBarUtility: "メニューバーユーティリティ",
+            .modes: "モード",
+            .modesSubtitle: "ワンクリックのワークフローを作成、確認、カスタマイズします。",
             .needsAccess: "アクセスが必要",
             .noSwitchAdded: "スイッチがありません",
             .off: "オフ",
@@ -484,6 +496,8 @@ enum L10n {
             .menuBar: "메뉴 막대",
             .menuBarIcon: "메뉴 막대 아이콘",
             .menuBarUtility: "메뉴 막대 유틸리티",
+            .modes: "모드",
+            .modesSubtitle: "원클릭 워크플로를 만들고 검토하고 사용자화합니다.",
             .needsAccess: "권한 필요",
             .noSwitchAdded: "스위치 없음",
             .off: "끔",
@@ -526,6 +540,8 @@ enum L10n {
             .menuBar: "Menüleiste",
             .menuBarIcon: "Menüleistensymbol",
             .menuBarUtility: "Menüleisten-Tool",
+            .modes: "Modi",
+            .modesSubtitle: "Erstelle, prüfe und passe Ein-Klick-Abläufe an.",
             .needsAccess: "Zugriff nötig",
             .noSwitchAdded: "Kein Schalter hinzugefügt",
             .off: "Aus",
@@ -568,6 +584,8 @@ enum L10n {
             .menuBar: "Barre de menus",
             .menuBarIcon: "Icône de la barre",
             .menuBarUtility: "Utilitaire de barre de menus",
+            .modes: "Modes",
+            .modesSubtitle: "Créez, vérifiez et personnalisez des flux en un clic.",
             .needsAccess: "Accès requis",
             .noSwitchAdded: "Aucun interrupteur ajouté",
             .off: "Désactivé",
@@ -610,6 +628,8 @@ enum L10n {
             .menuBar: "Barra dei menu",
             .menuBarIcon: "Icona nella barra menu",
             .menuBarUtility: "Utility barra dei menu",
+            .modes: "Modalità",
+            .modesSubtitle: "Crea, controlla e personalizza flussi di lavoro con un clic.",
             .needsAccess: "Accesso richiesto",
             .noSwitchAdded: "Nessun interruttore aggiunto",
             .off: "Disattivo",
@@ -652,6 +672,8 @@ enum L10n {
             .menuBar: "Barra de menus",
             .menuBarIcon: "Ícone da barra de menus",
             .menuBarUtility: "Utilitário da barra de menus",
+            .modes: "Modos",
+            .modesSubtitle: "Crie, revise e personalize fluxos de trabalho com um clique.",
             .needsAccess: "Acesso necessário",
             .noSwitchAdded: "Nenhum controle adicionado",
             .off: "Desligado",

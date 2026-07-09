@@ -73,6 +73,8 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
         }
     }
 
+    var requiresBetaChannel: (() -> Bool)?
+
     private let defaults = UserDefaults.standard
     private let bundleVersion: String
     private let channelSwitchLock = NSLock()
@@ -89,7 +91,8 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     private override init() {
         let bundleHasUpdateFeed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
         let runningFromAppBundle = Bundle.main.bundleURL.pathExtension == "app"
-        currentBuildChannel = SoftwareUpdateChannel.currentBuild
+        let detectedBuildChannel = SoftwareUpdateChannel.currentBuild
+        currentBuildChannel = detectedBuildChannel
         bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
         isAvailable = bundleHasUpdateFeed && runningFromAppBundle
         canCheckForUpdates = false
@@ -97,7 +100,7 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
         automaticallyChecksForUpdates = false
         automaticallyDownloadsUpdates = false
         let storedChannel = UserDefaults.standard.string(forKey: DefaultsKey.updateChannel)
-        updateChannel = storedChannel.flatMap(SoftwareUpdateChannel.init(rawValue:)) ?? .stable
+        updateChannel = storedChannel.flatMap(SoftwareUpdateChannel.init(rawValue:)) ?? detectedBuildChannel
 
         super.init()
 
@@ -145,6 +148,12 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     }
 
     func bestValidUpdate(in appcast: SUAppcast, for updater: SPUUpdater) -> SUAppcastItem? {
+        if requiresBetaChannel?() == true {
+            guard let item = bestItem(in: appcast.items, for: .beta), canInstall(item) else {
+                return SUAppcastItem.empty()
+            }
+            return item
+        }
         guard let target = currentChannelSwitchTarget() else { return nil }
         guard let item = bestItem(in: appcast.items, for: target) else {
             setChannelSwitchTarget(target, updateVersion: nil)
