@@ -159,11 +159,9 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
             setChannelSwitchTarget(target, updateVersion: nil)
             return SUAppcastItem.empty()
         }
-        guard canInstall(item) else {
-            setChannelSwitchTarget(target, updateVersion: nil)
-            return SUAppcastItem.empty()
-        }
 
+        // A user-requested channel switch may cross to an older or equal build.
+        // The selected item still comes from Sparkle's verified official appcast.
         setChannelSwitchTarget(target, updateVersion: item.versionString)
         return item
     }
@@ -233,7 +231,8 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
 
         guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }
         if versionA == bundleVersion, versionB == updateVersion {
-            // Channel switching can install a different package with the same CFBundleVersion.
+            // Channel switching can intentionally install a different package with an
+            // older or equal CFBundleVersion.
             // Sparkle asks whether the selected item is newer by comparing host -> item.
             return .orderedAscending
         }
