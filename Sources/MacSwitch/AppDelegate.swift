@@ -33,6 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(Self.requiresRegularActivation ? .regular : .accessory)
+        if !store.activeModeSessions.isEmpty, softwareUpdates.updateChannel != .beta {
+            softwareUpdates.updateChannel = .beta
+        }
+        softwareUpdates.requiresBetaChannel = { [weak store = self.store] in
+            guard let store else { return false }
+            return store.activeModeOperationID != nil || !store.activeModeSessions.isEmpty
+        }
         softwareUpdates.start()
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -80,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.prewarmDashboard()
         }
 
-        if Self.dashboardSmokeMode {
+        if Self.dashboardSmokeMode || Self.openDashboardOnLaunch {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 self?.showDashboardForSmokeTest()
             }
@@ -106,7 +113,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private static var requiresRegularActivation: Bool {
-        uiRegressionMode || preferencesSmokeMode || dashboardSmokeMode || openPreferencesOnLaunch || openCustomizeOnLaunch
+        uiRegressionMode || preferencesSmokeMode || dashboardSmokeMode || openPreferencesOnLaunch
+            || openCustomizeOnLaunch || openDashboardOnLaunch
     }
 
     private static var openPreferencesOnLaunch: Bool {
@@ -115,6 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private static var openCustomizeOnLaunch: Bool {
         CommandLine.arguments.contains("--open-customize")
+    }
+
+    private static var openDashboardOnLaunch: Bool {
+        CommandLine.arguments.contains("--open-dashboard")
     }
 
     @objc private func togglePopover() {

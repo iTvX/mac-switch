@@ -27,6 +27,7 @@ enum RegressionDiagnostics {
         checkDoNotDisturbShortcutStatus(&reporter)
         checkActionSafetyPreferences(&reporter)
         checkEjectDiskExclusions(&reporter)
+        checkModeSafety(&reporter)
 
         reporter.section("Default layout")
         checkDefaultVisibility(&reporter)
@@ -299,6 +300,40 @@ enum RegressionDiagnostics {
         reporter.check(
             EjectDiskPreferences.isExcluded(simulatorRuntimeURL, excludedPaths: []),
             "Eject Disk protects CoreSimulator runtime volumes by default"
+        )
+    }
+
+    private static func checkModeSafety(_ reporter: inout SelfTestReporter) {
+        let builtInItems = SwitchModeDefinition.builtIn.flatMap(\.items)
+        reporter.check(
+            builtInItems.allSatisfy { $0.kind.isModeEligible },
+            "built-in modes use reversible switches"
+        )
+        reporter.check(
+            !SwitchKind.screenClean.isModeEligible
+                && !SwitchKind.lockKeyboard.isModeEligible
+                && !SwitchKind.lowPowerMode.isModeEligible
+                && !SwitchKind.energyMode.isModeEligible,
+            "modes exclude blocking and lossy switches"
+        )
+
+        let now = Date()
+        let futureEndDate = now.addingTimeInterval(300)
+        let timedSession = ActiveSwitchModeSession(
+            modeID: .meeting,
+            originalStates: [.keepAwake: true, .doNotDisturb: true],
+            originalKeepAwakeEndDate: futureEndDate,
+            originalDoNotDisturbEndDate: futureEndDate
+        )
+        reporter.check(
+            timedSession.restorationState(for: .keepAwake, at: now) == true
+                && timedSession.restorationState(for: .doNotDisturb, at: now) == true,
+            "mode restoration preserves unexpired timed states"
+        )
+        reporter.check(
+            timedSession.restorationState(for: .keepAwake, at: futureEndDate.addingTimeInterval(1)) == false
+                && timedSession.restorationState(for: .doNotDisturb, at: futureEndDate.addingTimeInterval(1)) == false,
+            "mode restoration does not revive expired timed states"
         )
     }
 

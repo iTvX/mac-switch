@@ -480,23 +480,77 @@ private struct DashboardModesStrip: View {
     @ObservedObject var store: SwitchStore
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 6) {
                 ForEach(store.visibleModes) { mode in
                     DashboardModeButton(
                         mode: mode,
                         isActive: store.isModeActive(mode.id),
                         isBusy: store.isModeBusy(mode),
+                        isDisabled: store.isModeInteractionDisabled(mode),
                         action: {
                             store.toggleMode(mode)
                         }
                     )
                 }
             }
-            .padding(.horizontal, 2)
-            .padding(.vertical, 2)
+            .fixedSize(horizontal: true, vertical: false)
+
+            DashboardModesMenu(store: store)
         }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity)
         .frame(height: 34)
+    }
+}
+
+private struct DashboardModesMenu: View {
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        Menu {
+            ForEach(store.visibleModes) { mode in
+                Button {
+                    store.toggleMode(mode)
+                } label: {
+                    Label(
+                        mode.title,
+                        systemImage: store.isModeActive(mode.id) ? "checkmark.circle.fill" : mode.symbolName
+                    )
+                }
+                .disabled(store.isModeInteractionDisabled(mode))
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: activeMode?.symbolName ?? "square.stack.3d.up")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .frame(width: 14)
+                Text(activeMode?.compactTitle ?? store.text(.modes))
+                    .font(.system(size: 10.8, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(store.visibleModes.count)")
+                    .font(.system(size: 9.8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(activeMode == nil ? DashboardColors.subtleText : Color.accentColor)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 27)
+            .background(DashboardColors.controlFill.opacity(0.88), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Choose a mode")
+    }
+
+    private var activeMode: SwitchModeDefinition? {
+        store.visibleModes.first { store.isModeActive($0.id) }
     }
 }
 
@@ -504,23 +558,31 @@ private struct DashboardModeButton: View {
     let mode: SwitchModeDefinition
     let isActive: Bool
     let isBusy: Bool
+    let isDisabled: Bool
     let action: () -> Void
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(systemName: mode.symbolName)
-                    .font(.system(size: 10.5, weight: .bold))
-                    .frame(width: 13)
+                Group {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: mode.symbolName)
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                }
+                .frame(width: 13, height: 13)
                 Text(mode.compactTitle)
                     .font(.system(size: 10.6, weight: .bold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
             .foregroundStyle(isActive ? Color.accentColor : DashboardColors.subtleText)
-            .frame(minWidth: 58, maxWidth: 76, minHeight: 27)
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 54, maxWidth: 72, minHeight: 27)
             .background(
                 Capsule()
                     .fill(backgroundFill)
@@ -532,7 +594,7 @@ private struct DashboardModeButton: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(isBusy)
+        .disabled(isDisabled)
         .opacity(isBusy ? 0.62 : 1)
         .help(mode.subtitle)
         .onHover { isHovering = $0 }
@@ -1828,6 +1890,8 @@ struct PreferencesView: View {
                         switch tab {
                         case .general:
                             GeneralPreferencesView(store: store)
+                        case .modes:
+                            ModesPreferencesView(store: store)
                         case .customize:
                             CustomizePreferencesView(store: store)
                         case .about:
@@ -1877,13 +1941,14 @@ struct PreferencesView: View {
         NotificationCenter.default.post(
             name: .setMacSwitchPreferencesLayout,
             object: nil,
-            userInfo: ["mode": "compact"]
+            userInfo: ["mode": tab == .modes ? "detail" : "compact"]
         )
     }
 }
 
 private enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
+    case modes
     case customize
     case about
 
@@ -1892,6 +1957,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
     func title(language: AppLanguage) -> String {
         switch self {
         case .general: return L10n.text(.general, language: language)
+        case .modes: return L10n.text(.modes, language: language)
         case .customize: return L10n.text(.customize, language: language)
         case .about: return L10n.text(.about, language: language)
         }
@@ -1900,6 +1966,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
     var symbolName: String {
         switch self {
         case .general: return "gearshape"
+        case .modes: return "square.stack.3d.up"
         case .customize: return "wand.and.stars"
         case .about: return "info.circle"
         }
@@ -2105,12 +2172,20 @@ private struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String
     let scrolls: Bool
+    let contentMaxWidth: CGFloat
     let content: Content
 
-    init(title: String, subtitle: String, scrolls: Bool = true, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        subtitle: String,
+        scrolls: Bool = true,
+        contentMaxWidth: CGFloat = 560,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.scrolls = scrolls
+        self.contentMaxWidth = contentMaxWidth
         self.content = content()
     }
 
@@ -2135,7 +2210,7 @@ private struct SettingsPage<Content: View>: View {
                     content
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
-                        .frame(maxWidth: 560, alignment: .leading)
+                        .frame(maxWidth: contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -2214,12 +2289,19 @@ private struct SettingsDivider: View {
 private struct SettingsRow<Accessory: View>: View {
     let title: String
     let subtitle: String?
+    let systemImage: String?
     let accessory: Accessory
     @State private var isExpanded = false
 
-    init(title: String, subtitle: String? = nil, @ViewBuilder accessory: () -> Accessory) {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        @ViewBuilder accessory: () -> Accessory
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.systemImage = systemImage
         self.accessory = accessory()
     }
 
@@ -2238,6 +2320,14 @@ private struct SettingsRow<Accessory: View>: View {
                             .foregroundStyle(subtitle == nil ? Color.clear : .secondary)
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                             .frame(width: 10)
+
+                        if let systemImage {
+                            Image(systemName: systemImage)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(Color.accentColor)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .frame(width: 18)
+                        }
 
                         Text(title)
                             .font(.system(size: 12.6, weight: .medium))
@@ -2406,8 +2496,6 @@ private struct GeneralPreferencesView: View {
                         .frame(width: 178)
                     }
                 }
-
-                ModesSettingsSection(store: store)
 
                 SettingsGroup(store.text(.permissions), defaultExpanded: true) {
                     SettingsRow(
@@ -2601,19 +2689,28 @@ private struct GeneralPreferencesView: View {
     }
 }
 
+private struct ModesPreferencesView: View {
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        SettingsPage(
+            title: store.text(.modes),
+            subtitle: store.text(.modesSubtitle),
+            contentMaxWidth: 700
+        ) {
+            ModesSettingsSection(store: store)
+        }
+    }
+}
+
 private struct ModesSettingsSection: View {
     @ObservedObject var store: SwitchStore
     @State private var expandedCustomModeID: SwitchModeID?
 
     var body: some View {
-        SettingsGroup("Modes") {
+        SettingsGroup("Mode Library") {
             HStack(spacing: 10) {
                 SettingsPill(text: "\(store.visibleModes.count) visible", color: Color.accentColor)
-
-                Text("Create one-click workflows from your own switch combinations.")
-                    .font(.system(size: 11.6, weight: .medium))
-                    .foregroundStyle(PreferencesColors.subtleText)
-                    .lineLimit(2)
 
                 Spacer(minLength: 0)
 
@@ -2686,9 +2783,14 @@ private struct BuiltInModeSettingsRow: View {
     var body: some View {
         SettingsRow(
             title: mode.title,
-            subtitle: mode.subtitle
+            subtitle: modeDetails,
+            systemImage: mode.symbolName
         ) {
             HStack(spacing: 8) {
+                Label("\(mode.items.count)", systemImage: "switch.2")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.secondary)
+
                 SettingsPill(
                     text: store.modeStatusText(for: mode),
                     color: statusColor
@@ -2700,9 +2802,17 @@ private struct BuiltInModeSettingsRow: View {
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .disabled(store.isModeBusy(mode))
+                .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id))
+                .help(store.isModeActive(mode.id) ? "Turn this mode off before hiding it." : "Show this mode in the menu")
             }
         }
+    }
+
+    private var modeDetails: String {
+        let targets = mode.items.map { item in
+            "\(store.switchTitle(item.kind)): \(item.targetIsOn ? store.text(.on) : store.text(.off))"
+        }.joined(separator: " · ")
+        return "\(mode.subtitle)\n\(targets)"
     }
 
     private var statusColor: Color {
@@ -2720,8 +2830,9 @@ private struct CustomModeEditor: View {
     @State private var draftTitle = ""
     @State private var draftSubtitle = ""
     @State private var draftSymbolName = "slider.horizontal.3"
+    @State private var confirmsDeletion = false
 
-    private static let modeEligibleSwitches = SwitchKind.allCases.filter { !$0.isMomentaryAction }
+    private static let modeEligibleSwitches = SwitchKind.allCases.filter(\.isModeEligible)
     private static let iconChoices: [ModeIconChoice] = [
         ModeIconChoice(symbol: "slider.horizontal.3", title: "Controls"),
         ModeIconChoice(symbol: "rectangle.on.rectangle.angled", title: "Presentation"),
@@ -2765,13 +2876,11 @@ private struct CustomModeEditor: View {
                 ))
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .disabled(store.isModeBusy(mode) || mode.items.isEmpty)
+                .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id) || mode.items.isEmpty)
+                .help(store.isModeActive(mode.id) ? "Turn this mode off before hiding it." : "Show this mode in the menu")
 
                 Button(role: .destructive) {
-                    if isExpanded {
-                        isExpanded = false
-                    }
-                    store.deleteCustomMode(mode.id)
+                    confirmsDeletion = true
                 } label: {
                     Image(systemName: "trash")
                         .font(.system(size: 11.5, weight: .semibold))
@@ -2779,7 +2888,7 @@ private struct CustomModeEditor: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.secondary)
-                .disabled(store.isModeBusy(mode))
+                .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id))
                 .help("Delete mode")
 
                 Button {
@@ -2885,6 +2994,21 @@ private struct CustomModeEditor: View {
         .onChange(of: mode.id) { _, _ in
             syncDrafts()
         }
+        .confirmationDialog(
+            "Delete \"\(mode.title)\"?",
+            isPresented: $confirmsDeletion,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Mode", role: .destructive) {
+                if isExpanded {
+                    isExpanded = false
+                }
+                store.deleteCustomMode(mode.id)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This custom mode cannot be recovered.")
+        }
     }
 
     private var statusColor: Color {
@@ -2898,7 +3022,7 @@ private struct CustomModeEditor: View {
     }
 
     private var isEditable: Bool {
-        !store.isModeActive(mode.id) && !store.isModeBusy(mode)
+        !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
     }
 
     private var hasMetadataChanges: Bool {
@@ -3003,7 +3127,7 @@ private struct CustomModeSwitchTargetRow: View {
 
     private var isEditable: Bool {
         guard let mode else { return false }
-        return !store.isModeActive(mode.id) && !store.isModeBusy(mode)
+        return !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
     }
 
     private func setIncluded(_ include: Bool) {
@@ -3336,6 +3460,19 @@ private struct AboutPreferencesView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"
     }
 
+    private var updateChannelBinding: Binding<SoftwareUpdateChannel> {
+        Binding(
+            get: { softwareUpdates.updateChannel },
+            set: { newChannel in
+                guard store.activeModeOperationID == nil, store.activeModeSessions.isEmpty else {
+                    store.lastError = "Turn off the active mode before changing update channels."
+                    return
+                }
+                softwareUpdates.updateChannel = newChannel
+            }
+        )
+    }
+
     var body: some View {
         SettingsPage(
             title: store.text(.about),
@@ -3391,7 +3528,7 @@ private struct AboutPreferencesView: View {
                         title: "Update Channel",
                         subtitle: softwareUpdates.updateChannel.subtitle
                     ) {
-                        Picker("", selection: $softwareUpdates.updateChannel) {
+                        Picker("", selection: updateChannelBinding) {
                             ForEach(SoftwareUpdateChannel.allCases) { channel in
                                 Text(channel.title).tag(channel)
                             }
@@ -3399,7 +3536,8 @@ private struct AboutPreferencesView: View {
                         .labelsHidden()
                         .pickerStyle(.segmented)
                         .frame(width: 132)
-                        .disabled(!softwareUpdates.isAvailable)
+                        .disabled(!softwareUpdates.isAvailable || store.activeModeOperationID != nil || !store.activeModeSessions.isEmpty)
+                        .help(!store.activeModeSessions.isEmpty ? "Turn off the active mode before changing update channels." : "")
                     }
 
                     SettingsDivider()

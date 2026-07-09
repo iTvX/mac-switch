@@ -110,6 +110,17 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable {
         }
     }
 
+    var isModeEligible: Bool {
+        switch self {
+        case .stageManager, .hideWidgets, .muteMicrophone, .hideDesktopIcons,
+             .darkMode, .keepAwake, .doNotDisturb, .nightShift, .trueTone,
+             .showHiddenFiles, .screenResolution, .hideDock:
+            return true
+        default:
+            return false
+        }
+    }
+
     var defaultEnabled: Bool {
         switch self {
         case .stageManager, .hideDesktopIcons, .darkMode, .keepAwake,
@@ -238,10 +249,19 @@ struct SwitchModeItem: Codable, Equatable {
 struct ActiveSwitchModeSession: Codable, Equatable {
     let modeID: SwitchModeID
     private let rawOriginalStates: [String: Bool]
+    let originalKeepAwakeEndDate: Date?
+    let originalDoNotDisturbEndDate: Date?
 
-    init(modeID: SwitchModeID, originalStates: [SwitchKind: Bool]) {
+    init(
+        modeID: SwitchModeID,
+        originalStates: [SwitchKind: Bool],
+        originalKeepAwakeEndDate: Date? = nil,
+        originalDoNotDisturbEndDate: Date? = nil
+    ) {
         self.modeID = modeID
         self.rawOriginalStates = Dictionary(uniqueKeysWithValues: originalStates.map { ($0.key.rawValue, $0.value) })
+        self.originalKeepAwakeEndDate = originalKeepAwakeEndDate
+        self.originalDoNotDisturbEndDate = originalDoNotDisturbEndDate
     }
 
     var originalKinds: [SwitchKind] {
@@ -250,6 +270,34 @@ struct ActiveSwitchModeSession: Codable, Equatable {
 
     func originalState(for kind: SwitchKind) -> Bool? {
         rawOriginalStates[kind.rawValue]
+    }
+
+    func restorationState(for kind: SwitchKind, at date: Date = Date()) -> Bool? {
+        guard let originalState = originalState(for: kind) else { return nil }
+        guard originalState else { return false }
+
+        let endDate: Date?
+        switch kind {
+        case .keepAwake:
+            endDate = originalKeepAwakeEndDate
+        case .doNotDisturb:
+            endDate = originalDoNotDisturbEndDate
+        default:
+            endDate = nil
+        }
+        return endDate.map { $0 > date } ?? true
+    }
+
+    func restorationEndDate(for kind: SwitchKind, at date: Date = Date()) -> Date? {
+        guard restorationState(for: kind, at: date) == true else { return nil }
+        switch kind {
+        case .keepAwake:
+            return originalKeepAwakeEndDate
+        case .doNotDisturb:
+            return originalDoNotDisturbEndDate
+        default:
+            return nil
+        }
     }
 }
 
@@ -772,6 +820,7 @@ final class SwitchStore: ObservableObject {
     @Published var preferredCustomizeKind: SwitchKind?
     @Published private(set) var actionsInProgress: Set<SwitchKind> = []
     @Published private(set) var actionsPreparing: Set<SwitchKind> = []
+    @Published private(set) var activeModeOperationID: SwitchModeID?
     @Published private(set) var isRefreshing = false
     @Published private(set) var isUpdatingStartAtLogin = false
     @Published private(set) var startAtLoginNeedsRepair = false
@@ -796,6 +845,19 @@ final class SwitchStore: ObservableObject {
     private var scheduledFollowUpRefreshes: Set<SwitchKind> = []
     private var pendingHideAfterDeactivation: Set<SwitchKind> = []
     private var keepAwakeRestoreEndDate: Date?
+    private var modeReservedKinds: Set<SwitchKind> = []
+
+    private struct ModeStep {
+        let kind: SwitchKind
+        let targetIsOn: Bool
+        let endDate: Date?
+        let forcesIndefiniteDuration: Bool
+    }
+
+    private struct ModeStepFailure {
+        let kind: SwitchKind
+        let message: String
+    }
 
     private enum HidePreparationResult {
         case readyToHide
@@ -1086,11 +1148,11 @@ final class SwitchStore: ObservableObject {
     }
 
     var hasBusyActions: Bool {
-        !actionsInProgress.isEmpty || !actionsPreparing.isEmpty
+        !actionsInProgress.isEmpty || !actionsPreparing.isEmpty || activeModeOperationID != nil
     }
 
     private func isDirectActionBusy(_ kind: SwitchKind) -> Bool {
-        actionsInProgress.contains(kind) || actionsPreparing.contains(kind)
+        actionsInProgress.contains(kind) || actionsPreparing.contains(kind) || modeReservedKinds.contains(kind)
     }
 
     private func conflictingActionKinds(for kind: SwitchKind) -> Set<SwitchKind> {
@@ -1123,7 +1185,11 @@ final class SwitchStore: ObservableObject {
     }
 
     func isModeBusy(_ mode: SwitchModeDefinition) -> Bool {
-        mode.items.contains { isActionBusy($0.kind) }
+        activeModeOperationID == mode.id || mode.items.contains { isActionBusy($0.kind) }
+    }
+
+    func isModeInteractionDisabled(_ mode: SwitchModeDefinition) -> Bool {
+        activeModeOperationID != nil || mode.items.contains { isActionBusy($0.kind) }
     }
 
     func modeStatusText(for mode: SwitchModeDefinition) -> String {
@@ -1148,13 +1214,9 @@ final class SwitchStore: ObservableObject {
             }
             enabledModeIDs.insert(modeID)
         } else {
-            if let mode = allModes.first(where: { $0.id == modeID }),
-               isModeActive(modeID) {
-                guard !isModeBusy(mode) else {
-                    lastError = "Finish the current switch update before hiding this mode."
-                    return
-                }
-                deactivateMode(mode)
+            if isModeActive(modeID) || activeModeOperationID == modeID {
+                lastError = "Turn this mode off before hiding it from the menu."
+                return
             }
             enabledModeIDs.remove(modeID)
         }
@@ -1182,7 +1244,7 @@ final class SwitchStore: ObservableObject {
         guard mode.id.isCustom,
               let index = customModes.firstIndex(where: { $0.id == mode.id }),
               activeModeSessions[mode.id] == nil,
-              !isModeBusy(mode)
+              !isModeInteractionDisabled(mode)
         else { return }
 
         let sanitized = sanitizedCustomMode(mode)
@@ -1194,15 +1256,12 @@ final class SwitchStore: ObservableObject {
 
     func deleteCustomMode(_ modeID: SwitchModeID) {
         guard modeID.isCustom,
-              let mode = customModes.first(where: { $0.id == modeID })
+              customModes.contains(where: { $0.id == modeID })
         else { return }
 
-        if isModeActive(modeID) {
-            guard !isModeBusy(mode) else {
-                lastError = "Finish the current switch update before deleting this mode."
-                return
-            }
-            deactivateMode(mode)
+        if isModeActive(modeID) || activeModeOperationID == modeID {
+            lastError = "Turn this mode off before deleting it."
+            return
         }
 
         customModes.removeAll { $0.id == modeID }
@@ -1211,15 +1270,18 @@ final class SwitchStore: ObservableObject {
     }
 
     func toggleMode(_ mode: SwitchModeDefinition) {
-        if isModeActive(mode.id) {
-            deactivateMode(mode)
+        guard let currentMode = allModes.first(where: { $0.id == mode.id }) else { return }
+        guard activeModeOperationID == nil else { return }
+        if isModeActive(currentMode.id) {
+            deactivateMode(currentMode)
         } else {
-            activateMode(mode)
+            activateMode(currentMode)
         }
     }
 
     private func activateMode(_ mode: SwitchModeDefinition) {
-        guard !mode.items.isEmpty else {
+        let items = Self.deduplicatedModeItems(mode.items).filter { $0.kind.isModeEligible }
+        guard !items.isEmpty else {
             lastError = "Add at least one switch to \"\(mode.title)\" before starting this mode."
             return
         }
@@ -1227,56 +1289,317 @@ final class SwitchStore: ObservableObject {
             lastError = "Turn off the current mode before starting another mode."
             return
         }
-        guard !isModeBusy(mode) else {
+        guard SoftwareUpdateManager.shared.updateChannel == .beta else {
+            lastError = "Switch the update channel to Beta before starting a mode."
+            return
+        }
+        let kinds = Set(items.map(\.kind))
+        guard !kinds.contains(where: isActionBusy) else {
             lastError = "Finish the current switch update before changing modes."
             return
         }
 
-        let originalStates = Dictionary(uniqueKeysWithValues: mode.items.map { item in
-            (item.kind, snapshots[item.kind]?.isOn ?? false)
-        })
-        activeModeSessions[mode.id] = ActiveSwitchModeSession(modeID: mode.id, originalStates: originalStates)
-        clearLastErrorIfPrefixed("Mode")
+        beginModeOperation(mode.id, reserving: kinds)
+        captureFreshModeSnapshots(for: kinds) { [weak self] captured in
+            guard let self, self.activeModeOperationID == mode.id else { return }
 
-        var skippedTitles: [String] = []
-        for item in mode.items {
-            guard ensureSwitchAvailable(item.kind) else {
-                skippedTitles.append(item.kind.title)
-                continue
+            let availableItems = items.filter { captured[$0.kind]?.isAvailable == true }
+            let skipped = items.filter { captured[$0.kind]?.isAvailable != true }
+            guard !availableItems.isEmpty else {
+                self.finishModeOperation(mode.id, reservedKinds: kinds)
+                self.lastError = "Mode \"\(mode.title)\" could not start because none of its switches are available."
+                return
             }
-            guard snapshots[item.kind]?.isOn != item.targetIsOn else { continue }
-            set(item.kind, enabled: item.targetIsOn)
-        }
 
-        if !skippedTitles.isEmpty {
-            lastError = "Mode \"\(mode.title)\" skipped unavailable switches: \(skippedTitles.joined(separator: ", "))."
+            let originalStates = Dictionary(uniqueKeysWithValues: availableItems.compactMap { item -> (SwitchKind, Bool)? in
+                guard let snapshot = captured[item.kind] else { return nil }
+                return (item.kind, snapshot.isOn)
+            })
+            let session = ActiveSwitchModeSession(
+                modeID: mode.id,
+                originalStates: originalStates,
+                originalKeepAwakeEndDate: originalStates[.keepAwake] == true
+                    ? self.defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date
+                    : nil,
+                originalDoNotDisturbEndDate: originalStates[.doNotDisturb] == true
+                    ? self.defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date
+                    : nil
+            )
+            self.activeModeSessions[mode.id] = session
+            self.clearLastErrorIfPrefixed("Mode")
+
+            let steps = availableItems.compactMap { item in
+                self.activationStep(for: item, snapshot: captured[item.kind] ?? .off, session: session)
+            }
+            self.runModeSteps(steps, stopOnFailure: true) { [weak self] failures in
+                guard let self, self.activeModeOperationID == mode.id else { return }
+                guard !failures.isEmpty else {
+                    self.finishModeOperation(mode.id, reservedKinds: kinds)
+                    if !skipped.isEmpty {
+                        self.lastError = "Mode \"\(mode.title)\" skipped unavailable switches: \(skipped.map(\.kind.title).joined(separator: ", "))."
+                    }
+                    return
+                }
+
+                let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)
+                self.runModeSteps(rollback.steps, stopOnFailure: false) { [weak self] rollbackFailures in
+                    guard let self, self.activeModeOperationID == mode.id else { return }
+                    let allRollbackFailures = rollback.failures + rollbackFailures
+                    if allRollbackFailures.isEmpty {
+                        self.activeModeSessions.removeValue(forKey: mode.id)
+                        self.lastError = "Mode \"\(mode.title)\" could not start; its changes were restored. \(self.modeFailureDescription(failures))"
+                    } else {
+                        self.lastError = "Mode \"\(mode.title)\" started only partially and could not fully restore its changes. Turn it off to retry. \(self.modeFailureDescription(failures + allRollbackFailures))"
+                    }
+                    self.finishModeOperation(mode.id, reservedKinds: kinds)
+                }
+            }
         }
     }
 
     private func deactivateMode(_ mode: SwitchModeDefinition) {
         guard let session = activeModeSessions[mode.id] else { return }
-        guard !isModeBusy(mode) else {
+        let kinds = Set(session.originalKinds)
+        guard activeModeOperationID == nil,
+              !kinds.contains(where: isActionBusy)
+        else {
             lastError = "Finish the current switch update before turning off this mode."
             return
         }
 
-        activeModeSessions.removeValue(forKey: mode.id)
-        clearLastErrorIfPrefixed("Mode")
+        guard !kinds.isEmpty else {
+            activeModeSessions.removeValue(forKey: mode.id)
+            return
+        }
 
-        var skippedTitles: [String] = []
+        beginModeOperation(mode.id, reserving: kinds)
+        captureFreshModeSnapshots(for: kinds) { [weak self] captured in
+            guard let self, self.activeModeOperationID == mode.id else { return }
+            let plan = self.restorationPlan(for: session, snapshots: captured)
+            self.runModeSteps(plan.steps, stopOnFailure: false) { [weak self] operationFailures in
+                guard let self, self.activeModeOperationID == mode.id else { return }
+                let failures = plan.failures + operationFailures
+                if failures.isEmpty {
+                    self.activeModeSessions.removeValue(forKey: mode.id)
+                    self.clearLastErrorIfPrefixed("Mode")
+                    self.enforceDarkModeScheduleAsync()
+                    self.enforceDoNotDisturbExpirationAsync()
+                } else {
+                    self.lastError = "Mode \"\(mode.title)\" could not fully restore its previous state. Retry turning it off. \(self.modeFailureDescription(failures))"
+                }
+                self.finishModeOperation(mode.id, reservedKinds: kinds)
+            }
+        }
+    }
+
+    private func beginModeOperation(_ modeID: SwitchModeID, reserving kinds: Set<SwitchKind>) {
+        for kind in kinds {
+            invalidatePendingSnapshot(for: kind)
+        }
+        modeReservedKinds.formUnion(kinds)
+        activeModeOperationID = modeID
+    }
+
+    private func finishModeOperation(_ modeID: SwitchModeID, reservedKinds: Set<SwitchKind>) {
+        guard activeModeOperationID == modeID else { return }
+        modeReservedKinds.subtract(reservedKinds)
+        activeModeOperationID = nil
+        refreshAsync(kinds: Array(reservedKinds))
+    }
+
+    private func captureFreshModeSnapshots(
+        for kinds: Set<SwitchKind>,
+        completion: @escaping ([SwitchKind: SwitchSnapshot]) -> Void
+    ) {
+        let duration = keepAwakeDuration
+        let controller = self.controller
+        let mainKinds = kinds.filter(\.snapshotRequiresMainThread)
+        let backgroundKinds = kinds.filter { !$0.snapshotRequiresMainThread }
+        var captured = Dictionary(uniqueKeysWithValues: mainKinds.map { kind in
+            (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
+        })
+
+        let finish: ([SwitchKind: SwitchSnapshot]) -> Void = { [weak self] backgroundSnapshots in
+            guard let self else { return }
+            for (kind, rawSnapshot) in backgroundSnapshots {
+                captured[kind] = rawSnapshot
+            }
+            let decorated = Dictionary(uniqueKeysWithValues: captured.map { kind, snapshot in
+                (kind, self.decoratedSnapshot(snapshot, for: kind))
+            })
+            for (kind, snapshot) in decorated {
+                self.snapshots[kind] = snapshot
+            }
+            completion(decorated)
+        }
+
+        guard !backgroundKinds.isEmpty else {
+            DispatchQueue.main.async { finish([:]) }
+            return
+        }
+
+        actionQueue.async {
+            let backgroundSnapshots = Dictionary(uniqueKeysWithValues: backgroundKinds.map { kind in
+                (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
+            })
+            DispatchQueue.main.async {
+                finish(backgroundSnapshots)
+            }
+        }
+    }
+
+    private func activationStep(
+        for item: SwitchModeItem,
+        snapshot: SwitchSnapshot,
+        session: ActiveSwitchModeSession
+    ) -> ModeStep? {
+        let hadFiniteDuration: Bool
+        switch item.kind {
+        case .keepAwake:
+            hadFiniteDuration = session.originalKeepAwakeEndDate != nil
+        case .doNotDisturb:
+            hadFiniteDuration = session.originalDoNotDisturbEndDate != nil
+        default:
+            hadFiniteDuration = false
+        }
+        let replacesFiniteDuration = item.targetIsOn && hadFiniteDuration
+        guard snapshot.isOn != item.targetIsOn || replacesFiniteDuration else { return nil }
+        return ModeStep(
+            kind: item.kind,
+            targetIsOn: item.targetIsOn,
+            endDate: nil,
+            forcesIndefiniteDuration: item.targetIsOn && (item.kind == .keepAwake || item.kind == .doNotDisturb)
+        )
+    }
+
+    private func restorationPlan(
+        for session: ActiveSwitchModeSession,
+        snapshots currentSnapshots: [SwitchKind: SwitchSnapshot],
+        at date: Date = Date()
+    ) -> (steps: [ModeStep], failures: [ModeStepFailure]) {
+        var steps: [ModeStep] = []
+        var failures: [ModeStepFailure] = []
         for kind in session.originalKinds {
-            guard let originalState = session.originalState(for: kind) else { continue }
-            guard ensureSwitchAvailable(kind) else {
-                skippedTitles.append(kind.title)
+            guard let target = session.restorationState(for: kind, at: date) else { continue }
+            guard let snapshot = currentSnapshots[kind], snapshot.isAvailable else {
+                failures.append(ModeStepFailure(kind: kind, message: "unavailable"))
                 continue
             }
-            guard snapshots[kind]?.isOn != originalState else { continue }
-            set(kind, enabled: originalState)
+            let endDate = session.restorationEndDate(for: kind, at: date)
+            let restoresFiniteDuration = endDate != nil && (kind == .keepAwake || kind == .doNotDisturb)
+            guard snapshot.isOn != target || restoresFiniteDuration else { continue }
+            steps.append(ModeStep(
+                kind: kind,
+                targetIsOn: target,
+                endDate: endDate,
+                forcesIndefiniteDuration: target && endDate == nil && (kind == .keepAwake || kind == .doNotDisturb)
+            ))
+        }
+        return (steps, failures)
+    }
+
+    private func runModeSteps(
+        _ steps: [ModeStep],
+        index: Int = 0,
+        failures: [ModeStepFailure] = [],
+        stopOnFailure: Bool,
+        completion: @escaping ([ModeStepFailure]) -> Void
+    ) {
+        guard index < steps.count else {
+            completion(failures)
+            return
+        }
+        let step = steps[index]
+        performModeStep(step) { [weak self] failure in
+            guard let self else { return }
+            var updatedFailures = failures
+            if let failure {
+                updatedFailures.append(failure)
+                if stopOnFailure {
+                    completion(updatedFailures)
+                    return
+                }
+            }
+            self.runModeSteps(
+                steps,
+                index: index + 1,
+                failures: updatedFailures,
+                stopOnFailure: stopOnFailure,
+                completion: completion
+            )
+        }
+    }
+
+    private func performModeStep(_ step: ModeStep, completion: @escaping (ModeStepFailure?) -> Void) {
+        invalidatePendingSnapshot(for: step.kind)
+        let actionVersion = nextActionVersion(for: step.kind)
+        actionsInProgress.insert(step.kind)
+        if step.kind == .keepAwake, step.targetIsOn, let endDate = step.endDate {
+            keepAwakeRestoreEndDate = endDate
         }
 
-        if !skippedTitles.isEmpty {
-            lastError = "Mode \"\(mode.title)\" could not restore unavailable switches: \(skippedTitles.joined(separator: ", "))."
+        let duration = keepAwakeDuration
+        let controller = self.controller
+        let operation: () -> SwitchOperationResult = {
+            if step.kind == .keepAwake, step.targetIsOn {
+                let requestedDuration = step.endDate.map { max(1, $0.timeIntervalSinceNow) }
+                return controller.setKeepAwake(
+                    enabled: true,
+                    duration: step.forcesIndefiniteDuration ? nil : requestedDuration,
+                    defaultDuration: duration
+                )
+            }
+            return controller.set(step.kind, enabled: step.targetIsOn, keepAwakeDuration: duration)
         }
+        let finish: (SwitchOperationResult) -> Void = { [weak self] result in
+            guard let self, self.isCurrentAction(step.kind, version: actionVersion) else { return }
+            self.applySetResult(result, for: step.kind, enabled: step.targetIsOn, actionVersion: actionVersion)
+            self.applyModeDurationPersistence(for: step, result: result)
+
+            let failureMessage: String?
+            if let error = result.error {
+                failureMessage = error
+            } else if result.snapshot.isOn != step.targetIsOn {
+                failureMessage = "macOS did not reach the requested state"
+            } else {
+                failureMessage = nil
+            }
+            completion(failureMessage.map { ModeStepFailure(kind: step.kind, message: $0) })
+        }
+
+        if step.kind.operationRequiresMainThread {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.04) {
+                finish(operation())
+            }
+        } else {
+            actionQueue.async {
+                let result = operation()
+                DispatchQueue.main.async {
+                    finish(result)
+                }
+            }
+        }
+    }
+
+    private func applyModeDurationPersistence(for step: ModeStep, result: SwitchOperationResult) {
+        guard result.error == nil, result.snapshot.isOn == step.targetIsOn, step.targetIsOn else { return }
+        if step.kind == .keepAwake, step.forcesIndefiniteDuration {
+            defaults.set(true, forKey: DefaultsKey.keepAwakeActive)
+            defaults.removeObject(forKey: DefaultsKey.keepAwakeEndDate)
+        }
+        if step.kind == .doNotDisturb {
+            if let endDate = step.endDate {
+                defaults.set(endDate, forKey: DefaultsKey.doNotDisturbEndDate)
+                scheduleDoNotDisturbExpirationMonitor(for: endDate)
+            } else if step.forcesIndefiniteDuration {
+                defaults.removeObject(forKey: DefaultsKey.doNotDisturbEndDate)
+                cancelDoNotDisturbExpirationMonitor()
+            }
+        }
+    }
+
+    private func modeFailureDescription(_ failures: [ModeStepFailure]) -> String {
+        failures.map { "\($0.kind.title): \($0.message)" }.joined(separator: "; ")
     }
 
     private func uniqueCustomModeTitle() -> String {
@@ -1940,6 +2263,7 @@ final class SwitchStore: ObservableObject {
 
     private func enforceDarkModeScheduleAsync() {
         guard darkModeScheduleMode != .manual else { return }
+        guard activeModeTarget(for: .darkMode) == nil else { return }
         guard !darkModeScheduleEnforcementInFlight else { return }
 
         darkModeScheduleEnforcementInFlight = true
@@ -1957,9 +2281,12 @@ final class SwitchStore: ObservableObject {
                 self.darkModeScheduleEnforcementInFlight = false
                 guard self.darkModeScheduleMode == mode,
                       self.darkModeScheduleStart == start,
-                      self.darkModeScheduleEnd == end
+                      self.darkModeScheduleEnd == end,
+                      self.activeModeTarget(for: .darkMode) == nil
                 else {
-                    self.enforceDarkModeScheduleAsync()
+                    if self.activeModeTarget(for: .darkMode) == nil {
+                        self.enforceDarkModeScheduleAsync()
+                    }
                     return
                 }
 
@@ -1996,6 +2323,7 @@ final class SwitchStore: ObservableObject {
     }
 
     private func enforceDoNotDisturbExpirationAsync() {
+        guard activeModeTarget(for: .doNotDisturb) == nil else { return }
         guard let endDate = defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date else {
             cancelDoNotDisturbExpirationMonitor()
             return
@@ -2020,7 +2348,8 @@ final class SwitchStore: ObservableObject {
                 self.doNotDisturbExpirationEnforcementInFlight = false
                 guard let currentEndDate = self.defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date,
                       currentEndDate == endDate,
-                      Date() >= currentEndDate
+                      Date() >= currentEndDate,
+                      self.activeModeTarget(for: .doNotDisturb) == nil
                 else { return }
 
                 let decorated = self.decoratedSnapshot(snapshot, for: .doNotDisturb)
@@ -2040,6 +2369,15 @@ final class SwitchStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private func activeModeTarget(for kind: SwitchKind) -> Bool? {
+        guard let activeModeID = activeModeSessions.keys.first,
+              let session = activeModeSessions[activeModeID],
+              session.originalState(for: kind) != nil,
+              let mode = allModes.first(where: { $0.id == activeModeID })
+        else { return nil }
+        return mode.items.first(where: { $0.kind == kind })?.targetIsOn
     }
 
     private func scheduleDoNotDisturbExpirationMonitorFromDefaults() {
@@ -2218,6 +2556,7 @@ final class SwitchStore: ObservableObject {
             let hasKnownSwitches = session.originalKinds.contains { validSwitchKinds.contains($0) }
             guard hasKnownSwitches else { continue }
             loaded[session.modeID] = session
+            break
         }
         return loaded
     }
@@ -2236,7 +2575,7 @@ final class SwitchStore: ObservableObject {
         let title = mode.title.trimmingCharacters(in: .whitespacesAndNewlines)
         let subtitle = mode.subtitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let symbolName = mode.symbolName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let items = deduplicatedModeItems(mode.items).filter { !$0.kind.isMomentaryAction }
+        let items = deduplicatedModeItems(mode.items).filter { $0.kind.isModeEligible }
         return SwitchModeDefinition(
             id: mode.id,
             title: title.isEmpty ? "Custom Mode" : title,
