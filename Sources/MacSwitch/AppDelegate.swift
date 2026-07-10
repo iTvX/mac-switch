@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var dashboardGlobalEventMonitor: Any?
 
     private struct PreferencesResizeState {
+        let edge: PreferencesVerticalResizeEdge
         let initialFrame: NSRect
         var deltaY: CGFloat
         var appliedFrame: NSRect?
@@ -178,6 +179,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
         preferencesWindow?.orderFrontRegardless()
         preferencesWindow?.makeKeyAndOrderFront(nil)
+        if let window = preferencesWindow {
+            window.contentView?.layoutSubtreeIfNeeded()
+            applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
+        }
     }
 
     @objc private func resizePreferencesForLayout(_ notification: Notification) {
@@ -236,7 +241,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         window.contentMinSize = minContentSize
         window.contentMaxSize = maxContentSize
-        window.minSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: minContentSize)).size
+        var minFrameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: minContentSize)).size
+        minFrameSize.height = max(minFrameSize.height, preferencesMinimumFrameHeight(for: window))
+        window.minSize = minFrameSize
         window.maxSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: maxContentSize)).size
     }
 
@@ -250,7 +257,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             preferencesMaximumContentHeight(for: window)
         )
         let contentSize = NSSize(width: contentWidth, height: contentHeight)
-        return window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+        var frameSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: contentSize)).size
+        frameSize.height = max(frameSize.height, preferencesMinimumFrameHeight(for: window))
+        return frameSize
+    }
+
+    private func preferencesMinimumFrameHeight(for window: NSWindow) -> CGFloat {
+        let contentLayoutInset = max(window.frame.height - window.contentLayoutRect.height, 0)
+        let titlebarInset = max(window.contentView?.safeAreaInsets.top ?? 0, contentLayoutInset)
+        return preferencesMinimumContentHeight + titlebarInset
     }
 
     private func makePreferencesContentController(
@@ -266,24 +281,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         hostedView.translatesAutoresizingMaskIntoConstraints = false
         containerView.addSubview(hostedView)
 
-        let bottomHandle = PreferencesVerticalResizeHandleView(edge: .bottom)
-        bottomHandle.translatesAutoresizingMaskIntoConstraints = false
-        bottomHandle.resizeBegan = { [weak self] initialFrame in
-            self?.beginPreferencesWindowResize(initialFrame: initialFrame)
+        func makeResizeHandle(for edge: PreferencesVerticalResizeEdge) -> PreferencesVerticalResizeHandleView {
+            let handle = PreferencesVerticalResizeHandleView(edge: edge)
+            handle.translatesAutoresizingMaskIntoConstraints = false
+            handle.resizeBegan = { [weak self] initialFrame in
+                self?.beginPreferencesWindowResize(edge: edge, initialFrame: initialFrame)
+            }
+            handle.resizeChanged = { [weak self] initialFrame, deltaY in
+                self?.queuePreferencesWindowResize(edge: edge, initialFrame: initialFrame, deltaY: deltaY)
+            }
+            handle.resizeEnded = { [weak self] in
+                self?.endPreferencesWindowResize()
+            }
+            containerView.addSubview(handle)
+            return handle
         }
-        bottomHandle.resizeChanged = { [weak self] initialFrame, deltaY in
-            self?.queuePreferencesWindowResizeFromBottom(initialFrame: initialFrame, deltaY: deltaY)
-        }
-        bottomHandle.resizeEnded = { [weak self] in
-            self?.endPreferencesWindowResize()
-        }
-        containerView.addSubview(bottomHandle)
+        let topHandle = makeResizeHandle(for: .top)
+        let bottomHandle = makeResizeHandle(for: .bottom)
 
         NSLayoutConstraint.activate([
             hostedView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             hostedView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             hostedView.topAnchor.constraint(equalTo: containerView.topAnchor),
             hostedView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+            topHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            topHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            topHandle.topAnchor.constraint(equalTo: containerView.topAnchor),
+            topHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness),
             bottomHandle.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             bottomHandle.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             bottomHandle.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
@@ -293,20 +317,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return containerController
     }
 
-    private func beginPreferencesWindowResize(initialFrame: NSRect) {
+    private func beginPreferencesWindowResize(edge: PreferencesVerticalResizeEdge, initialFrame: NSRect) {
         guard let window = preferencesWindow else { return }
         applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
 
         preferencesWindowWasMovableByBackground = window.isMovableByWindowBackground
         window.isMovableByWindowBackground = false
         window.contentView?.viewWillStartLiveResize()
-        preferencesResizeState = PreferencesResizeState(initialFrame: initialFrame, deltaY: 0, appliedFrame: nil)
+        preferencesResizeState = PreferencesResizeState(
+            edge: edge,
+            initialFrame: initialFrame,
+            deltaY: 0,
+            appliedFrame: nil
+        )
         startPreferencesResizeTimer()
     }
 
-    private func queuePreferencesWindowResizeFromBottom(initialFrame: NSRect, deltaY: CGFloat) {
+    private func queuePreferencesWindowResize(
+        edge: PreferencesVerticalResizeEdge,
+        initialFrame: NSRect,
+        deltaY: CGFloat
+    ) {
+        if let state = preferencesResizeState, state.edge != edge {
+            endPreferencesWindowResize()
+        }
         if preferencesResizeState == nil {
-            beginPreferencesWindowResize(initialFrame: initialFrame)
+            beginPreferencesWindowResize(edge: edge, initialFrame: initialFrame)
         }
         preferencesResizeState?.deltaY = deltaY
     }
@@ -316,8 +352,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
               var state = preferencesResizeState
         else { return }
 
-        let frame = preferencesWindowResizeFrameFromBottom(
+        let frame = preferencesWindowResizeFrame(
             for: window,
+            edge: state.edge,
             initialFrame: state.initialFrame,
             deltaY: state.deltaY
         )
@@ -356,16 +393,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         RunLoop.main.add(timer, forMode: .eventTracking)
     }
 
-    private func preferencesWindowResizeFrameFromBottom(
+    private func preferencesWindowResizeFrame(
         for window: NSWindow,
+        edge: PreferencesVerticalResizeEdge,
         initialFrame: NSRect,
         deltaY: CGFloat
     ) -> NSRect {
-        let proposedHeight = initialFrame.height - deltaY
-        let maximumHeight = min(
-            window.maxSize.height,
-            maximumPreferencesFrameHeightFromBottom(for: window, initialFrame: initialFrame)
-        )
+        let proposedHeight = initialFrame.height + edge.heightDeltaMultiplier * deltaY
+        let maximumHeight = min(window.maxSize.height, maximumPreferencesFrameHeight(
+            for: window,
+            edge: edge,
+            initialFrame: initialFrame
+        ))
         let targetHeight = pixelAligned(
             min(max(proposedHeight, window.minSize.height), maximumHeight),
             for: window
@@ -377,7 +416,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         var frame = initialFrame
         frame.size = targetSize
         frame.origin.x = initialFrame.minX
-        frame.origin.y = initialFrame.maxY - targetSize.height
+        frame.origin.y = edge == .top
+            ? initialFrame.minY
+            : initialFrame.maxY - targetSize.height
 
         return frame
     }
@@ -387,15 +428,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return (value * scale).rounded() / scale
     }
 
-    private func maximumPreferencesFrameHeightFromBottom(
+    private func maximumPreferencesFrameHeight(
         for window: NSWindow,
+        edge: PreferencesVerticalResizeEdge,
         initialFrame: NSRect
     ) -> CGFloat {
         guard let screen = window.screen ?? Self.preferredScreenForPreferences() else {
             return CGFloat.greatestFiniteMagnitude
         }
         let visibleFrame = screen.visibleFrame.insetBy(dx: 18, dy: 18)
-        return max(window.minSize.height, initialFrame.maxY - visibleFrame.minY)
+        let availableHeight = edge == .top
+            ? visibleFrame.maxY - initialFrame.minY
+            : initialFrame.maxY - visibleFrame.minY
+        return max(window.minSize.height, availableHeight)
     }
 
     private func preferencesMaximumContentHeight(for window: NSWindow) -> CGFloat {
@@ -609,9 +654,80 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 minimumSize: preferencesContentSize(for: preferencesLayoutMode)
             )
         }
+        let resizeResult = Self.preferencesSmokeMode ? evaluatePreferencesResizeSmokeTest() : nil
         print(result.output)
+        if let resizeResult {
+            print("\n\(resizeResult.output)")
+        }
         fflush(stdout)
-        Darwin.exit(result.passed ? 0 : 1)
+        Darwin.exit(result.passed && (resizeResult?.passed ?? true) ? 0 : 1)
+    }
+
+    private func evaluatePreferencesResizeSmokeTest() -> UISmokeResult {
+        var reporter = UISmokeReporter()
+        reporter.section("Preferences Resize Smoke")
+
+        guard let window = preferencesWindow else {
+            reporter.check(false, "Preferences window is available for resize checks")
+            return UISmokeResult(passed: false, output: reporter.output)
+        }
+
+        applyPreferencesResizeConstraints(to: window, layoutMode: preferencesLayoutMode)
+        let originalFrame = window.frame
+        defer { window.setFrame(originalFrame, display: true) }
+
+        let tolerance: CGFloat = 0.5
+        let minimumHeight = window.minSize.height
+        reporter.check(minimumHeight > preferencesMinimumContentHeight, "minimum frame includes the titlebar safe area")
+
+        let topExpandedTarget = preferencesWindowResizeFrame(
+            for: window,
+            edge: .top,
+            initialFrame: originalFrame,
+            deltaY: 120
+        )
+        window.setFrame(topExpandedTarget, display: true)
+        let topExpandedFrame = window.frame
+        reporter.check(topExpandedFrame.height > originalFrame.height, "top edge expands the window upward")
+        reporter.check(abs(topExpandedFrame.minY - originalFrame.minY) <= tolerance, "top-edge resize keeps the bottom edge fixed")
+        reporter.check(abs(topExpandedFrame.width - originalFrame.width) <= tolerance, "top-edge resize keeps the width fixed")
+
+        let topMinimumTarget = preferencesWindowResizeFrame(
+            for: window,
+            edge: .top,
+            initialFrame: topExpandedFrame,
+            deltaY: -500
+        )
+        window.setFrame(topMinimumTarget, display: true)
+        let topMinimumFrame = window.frame
+        reporter.check(abs(topMinimumFrame.height - minimumHeight) <= tolerance, "top edge stops at the real minimum height")
+        reporter.check(abs(topMinimumFrame.minY - topExpandedFrame.minY) <= tolerance, "top edge cannot move the window past minimum height")
+
+        window.setFrame(originalFrame, display: true)
+        let bottomExpandedTarget = preferencesWindowResizeFrame(
+            for: window,
+            edge: .bottom,
+            initialFrame: originalFrame,
+            deltaY: -120
+        )
+        window.setFrame(bottomExpandedTarget, display: true)
+        let bottomExpandedFrame = window.frame
+        reporter.check(bottomExpandedFrame.height > originalFrame.height, "bottom edge expands the window downward")
+        reporter.check(abs(bottomExpandedFrame.maxY - originalFrame.maxY) <= tolerance, "bottom-edge resize keeps the top edge fixed")
+        reporter.check(abs(bottomExpandedFrame.width - originalFrame.width) <= tolerance, "bottom-edge resize keeps the width fixed")
+
+        let bottomMinimumTarget = preferencesWindowResizeFrame(
+            for: window,
+            edge: .bottom,
+            initialFrame: bottomExpandedFrame,
+            deltaY: 500
+        )
+        window.setFrame(bottomMinimumTarget, display: true)
+        let bottomMinimumFrame = window.frame
+        reporter.check(abs(bottomMinimumFrame.height - minimumHeight) <= tolerance, "bottom edge stops at the real minimum height")
+        reporter.check(abs(bottomMinimumFrame.maxY - bottomExpandedFrame.maxY) <= tolerance, "bottom edge cannot move the window past minimum height")
+
+        return UISmokeResult(passed: !reporter.hasFailures, output: reporter.output)
     }
 
     private var currentDashboardSize: NSSize {
@@ -695,7 +811,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 }
 
 private enum PreferencesVerticalResizeEdge {
+    case top
     case bottom
+
+    var heightDeltaMultiplier: CGFloat {
+        self == .top ? 1 : -1
+    }
+
+    @available(macOS 15.0, *)
+    var frameResizePosition: NSCursor.FrameResizePosition {
+        self == .top ? .top : .bottom
+    }
 }
 
 private final class PreferencesVerticalResizeHandleView: NSView {
@@ -722,8 +848,16 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     override var acceptsFirstResponder: Bool { false }
     override var mouseDownCanMoveWindow: Bool { false }
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .resizeUpDown)
+        addCursorRect(bounds, cursor: resizeCursor)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        resizeCursor.set()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -731,6 +865,7 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         initialMouseY = NSEvent.mouseLocation.y
         initialFrame = window.frame
         isDragging = true
+        resizeCursor.set()
         resizeBegan?(initialFrame)
     }
 
@@ -746,6 +881,13 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         let deltaY = NSEvent.mouseLocation.y - initialMouseY
         resizeChanged?(initialFrame, deltaY)
         resizeEnded?()
+    }
+
+    private var resizeCursor: NSCursor {
+        if #available(macOS 15.0, *) {
+            return .frameResize(position: edge.frameResizePosition, directions: .all)
+        }
+        return .resizeUpDown
     }
 }
 
