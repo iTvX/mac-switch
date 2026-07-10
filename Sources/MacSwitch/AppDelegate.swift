@@ -724,6 +724,7 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     }
 
     override var acceptsFirstResponder: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
 
     override func resetCursorRects() {
         addCursorRect(bounds, cursor: Self.verticalResizeCursor)
