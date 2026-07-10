@@ -736,6 +736,10 @@ final class SwitchStore: ObservableObject {
         didSet { saveEnabledModeIDs() }
     }
 
+    @Published var removedBuiltInModeIDs: Set<SwitchModeID> {
+        didSet { saveRemovedBuiltInModeIDs() }
+    }
+
     @Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession] {
         didSet { saveActiveModeSessions() }
     }
@@ -873,8 +877,16 @@ final class SwitchStore: ObservableObject {
         allModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }
     }
 
+    var builtInModes: [SwitchModeDefinition] {
+        SwitchModeDefinition.builtIn.filter { !removedBuiltInModeIDs.contains($0.id) }
+    }
+
     var allModes: [SwitchModeDefinition] {
-        SwitchModeDefinition.builtIn + customModes
+        builtInModes + customModes
+    }
+
+    var hasBuiltInModeOverrides: Bool {
+        !removedBuiltInModeIDs.isEmpty || !Set(SwitchModeID.allCases).isSubset(of: enabledModeIDs)
     }
 
     var effectiveLanguage: AppLanguage {
@@ -917,7 +929,17 @@ final class SwitchStore: ObservableObject {
         let loadedCustomModes = Self.loadCustomModes(from: defaults)
         customModes = loadedCustomModes
 
-        let loadedModeDefinitions = SwitchModeDefinition.builtIn + loadedCustomModes
+        let builtInModeIDs = Set(SwitchModeID.allCases)
+        let loadedRemovedBuiltInModeIDs = Set(
+            defaults.stringArray(forKey: DefaultsKey.removedBuiltInModeIDs)?
+                .map(SwitchModeID.init(rawValue:)) ?? []
+        ).intersection(builtInModeIDs)
+        removedBuiltInModeIDs = loadedRemovedBuiltInModeIDs
+
+        let loadedBuiltInModes = SwitchModeDefinition.builtIn.filter {
+            !loadedRemovedBuiltInModeIDs.contains($0.id)
+        }
+        let loadedModeDefinitions = loadedBuiltInModes + loadedCustomModes
         let validModeIDs = Set(loadedModeDefinitions.map(\.id))
         let modesWithSwitches = Set(loadedModeDefinitions.filter { !$0.items.isEmpty }.map(\.id))
         let storedModeIDs = defaults.stringArray(forKey: DefaultsKey.enabledModeIDs)?
@@ -925,7 +947,7 @@ final class SwitchStore: ObservableObject {
         if let storedModeIDs {
             enabledModeIDs = Set(storedModeIDs).intersection(modesWithSwitches)
         } else {
-            enabledModeIDs = Set(SwitchModeID.allCases)
+            enabledModeIDs = builtInModeIDs.subtracting(loadedRemovedBuiltInModeIDs)
         }
         activeModeSessions = Self.loadActiveModeSessions(from: defaults, validModeIDs: validModeIDs)
 
@@ -959,6 +981,8 @@ final class SwitchStore: ObservableObject {
         startAtLogin = LoginItemManager.initialIsEnabled
         saveOrder()
         saveEnabledKinds()
+        saveRemovedBuiltInModeIDs()
+        saveEnabledModeIDs()
         refreshStartAtLoginStatusAsync()
 
         for kind in SwitchKind.allCases {
@@ -1220,6 +1244,30 @@ final class SwitchStore: ObservableObject {
             }
             enabledModeIDs.remove(modeID)
         }
+    }
+
+    func deleteBuiltInMode(_ modeID: SwitchModeID) {
+        guard modeID.isBuiltIn,
+              !removedBuiltInModeIDs.contains(modeID),
+              let mode = SwitchModeDefinition.builtIn.first(where: { $0.id == modeID })
+        else { return }
+
+        if isModeActive(modeID) || activeModeOperationID == modeID {
+            lastError = "Turn this mode off before deleting it."
+            return
+        }
+        if isModeInteractionDisabled(mode) {
+            lastError = "Wait for the current mode operation to finish before deleting it."
+            return
+        }
+
+        enabledModeIDs.remove(modeID)
+        removedBuiltInModeIDs.insert(modeID)
+    }
+
+    func restoreBuiltInModes() {
+        removedBuiltInModeIDs.removeAll()
+        enabledModeIDs.formUnion(SwitchModeID.allCases)
     }
 
     @discardableResult
@@ -2162,6 +2210,11 @@ final class SwitchStore: ObservableObject {
         defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.enabledModeIDs)
     }
 
+    private func saveRemovedBuiltInModeIDs() {
+        let ordered = SwitchModeID.allCases.filter { removedBuiltInModeIDs.contains($0) }
+        defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.removedBuiltInModeIDs)
+    }
+
     private func saveActiveModeSessions() {
         let orderedSessions = allModes.map(\.id).compactMap { activeModeSessions[$0] }
         guard let data = try? JSONEncoder().encode(orderedSessions) else { return }
@@ -2628,6 +2681,7 @@ private enum DefaultsKey {
     static let appLanguage = "app.language"
     static let shortcuts = "switch.shortcuts"
     static let enabledModeIDs = "switch.modes.enabled"
+    static let removedBuiltInModeIDs = "switch.modes.removedBuiltIn"
     static let activeModeSessions = "switch.modes.activeSessions"
     static let customModes = "switch.modes.custom"
     static let customizationDefaultsVersion = "switch.customizationDefaultsVersion"

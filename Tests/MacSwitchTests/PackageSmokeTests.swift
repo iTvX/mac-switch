@@ -268,6 +268,11 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct ModesPreferencesView",
             to: "private enum AppLinks"
         )
+        let restoreBuiltInModesSource = try extract(
+            storeSource,
+            from: "func restoreBuiltInModes()",
+            to: "@discardableResult\n    func createCustomMode()"
+        )
 
         XCTAssertTrue(model.contains("struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIterable"))
         XCTAssertTrue(model.contains("static func custom() -> SwitchModeID"))
@@ -287,11 +292,19 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(modeDefinitionSource.contains(".lockScreen"))
         XCTAssertTrue(model.contains("struct ActiveSwitchModeSession: Codable, Equatable"))
         XCTAssertTrue(storeSource.contains("@Published var enabledModeIDs: Set<SwitchModeID>"))
+        XCTAssertTrue(storeSource.contains("@Published var removedBuiltInModeIDs: Set<SwitchModeID>"))
         XCTAssertTrue(storeSource.contains("@Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession]"))
         XCTAssertTrue(storeSource.contains("@Published var customModes: [SwitchModeDefinition]"))
         XCTAssertTrue(storeSource.contains("var visibleModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("var builtInModes: [SwitchModeDefinition]"))
         XCTAssertTrue(storeSource.contains("var allModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("builtInModes + customModes"))
+        XCTAssertTrue(storeSource.contains("var hasBuiltInModeOverrides: Bool"))
         XCTAssertTrue(storeSource.contains("enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil"))
+        XCTAssertTrue(storeSource.contains("func deleteBuiltInMode(_ modeID: SwitchModeID)"))
+        XCTAssertTrue(storeSource.contains("func restoreBuiltInModes()"))
+        XCTAssertTrue(storeSource.contains("removedBuiltInModeIDs.removeAll()\n        enabledModeIDs.formUnion(SwitchModeID.allCases)"))
+        XCTAssertFalse(restoreBuiltInModesSource.contains("customModes"), "restoring presets must not modify custom modes")
         XCTAssertTrue(storeSource.contains("func createCustomMode() -> SwitchModeID"))
         XCTAssertTrue(storeSource.contains("func updateCustomMode(_ mode: SwitchModeDefinition)"))
         XCTAssertTrue(storeSource.contains("func deleteCustomMode(_ modeID: SwitchModeID)"))
@@ -309,8 +322,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("originalDoNotDisturbEndDate:"))
         XCTAssertTrue(storeSource.contains("activeModeSessions.removeValue(forKey: mode.id)"))
         XCTAssertTrue(storeSource.contains("private func saveCustomModes()"))
+        XCTAssertTrue(storeSource.contains("private func saveRemovedBuiltInModeIDs()"))
         XCTAssertTrue(storeSource.contains("private func saveActiveModeSessions()"))
         XCTAssertTrue(model.contains("static let enabledModeIDs = \"switch.modes.enabled\""))
+        XCTAssertTrue(model.contains("static let removedBuiltInModeIDs = \"switch.modes.removedBuiltIn\""))
         XCTAssertTrue(model.contains("static let activeModeSessions = \"switch.modes.activeSessions\""))
         XCTAssertTrue(model.contains("static let customModes = \"switch.modes.custom\""))
         XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
@@ -319,16 +334,26 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("ViewThatFits(in: .horizontal)"))
         XCTAssertTrue(views.contains("isDisabled: store.isModeInteractionDisabled(mode)"))
         XCTAssertFalse(generalSource.contains("ModesSettingsSection(store: store)"))
-        XCTAssertTrue(modesSource.contains("SettingsGroup(\"Mode Library\")"))
-        XCTAssertTrue(modesSource.contains("private struct CustomModeEditor"))
+        XCTAssertTrue(modesSource.contains("private struct ModesLibraryPanel"))
+        XCTAssertTrue(modesSource.contains("private struct CustomModeSettingsRow"))
+        XCTAssertTrue(modesSource.contains("private struct CustomModeDetailPanel"))
+        XCTAssertFalse(modesSource.contains("private struct CustomModeEditor"))
         XCTAssertTrue(modesSource.contains("private struct CustomModeSwitchTargetRow"))
         XCTAssertTrue(modesSource.contains("store.createCustomMode()"))
         XCTAssertTrue(modesSource.contains("store.updateCustomMode(updated)"))
         XCTAssertTrue(modesSource.contains("store.deleteCustomMode(mode.id)"))
+        XCTAssertTrue(modesSource.contains("store.deleteBuiltInMode(mode.id)"))
+        XCTAssertTrue(modesSource.contains("store.restoreBuiltInModes()"))
+        XCTAssertTrue(modesSource.contains("Label(\"Restore Presets\", systemImage: \"arrow.counterclockwise\")"))
+        XCTAssertTrue(modesSource.contains("Custom modes will not be changed."))
         XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
         XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, $0)"))
         XCTAssertTrue(modesSource.contains("Turn this mode off before hiding it."))
         XCTAssertTrue(modesSource.contains("confirmationDialog("))
+        XCTAssertTrue(modesSource.contains("HStack(alignment: .top, spacing: selectedCustomMode == nil ? 0 : 10)"))
+        XCTAssertTrue(modesSource.contains("publishModesLayout(detailVisible: true)"))
+        XCTAssertTrue(modesSource.contains("publishModesLayout(detailVisible: false)"))
+        XCTAssertTrue(modesSource.contains(".transition(.move(edge: .trailing).combined(with: .opacity))"))
         XCTAssertTrue(appDelegate.contains("store.$enabledModeIDs"))
         XCTAssertTrue(appDelegate.contains("store.$activeModeSessions"))
         XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
@@ -2716,6 +2741,11 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct CustomizePreferencesView",
             to: "private struct CustomizeRow"
         )
+        let modesSource = try extract(
+            source,
+            from: "private struct ModesPreferencesView",
+            to: "private enum AppLinks"
+        )
         let switchPanelSource = try extract(
             source,
             from: "private struct SwitchPreferencePanel",
@@ -2763,14 +2793,18 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customizeSource.contains("publishCustomizeLayout(detailVisible: true)"))
         XCTAssertTrue(customizeSource.contains("publishCustomizeLayout(detailVisible: false)"))
         XCTAssertTrue(customizeSource.contains("name: .setMacSwitchPreferencesLayout"))
-        XCTAssertTrue(source.contains("userInfo: [\"mode\": tab == .modes ? \"detail\" : \"compact\"]"))
+        XCTAssertFalse(source.contains("userInfo: [\"mode\": tab == .modes ? \"detail\" : \"compact\"]"))
         XCTAssertTrue(source.contains("private func publishParentLayoutIfNeeded(for tab: PreferencesTab)"))
-        XCTAssertTrue(source.contains("guard tab != .customize else { return }"))
+        XCTAssertTrue(source.contains("guard tab != .customize, tab != .modes else { return }"))
+        XCTAssertTrue(source.contains("userInfo: [\"mode\": \"compact\"]"))
         XCTAssertFalse(source.contains("private func publishLayout(for tab: PreferencesTab)"))
         XCTAssertFalse(source.contains("? (store.preferredCustomizeKind == nil ? \"compact\" : \"detail\")"))
         XCTAssertTrue(customizeSource.contains(".onDisappear {\n            selectedKind = nil\n            publishCustomizeLayout(detailVisible: false)\n        }"))
         XCTAssertTrue(customizeSource.contains("userInfo: [\"mode\": detailVisible ? \"detail\" : \"compact\"]"))
         XCTAssertTrue(customizeSource.contains(".transition(.move(edge: .trailing).combined(with: .opacity))"))
+        XCTAssertTrue(modesSource.contains("userInfo: [\"mode\": detailVisible ? \"detail\" : \"compact\"]"))
+        XCTAssertTrue(modesSource.contains(".onDisappear {\n            selectedCustomModeID = nil\n            publishModesLayout(detailVisible: false)\n        }"))
+        XCTAssertTrue(modesSource.contains("CustomModeDetailPanel("))
         XCTAssertFalse(customizeSource.contains("@State private var selectedKind: SwitchKind = .keepAwake"))
         XCTAssertFalse(tabSource.contains("return false"), "Preferences tabs should not use disabled placeholder states")
         XCTAssertFalse(source.localizedCaseInsensitiveContains("coming soon"), "Preferences should not expose coming-soon placeholder copy")
