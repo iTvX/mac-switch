@@ -422,6 +422,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("PreferencesVerticalResizeHandleView(edge: .bottom)"))
         XCTAssertFalse(appDelegate.contains("PreferencesVerticalResizeHandleView(edge: .top)"))
         XCTAssertTrue(appDelegate.contains("static let handleThickness: CGFloat = 8"))
+        XCTAssertTrue(appDelegate.contains("override var mouseDownCanMoveWindow: Bool { false }"))
         XCTAssertTrue(appDelegate.contains("bottomHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness)"))
         XCTAssertTrue(appDelegate.contains("bottomHandle.resizeBegan = { [weak self] initialFrame in"))
         XCTAssertTrue(appDelegate.contains("bottomHandle.resizeChanged = { [weak self] initialFrame, deltaY in"))
