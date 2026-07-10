@@ -680,6 +680,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let minimumHeight = window.minSize.height
         reporter.check(minimumHeight > preferencesMinimumContentHeight, "minimum frame includes the titlebar safe area")
 
+        if let contentView = window.contentView {
+            contentView.layoutSubtreeIfNeeded()
+            let topPoint = NSPoint(
+                x: contentView.bounds.midX,
+                y: contentView.bounds.maxY - PreferencesVerticalResizeHandleView.handleThickness / 2
+            )
+            let bottomPoint = NSPoint(
+                x: contentView.bounds.midX,
+                y: contentView.bounds.minY + PreferencesVerticalResizeHandleView.handleThickness / 2
+            )
+            let topHandle = contentView.hitTest(topPoint) as? PreferencesVerticalResizeHandleView
+            let bottomHandle = contentView.hitTest(bottomPoint) as? PreferencesVerticalResizeHandleView
+            reporter.check(topHandle?.edge == .top, "top edge routes events to the resize handle")
+            reporter.check(bottomHandle?.edge == .bottom, "bottom edge routes events to the resize handle")
+
+            if let topHandle,
+               let pointerEvent = NSEvent.mouseEvent(
+                   with: .mouseMoved,
+                   location: topPoint,
+                   modifierFlags: [],
+                   timestamp: ProcessInfo.processInfo.systemUptime,
+                   windowNumber: window.windowNumber,
+                   context: nil,
+                   eventNumber: 0,
+                   clickCount: 0,
+                   pressure: 0
+               ) {
+                topHandle.mouseExited(with: pointerEvent)
+                let windowWasMovable = window.isMovable
+                topHandle.mouseEntered(with: pointerEvent)
+                reporter.check(!window.isMovable, "top edge suppresses competing titlebar movement before mouse down")
+                topHandle.mouseExited(with: pointerEvent)
+                reporter.check(window.isMovable == windowWasMovable, "top edge restores titlebar movement after exit")
+            } else {
+                reporter.check(false, "top-edge movement lifecycle is testable")
+            }
+        } else {
+            reporter.check(false, "preferences content view is available for edge checks")
+        }
+
         let topExpandedTarget = preferencesWindowResizeFrame(
             for: window,
             edge: .top,
@@ -834,6 +874,9 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     private var initialMouseY: CGFloat = 0
     private var initialFrame: NSRect = .zero
     private var isDragging = false
+    private var edgeTrackingArea: NSTrackingArea?
+    private weak var movementSuppressedWindow: NSWindow?
+    private var windowWasMovable = true
 
     init(edge: PreferencesVerticalResizeEdge) {
         self.edge = edge
@@ -856,12 +899,49 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         addCursorRect(bounds, cursor: resizeCursor)
     }
 
+    override func updateTrackingAreas() {
+        if let edgeTrackingArea {
+            removeTrackingArea(edgeTrackingArea)
+        }
+
+        if edge == .top {
+            let trackingArea = NSTrackingArea(
+                rect: .zero,
+                options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                owner: self,
+                userInfo: nil
+            )
+            addTrackingArea(trackingArea)
+            edgeTrackingArea = trackingArea
+        } else {
+            edgeTrackingArea = nil
+        }
+
+        super.updateTrackingAreas()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        restoreWindowMovement()
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        suppressWindowMovementForTopEdge()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if !isDragging {
+            restoreWindowMovement()
+        }
+    }
+
     override func cursorUpdate(with event: NSEvent) {
         resizeCursor.set()
     }
 
     override func mouseDown(with event: NSEvent) {
         guard let window else { return }
+        suppressWindowMovementForTopEdge()
         initialMouseY = NSEvent.mouseLocation.y
         initialFrame = window.frame
         isDragging = true
@@ -881,6 +961,27 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         let deltaY = NSEvent.mouseLocation.y - initialMouseY
         resizeChanged?(initialFrame, deltaY)
         resizeEnded?()
+        restoreWindowMovement()
+    }
+
+    deinit {
+        restoreWindowMovement()
+    }
+
+    private func suppressWindowMovementForTopEdge() {
+        guard edge == .top, let window else { return }
+        if movementSuppressedWindow === window { return }
+
+        restoreWindowMovement()
+        movementSuppressedWindow = window
+        windowWasMovable = window.isMovable
+        window.isMovable = false
+    }
+
+    private func restoreWindowMovement() {
+        guard let movementSuppressedWindow else { return }
+        movementSuppressedWindow.isMovable = windowWasMovable
+        self.movementSuppressedWindow = nil
     }
 
     private var resizeCursor: NSCursor {
