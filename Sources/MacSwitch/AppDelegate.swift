@@ -11,7 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private let preferencesCompactContentSize = NSSize(width: 580, height: 440)
     private let preferencesExpandedContentSize = NSSize(width: 980, height: 460)
-    private let preferencesMinimumContentHeight: CGFloat = 390
+    private let preferencesMinimumContentHeight: CGFloat = 320
     private let store = SwitchStore()
     private let softwareUpdates = SoftwareUpdateManager.shared
     private var statusItem: NSStatusItem?
@@ -700,10 +700,6 @@ private enum PreferencesVerticalResizeEdge {
 
 private final class PreferencesVerticalResizeHandleView: NSView {
     static let handleThickness: CGFloat = 8
-    private static let verticalResizeCursor = NSCursor(
-        image: verticalResizeCursorImage(),
-        hotSpot: NSPoint(x: 8, y: 11)
-    )
 
     let edge: PreferencesVerticalResizeEdge
     var resizeBegan: ((NSRect) -> Void)?
@@ -727,7 +723,7 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     override var mouseDownCanMoveWindow: Bool { false }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: Self.verticalResizeCursor)
+        addCursorRect(bounds, cursor: .resizeUpDown)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -750,44 +746,6 @@ private final class PreferencesVerticalResizeHandleView: NSView {
         let deltaY = NSEvent.mouseLocation.y - initialMouseY
         resizeChanged?(initialFrame, deltaY)
         resizeEnded?()
-    }
-
-    private static func verticalResizeCursorImage() -> NSImage {
-        let size = NSSize(width: 16, height: 22)
-        let image = NSImage(size: size)
-        image.lockFocus()
-
-        NSColor.white.setStroke()
-        let outline = NSBezierPath()
-        outline.lineWidth = 3.5
-        outline.lineCapStyle = .round
-        outline.lineJoinStyle = .round
-        drawVerticalResizeCursor(in: outline)
-        outline.stroke()
-
-        NSColor.black.setStroke()
-        let glyph = NSBezierPath()
-        glyph.lineWidth = 1.8
-        glyph.lineCapStyle = .round
-        glyph.lineJoinStyle = .round
-        drawVerticalResizeCursor(in: glyph)
-        glyph.stroke()
-
-        image.unlockFocus()
-        return image
-    }
-
-    private static func drawVerticalResizeCursor(in path: NSBezierPath) {
-        path.move(to: NSPoint(x: 8, y: 2.5))
-        path.line(to: NSPoint(x: 8, y: 19.5))
-
-        path.move(to: NSPoint(x: 4.5, y: 16))
-        path.line(to: NSPoint(x: 8, y: 19.5))
-        path.line(to: NSPoint(x: 11.5, y: 16))
-
-        path.move(to: NSPoint(x: 4.5, y: 6))
-        path.line(to: NSPoint(x: 8, y: 2.5))
-        path.line(to: NSPoint(x: 11.5, y: 6))
     }
 }
 

@@ -1912,7 +1912,7 @@ struct PreferencesView: View {
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 540, minHeight: 390)
+        .frame(minWidth: 540, minHeight: 320)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
