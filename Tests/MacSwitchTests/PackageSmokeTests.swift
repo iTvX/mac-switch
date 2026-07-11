@@ -272,6 +272,16 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct ModesPreferencesView",
             to: "private enum AppLinks"
         )
+        let builtInModeSettingsRowSource = try extract(
+            modesSource,
+            from: "private struct BuiltInModeSettingsRow",
+            to: "private struct CustomModeSettingsRow"
+        )
+        let customModeSettingsRowSource = try extract(
+            modesSource,
+            from: "private struct CustomModeSettingsRow",
+            to: "private struct CustomModeDetailPanel"
+        )
         let restoreBuiltInModesSource = try extract(
             storeSource,
             from: "func restoreBuiltInModes()",
@@ -349,7 +359,14 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(modesSource.contains("store.deleteBuiltInMode(mode.id)"))
         XCTAssertTrue(modesSource.contains("store.restoreBuiltInModes()"))
         XCTAssertTrue(modesSource.contains("Label(\"Restore Presets\", systemImage: \"arrow.counterclockwise\")"))
-        XCTAssertTrue(modesSource.contains("Custom modes will not be changed."))
+        XCTAssertFalse(builtInModeSettingsRowSource.contains("@State private var confirmsDeletion"))
+        XCTAssertFalse(builtInModeSettingsRowSource.contains("confirmationDialog("))
+        XCTAssertFalse(builtInModeSettingsRowSource.contains("Delete Preset"))
+        XCTAssertTrue(builtInModeSettingsRowSource.contains("Button(role: .destructive) {\n                store.deleteBuiltInMode(mode.id)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("@State private var confirmsDeletion = false"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("confirmationDialog("))
+        XCTAssertTrue(customModeSettingsRowSource.contains("Button(\"Delete Mode\", role: .destructive)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("This custom mode cannot be recovered."))
         XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
         XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, $0)"))
         XCTAssertTrue(modesSource.contains("Turn this mode off before hiding it."))
