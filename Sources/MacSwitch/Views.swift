@@ -2903,7 +2903,6 @@ private struct ModeLibrarySectionHeader: View {
 private struct BuiltInModeSettingsRow: View {
     let mode: SwitchModeDefinition
     @ObservedObject var store: SwitchStore
-    @State private var confirmsDeletion = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -2936,7 +2935,7 @@ private struct BuiltInModeSettingsRow: View {
             Spacer(minLength: 0)
 
             Button(role: .destructive) {
-                confirmsDeletion = true
+                store.deleteBuiltInMode(mode.id)
             } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 11.5, weight: .semibold))
@@ -2949,18 +2948,6 @@ private struct BuiltInModeSettingsRow: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
-        .confirmationDialog(
-            "Delete \"\(mode.title)\"?",
-            isPresented: $confirmsDeletion,
-            titleVisibility: .visible
-        ) {
-            Button("Delete Preset", role: .destructive) {
-                store.deleteBuiltInMode(mode.id)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("You can restore this preset later. Custom modes will not be changed.")
-        }
     }
 }
 
