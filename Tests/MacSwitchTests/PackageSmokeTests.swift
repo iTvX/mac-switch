@@ -40,6 +40,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("top edge cannot move the window past minimum height"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("bottom edge expands the window downward"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("bottom edge cannot move the window past minimum height"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status item uses the compact width"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status button matches the compact width"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Result: PASS"), result.combinedOutput)
     }
 
@@ -51,6 +53,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Dashboard window exists"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Dashboard window is onscreen"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Dashboard window size is"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status item uses the compact width"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Result: PASS"), result.combinedOutput)
     }
 
@@ -320,8 +323,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("@Published private(set) var pendingCustomModeDeletionID: SwitchModeID?"))
         XCTAssertTrue(storeSource.contains("var visibleModes: [SwitchModeDefinition]"))
         XCTAssertFalse(storeSource.contains("var builtInModes: [SwitchModeDefinition]"))
-        XCTAssertTrue(storeSource.contains("var allModes: [SwitchModeDefinition]"))
-        XCTAssertTrue(storeSource.contains("var allModes: [SwitchModeDefinition] {\n        customModes"))
+        XCTAssertFalse(storeSource.contains("var allModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("customModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }"))
         XCTAssertTrue(storeSource.contains("enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil"))
         XCTAssertTrue(storeSource.contains("private static let legacyPresetModeIDs"))
         XCTAssertTrue(storeSource.contains("legacyRemovedBuiltInModeIDsKey"))
@@ -388,12 +391,15 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(modesSource.contains("Restore Presets"))
         XCTAssertTrue(modesSource.contains("No modes yet"))
         XCTAssertTrue(modesSource.contains("Create a mode and choose the switches that fit your workflow."))
-        XCTAssertTrue(modesSource.contains("ModeLibrarySectionHeader(title: \"CUSTOM\""))
+        XCTAssertFalse(modesSource.contains("ModeLibrarySectionHeader"))
+        XCTAssertFalse(modesSource.contains("CUSTOM"))
+        XCTAssertTrue(modesSource.contains(#"\(store.visibleModes.count) in menu"#))
+        XCTAssertTrue(modesSource.contains("store.customModes.count == 1 ? \"1 mode\""))
         XCTAssertTrue(customModeSettingsRowSource.contains("@State private var confirmsDeletion = false"))
         XCTAssertTrue(customModeSettingsRowSource.contains("confirmationDialog("))
         XCTAssertTrue(customModeSettingsRowSource.contains("Turn Off & Delete"))
         XCTAssertTrue(customModeSettingsRowSource.contains("restore the switch states from before this mode was activated"))
-        XCTAssertTrue(customModeSettingsRowSource.contains("This custom mode cannot be recovered."))
+        XCTAssertTrue(customModeSettingsRowSource.contains("This mode cannot be recovered."))
         XCTAssertTrue(customModeSettingsRowSource.contains(".disabled(store.isModeInteractionDisabled(mode))"))
         XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
         XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, $0)"))
@@ -555,6 +561,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains(".sink { [weak self] icon in self?.updateStatusIcon(icon) }"))
         XCTAssertTrue(appDelegate.contains("private func updateStatusIcon(_ icon: MenuBarIcon)"))
         XCTAssertTrue(appDelegate.contains("let image = icon.templateImage()"))
+        XCTAssertTrue(appDelegate.contains("button.imageScaling = .scaleProportionallyDown"))
+        XCTAssertTrue(appDelegate.contains("button.alignment = .center"))
         XCTAssertTrue(menuBarIconSource.contains("func templateImage(size: NSSize = NSSize(width: 18, height: 18)) -> NSImage"))
         XCTAssertTrue(menuBarIconSource.contains("image.isTemplate = true"))
         XCTAssertTrue(views.contains("Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))"))
@@ -2886,8 +2894,12 @@ final class PackageSmokeTests: XCTestCase {
 
     func testStatusItemOpensDashboardOnMouseDown() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
-        XCTAssertTrue(appDelegate.contains("NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)"))
+        XCTAssertTrue(appDelegate.contains("private let statusItemWidth: CGFloat = 20"))
+        XCTAssertTrue(appDelegate.contains("NSStatusBar.system.statusItem(withLength: statusItemWidth)"))
+        XCTAssertFalse(appDelegate.contains("NSStatusItem.squareLength"))
         XCTAssertFalse(appDelegate.contains("NSStatusBar.system.statusItem(withLength: 34)"))
+        XCTAssertTrue(appDelegate.contains("private func evaluateStatusItemSmokeTest() -> UISmokeResult"))
+        XCTAssertTrue(appDelegate.contains("status button matches the compact width"))
         XCTAssertTrue(appDelegate.contains("item.button?.sendAction(on: [.leftMouseDown])"))
     }
 

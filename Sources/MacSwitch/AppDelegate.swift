@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let preferencesCompactContentSize = NSSize(width: 580, height: 440)
     private let preferencesExpandedContentSize = NSSize(width: 980, height: 460)
     private let preferencesMinimumContentHeight: CGFloat = 320
+    private let statusItemWidth: CGFloat = 20
     private let store = SwitchStore()
     private let softwareUpdates = SoftwareUpdateManager.shared
     private var statusItem: NSStatusItem?
@@ -43,7 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         softwareUpdates.start()
 
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let item = NSStatusBar.system.statusItem(withLength: statusItemWidth)
         statusItem = item
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
@@ -550,6 +551,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         let image = icon.templateImage()
         button.image = image
         button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+        button.alignment = .center
     }
 
     private func showDashboard(relativeTo button: NSStatusBarButton) {
@@ -655,12 +658,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             )
         }
         let resizeResult = Self.preferencesSmokeMode ? evaluatePreferencesResizeSmokeTest() : nil
+        let statusItemResult = evaluateStatusItemSmokeTest()
         print(result.output)
         if let resizeResult {
             print("\n\(resizeResult.output)")
         }
+        print("\n\(statusItemResult.output)")
         fflush(stdout)
-        Darwin.exit(result.passed && (resizeResult?.passed ?? true) ? 0 : 1)
+        Darwin.exit(result.passed && (resizeResult?.passed ?? true) && statusItemResult.passed ? 0 : 1)
+    }
+
+    private func evaluateStatusItemSmokeTest() -> UISmokeResult {
+        var reporter = UISmokeReporter()
+        reporter.section("Menu Bar UI Smoke")
+
+        guard let item = statusItem, let button = item.button else {
+            reporter.check(false, "menu bar status item exists")
+            return UISmokeResult(passed: false, output: reporter.output)
+        }
+
+        button.layoutSubtreeIfNeeded()
+        let tolerance: CGFloat = 0.5
+        reporter.check(abs(item.length - statusItemWidth) <= tolerance, "status item uses the compact width")
+        reporter.check(abs(button.bounds.width - statusItemWidth) <= tolerance, "status button matches the compact width")
+        reporter.check(button.image?.size == NSSize(width: 18, height: 18), "status artwork keeps its intended size")
+        reporter.check(button.imagePosition == .imageOnly, "status item renders only the icon")
+        reporter.check(button.alignment == .center, "status artwork stays centered")
+
+        return UISmokeResult(passed: !reporter.hasFailures, output: reporter.output)
     }
 
     private func evaluatePreferencesResizeSmokeTest() -> UISmokeResult {
