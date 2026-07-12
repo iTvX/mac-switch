@@ -2715,7 +2715,7 @@ private struct ModesPreferencesView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    SettingsPill(text: "\(store.visibleModes.count) visible", color: Color.accentColor)
+                    SettingsPill(text: "\(store.visibleModes.count) in menu", color: Color.accentColor)
 
                     Spacer(minLength: 0)
 
@@ -2826,7 +2826,7 @@ private struct ModesLibraryPanel: View {
                     .font(.system(size: 11.5, weight: .bold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(store.allModes.count) total")
+                Text(store.customModes.count == 1 ? "1 mode" : "\(store.customModes.count) modes")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.tertiary)
             }
@@ -2857,9 +2857,6 @@ private struct ModesLibraryPanel: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ModeLibrarySectionHeader(title: "CUSTOM", count: store.customModes.count)
-                        SettingsDivider()
-
                         ForEach(Array(store.customModes.enumerated()), id: \.element.id) { index, mode in
                             CustomModeSettingsRow(
                                 mode: mode,
@@ -2873,31 +2870,12 @@ private struct ModesLibraryPanel: View {
                             }
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .glassCard(cornerRadius: 11, fillOpacity: 0.10)
-    }
-}
-
-private struct ModeLibrarySectionHeader: View {
-    let title: String
-    let count: Int
-
-    var body: some View {
-        HStack {
-            Text(title)
-                .font(.system(size: 10.2, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("\(count)")
-                .font(.system(size: 10.2, weight: .semibold))
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 28)
-        .background(PreferencesColors.surface)
     }
 }
 
@@ -2982,7 +2960,7 @@ private struct CustomModeSettingsRow: View {
             Text(
                 store.isModeActive(mode.id)
                     ? "Mac Switch will restore the switch states from before this mode was activated, then delete it."
-                    : "This custom mode cannot be recovered."
+                    : "This mode cannot be recovered."
             )
         }
     }
@@ -2999,10 +2977,10 @@ private struct CustomModeDetailPanel: View {
     private static let modeEligibleSwitches = SwitchKind.allCases.filter(\.isModeEligible)
     private static let iconChoices: [ModeIconChoice] = [
         ModeIconChoice(symbol: "slider.horizontal.3", title: "Controls"),
-        ModeIconChoice(symbol: "rectangle.on.rectangle.angled", title: "Presentation"),
-        ModeIconChoice(symbol: "target", title: "Focus"),
-        ModeIconChoice(symbol: "person.2.wave.2", title: "Meeting"),
-        ModeIconChoice(symbol: "sparkles.rectangle.stack", title: "Clean"),
+        ModeIconChoice(symbol: "rectangle.on.rectangle.angled", title: "Windows"),
+        ModeIconChoice(symbol: "target", title: "Target"),
+        ModeIconChoice(symbol: "person.2.wave.2", title: "People"),
+        ModeIconChoice(symbol: "sparkles.rectangle.stack", title: "Stack"),
         ModeIconChoice(symbol: "moon.stars.fill", title: "Night"),
         ModeIconChoice(symbol: "display", title: "Display"),
         ModeIconChoice(symbol: "cup.and.saucer.fill", title: "Awake"),
@@ -3041,7 +3019,7 @@ private struct CustomModeDetailPanel: View {
                                 .font(.system(size: 15.5, weight: .semibold))
                                 .lineLimit(2)
                                 .minimumScaleFactor(0.86)
-                            Text("Custom mode settings")
+                            Text("Mode settings")
                                 .font(.system(size: 11.5, weight: .regular))
                                 .foregroundStyle(.secondary)
                         }

@@ -814,11 +814,7 @@ final class SwitchStore: ObservableObject {
     }
 
     var visibleModes: [SwitchModeDefinition] {
-        allModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }
-    }
-
-    var allModes: [SwitchModeDefinition] {
-        customModes
+        customModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }
     }
 
     var effectiveLanguage: AppLanguage {
@@ -1156,7 +1152,7 @@ final class SwitchStore: ObservableObject {
 
     func setModeVisible(_ modeID: SwitchModeID, _ visible: Bool) {
         if visible {
-            if let mode = allModes.first(where: { $0.id == modeID }),
+            if let mode = customModes.first(where: { $0.id == modeID }),
                mode.items.isEmpty {
                 lastError = "Add at least one switch to \"\(mode.title)\" before showing this mode."
                 return
@@ -1230,7 +1226,7 @@ final class SwitchStore: ObservableObject {
     }
 
     func toggleMode(_ mode: SwitchModeDefinition) {
-        guard let currentMode = allModes.first(where: { $0.id == mode.id }) else { return }
+        guard let currentMode = customModes.first(where: { $0.id == mode.id }) else { return }
         guard activeModeOperationID == nil else { return }
         if isModeActive(currentMode.id) {
             deactivateMode(currentMode)
@@ -2180,7 +2176,7 @@ final class SwitchStore: ObservableObject {
     }
 
     private func saveEnabledModeIDs() {
-        let ordered = allModes.map(\.id).filter { enabledModeIDs.contains($0) }
+        let ordered = customModes.map(\.id).filter { enabledModeIDs.contains($0) }
         defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.enabledModeIDs)
     }
 
@@ -2397,7 +2393,7 @@ final class SwitchStore: ObservableObject {
         guard let activeModeID = activeModeSessions.keys.first,
               let session = activeModeSessions[activeModeID],
               session.originalState(for: kind) != nil,
-              let mode = allModes.first(where: { $0.id == activeModeID })
+              let mode = customModes.first(where: { $0.id == activeModeID })
         else { return nil }
         return mode.items.first(where: { $0.kind == kind })?.targetIsOn
     }
