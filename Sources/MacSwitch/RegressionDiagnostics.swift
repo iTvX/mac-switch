@@ -3,6 +3,7 @@ import Carbon
 import CoreGraphics
 import CoreLocation
 import Foundation
+import IOBluetooth
 
 enum RegressionDiagnostics {
     static func runSafe() -> Int32 {
@@ -22,6 +23,7 @@ enum RegressionDiagnostics {
         checkLargeProcessOutput(&reporter)
         checkScreenCleanExitEvents(&reporter)
         checkSystemSettingsURLs(&reporter)
+        checkBluetoothAudioSelection(&reporter)
         checkSunScheduleDateAlignment(&reporter)
         checkShortcutValidation(&reporter)
         checkDoNotDisturbShortcutStatus(&reporter)
@@ -341,6 +343,7 @@ enum RegressionDiagnostics {
         let urls = [
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
             "x-apple.systempreferences:com.apple.Bluetooth",
             "x-apple.systempreferences:com.apple.Displays-Settings.extension",
             "x-apple.systempreferences:com.apple.Sound-Settings.extension",
@@ -354,6 +357,84 @@ enum RegressionDiagnostics {
         for url in urls {
             reporter.check(URL(string: url) != nil, "system settings URL is valid: \(url)")
         }
+    }
+
+    private static func checkBluetoothAudioSelection(_ reporter: inout SelfTestReporter) {
+        let first = BluetoothAudioDeviceOption(
+            address: "00-11-22-33-44-55",
+            name: "Desk Headphones",
+            isConnected: false,
+            isAudioReady: false,
+            isDefaultOutput: false
+        )
+        let second = BluetoothAudioDeviceOption(
+            address: "AA-BB-CC-DD-EE-FF",
+            name: "Travel Headphones",
+            isConnected: false,
+            isAudioReady: false,
+            isDefaultOutput: false
+        )
+        let connected = BluetoothAudioDeviceOption(
+            address: first.address,
+            name: first.name,
+            isConnected: true,
+            isAudioReady: true,
+            isDefaultOutput: true
+        )
+
+        reporter.check(
+            BluetoothAudioPreferences.addressesMatch(first.address, "00:11:22:33:44:55"),
+            "Bluetooth addresses match across separator formats"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [first, second],
+                lastAddress: second.address
+            ) == second.address,
+            "Bluetooth Automatic reuses the last successful device"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [connected, second],
+                lastAddress: second.address
+            ) == connected.address,
+            "Bluetooth Automatic prioritizes a connected audio output"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [first, second],
+                lastAddress: ""
+            ) == nil,
+            "Bluetooth Automatic rejects an ambiguous uninitialized target"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(in: [first], lastAddress: "") == first.address,
+            "Bluetooth Automatic accepts a single paired output"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioHeadphones),
+                name: "Headphones"
+            ),
+            "Bluetooth device filtering accepts headphones"
+        )
+        reporter.check(
+            !BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioMicrophone),
+                name: "Bluetooth Microphone"
+            ),
+            "Bluetooth device filtering rejects input-only devices"
+        )
+        reporter.check(
+            !BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioHeadphones),
+                name: "AirPods Pro - Find My"
+            ),
+            "Bluetooth device filtering rejects Find My companion records"
+        )
     }
 
     private static func checkSunScheduleDateAlignment(_ reporter: inout SelfTestReporter) {

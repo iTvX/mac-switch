@@ -21,6 +21,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Eject Disk exclusion matching works without writing preferences"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("built-in modes use reversible switches"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("mode restoration does not revive expired timed states"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth Automatic reuses the last successful device"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth Automatic rejects an ambiguous uninitialized target"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth device filtering rejects Find My companion records"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Play Music: skipped in safe self-test to avoid Automation prompts"), result.combinedOutput)
         XCTAssertFalse(result.combinedOutput.contains(NSHomeDirectory()), "safe self-test output should redact the current user's home path")
     }
@@ -1913,15 +1916,16 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(audioSource.contains("pendingDeviceRefresh"))
         XCTAssertTrue(audioSource.contains("DispatchQueue.global(qos: .utility).async"))
         XCTAssertTrue(audioSource.contains("let latestAddress = BluetoothAudioPreferences.selectedAddress"))
-        XCTAssertTrue(audioSource.contains("$0.address.caseInsensitiveCompare(normalized) == .orderedSame"))
-        XCTAssertTrue(audioSource.contains("$0.address.caseInsensitiveCompare(latestAddress) == .orderedSame"))
+        XCTAssertTrue(audioSource.contains("BluetoothAudioPreferences.addressesMatch($0.address, normalized)"))
+        XCTAssertTrue(audioSource.contains("BluetoothAudioPreferences.addressesMatch($0.address, latestAddress)"))
         XCTAssertTrue(audioSource.contains(".disabled(isRefreshingDevices || store.isActionBusy(.bluetoothAudio))"))
         XCTAssertFalse(audioSource.contains("let storedAddress = BluetoothAudioPreferences.selectedAddress"))
         XCTAssertTrue(audioSource.contains("store.refreshAsync(.bluetoothAudio)"))
         XCTAssertFalse(audioSource.contains("@State private var devices = BluetoothAudioPreferences.deviceOptions"))
         XCTAssertFalse(audioSource.contains("store.refresh(.bluetoothAudio)"))
         XCTAssertTrue(extendedSwitches.contains("private static func normalizedAddress"))
-        XCTAssertTrue(extendedSwitches.contains("$0.addressString.caseInsensitiveCompare(selected) == .orderedSame"))
+        XCTAssertTrue(extendedSwitches.contains("static func addressesMatch"))
+        XCTAssertTrue(extendedSwitches.contains("devices.first { addressesMatch($0.addressString, selected) }"))
 
         XCTAssertTrue(screenResolutionSource.contains("@State private var displays: [DisplayOption] = []"))
         XCTAssertTrue(screenResolutionSource.contains("@State private var currentResolutionText = \"Checking...\""))
@@ -2463,6 +2467,94 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(powerModeSource.contains("guard mode == 0 || availableModes(current: currentMode).contains(mode)"))
         XCTAssertTrue(powerModeSource.contains("current == mode"))
         XCTAssertTrue(powerModeSource.contains("power mode did not change"))
+    }
+
+    func testBluetoothAudioUsesDeterministicTargetsAndVerifiesAudioReadiness() throws {
+        let package = try String(contentsOf: packageRoot.appendingPathComponent("Package.swift"))
+        let extendedSwitches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let diagnostics = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/RegressionDiagnostics.swift"))
+        let preferencesSource = try extract(
+            extendedSwitches,
+            from: "enum BluetoothAudioPreferences",
+            to: "private struct BluetoothAudioOutputEndpoint"
+        )
+        let outputMonitorSource = try extract(
+            extendedSwitches,
+            from: "private struct BluetoothAudioOutputEndpoint",
+            to: "struct DisplayModeOption"
+        )
+        let audioSwitchSource = try extract(
+            extendedSwitches,
+            from: "struct BluetoothAudioSwitch",
+            to: "struct DoNotDisturbSwitch"
+        )
+        let audioPanelSource = try extract(
+            views,
+            from: "private struct BluetoothAudioPreferencesPanel",
+            to: "private struct RecoveryNotice"
+        )
+        let snapshotThreadSource = try extract(
+            model,
+            from: "var snapshotRequiresMainThread: Bool",
+            to: "var requiresFreshAvailabilityBeforeAction: Bool"
+        )
+
+        XCTAssertTrue(package.contains(".linkedFramework(\"CoreBluetooth\")"))
+        XCTAssertTrue(extendedSwitches.contains("import CoreBluetooth"))
+        XCTAssertTrue(preferencesSource.contains("static let lastConnectedAddressKey"))
+        XCTAssertTrue(preferencesSource.contains("static var authorizationMessage: String?"))
+        XCTAssertTrue(preferencesSource.contains("CBManager.authorization"))
+        XCTAssertTrue(preferencesSource.contains("static func automaticTargetAddress("))
+        XCTAssertTrue(preferencesSource.contains("return options.count == 1 ? options[0].address : nil"))
+        XCTAssertTrue(preferencesSource.contains("static func isSupportedAudioOutput"))
+        XCTAssertTrue(preferencesSource.contains("guard !normalizedName.contains(\"find my\")"))
+        XCTAssertTrue(preferencesSource.contains("kBluetoothDeviceClassMinorAudioMicrophone"))
+        XCTAssertTrue(preferencesSource.contains("fileprivate static func deviceOptions(for devices: [IOBluetoothDevice])"))
+        XCTAssertTrue(preferencesSource.contains("fileprivate static func selectedDevice(in devices: [IOBluetoothDevice])"))
+        XCTAssertFalse(preferencesSource.contains("audioDevices.first(where: { !$0.isConnected() })"))
+        XCTAssertTrue(extendedSwitches.contains("private enum BluetoothAudioExecution"))
+        XCTAssertTrue(extendedSwitches.contains("DispatchSpecificKey<UInt8>()"))
+        XCTAssertTrue(extendedSwitches.contains("com.maxyu.macswitch.bluetooth-ipc"))
+        XCTAssertTrue(extendedSwitches.contains("autoreleasepool(invoking: operation)"))
+
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDeviceTransportTypeBluetooth"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDeviceTransportTypeBluetoothLE"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDevicePropertyDeviceIsAlive) == 1"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDevicePropertyStreamConfiguration"))
+        XCTAssertTrue(outputMonitorSource.contains("static func waitForOutput"))
+        XCTAssertTrue(outputMonitorSource.contains("timeout: TimeInterval = 12"))
+        XCTAssertTrue(outputMonitorSource.contains("normalizedAddressKey($0.uid).contains(addressKey)"))
+        XCTAssertTrue(outputMonitorSource.contains("takeRetainedValue() as String"))
+        XCTAssertFalse(outputMonitorSource.contains("takeUnretainedValue() as String"))
+
+        XCTAssertTrue(audioSwitchSource.contains("let devices = BluetoothAudioPreferences.audioDevices"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioExecution.sync"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.deviceOptions(for: devices)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.selectedDevice(in: devices)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.targetDeviceForConnect(in: devices, options: options)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.rememberConnectedAddress(target.addressString)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioOutputMonitor.waitForOutput(for: target)"))
+        XCTAssertTrue(audioSwitchSource.contains("connected to Bluetooth, but its audio output is not ready"))
+        XCTAssertTrue(audioSwitchSource.contains("targetDeviceForConnect(in: devices, options: options).map { [$0] }"))
+        XCTAssertTrue(audioSwitchSource.contains("result != kIOReturnSuccess,"))
+        XCTAssertTrue(audioSwitchSource.contains("waitForDevice(device, connected: false, timeout: 2)"))
+
+        XCTAssertTrue(model.contains("private let bluetoothActionQueue = DispatchQueue"))
+        XCTAssertTrue(model.contains("let operationQueue = kind == .bluetoothAudio ? bluetoothActionQueue : actionQueue"))
+        XCTAssertTrue(model.contains("for delay in [1.2, 4.5]"))
+        XCTAssertFalse(snapshotThreadSource.contains(".bluetoothAudio"))
+
+        XCTAssertTrue(audioPanelSource.contains("@State private var bluetoothAuthorizationMessage: String?"))
+        XCTAssertTrue(audioPanelSource.contains("SystemSettingsLinks.openBluetoothPrivacy()"))
+        XCTAssertTrue(audioPanelSource.contains("Automatic (last connected)"))
+        XCTAssertTrue(audioPanelSource.contains("Automatic target:"))
+        XCTAssertTrue(audioPanelSource.contains("current output"))
+        XCTAssertTrue(switches.contains("static func openBluetoothPrivacy() -> Bool"))
+        XCTAssertTrue(diagnostics.contains("Bluetooth Automatic rejects an ambiguous uninitialized target"))
+        XCTAssertTrue(diagnostics.contains("Bluetooth device filtering rejects Find My companion records"))
     }
 
     func testMomentaryActionsExposeInProgressFeedback() throws {
