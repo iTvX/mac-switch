@@ -2720,16 +2720,6 @@ private struct ModesPreferencesView: View {
                     Spacer(minLength: 0)
 
                     Button {
-                        store.restoreBuiltInModes()
-                    } label: {
-                        Label("Restore Presets", systemImage: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(!store.hasBuiltInModeOverrides)
-                    .help("Restore the four built-in modes without changing custom modes.")
-
-                    Button {
                         openDetailPanel(for: store.createCustomMode())
                     } label: {
                         Label("Add Mode", systemImage: "plus")
@@ -2848,24 +2838,15 @@ private struct ModesLibraryPanel: View {
 
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    if !store.builtInModes.isEmpty {
-                        ModeLibrarySectionHeader(title: "PRESETS", count: store.builtInModes.count)
-                        SettingsDivider()
+                    ModeLibrarySectionHeader(title: "PRESETS", count: store.builtInModes.count)
+                    SettingsDivider()
 
-                        ForEach(Array(store.builtInModes.enumerated()), id: \.element.id) { index, mode in
-                            BuiltInModeSettingsRow(mode: mode, store: store)
+                    ForEach(Array(store.builtInModes.enumerated()), id: \.element.id) { index, mode in
+                        BuiltInModeSettingsRow(mode: mode, store: store)
 
-                            if index < store.builtInModes.count - 1 {
-                                SettingsDivider()
-                            }
+                        if index < store.builtInModes.count - 1 {
+                            SettingsDivider()
                         }
-                    } else {
-                        Label("Built-in modes removed", systemImage: "tray")
-                            .font(.system(size: 11.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 14)
-                            .frame(height: 48)
                     }
 
                     if !store.customModes.isEmpty {
@@ -2947,18 +2928,6 @@ private struct BuiltInModeSettingsRow: View {
             }
 
             Spacer(minLength: 0)
-
-            Button(role: .destructive) {
-                store.deleteBuiltInMode(mode.id)
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id))
-            .help("Delete built-in mode")
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
@@ -3022,8 +2991,8 @@ private struct CustomModeSettingsRow: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
-            .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id))
-            .help("Delete mode")
+            .disabled(store.isModeInteractionDisabled(mode))
+            .help(store.isModeActive(mode.id) ? "Restore its previous states, then delete this mode" : "Delete mode")
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
@@ -3038,12 +3007,16 @@ private struct CustomModeSettingsRow: View {
             isPresented: $confirmsDeletion,
             titleVisibility: .visible
         ) {
-            Button("Delete Mode", role: .destructive) {
+            Button(store.isModeActive(mode.id) ? "Turn Off & Delete" : "Delete Mode", role: .destructive) {
                 store.deleteCustomMode(mode.id)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This custom mode cannot be recovered.")
+            Text(
+                store.isModeActive(mode.id)
+                    ? "Mac Switch will restore the switch states from before this mode was activated, then delete it."
+                    : "This custom mode cannot be recovered."
+            )
         }
     }
 }

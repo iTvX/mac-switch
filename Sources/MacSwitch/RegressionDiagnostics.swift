@@ -337,6 +337,24 @@ enum RegressionDiagnostics {
                 && timedSession.restorationState(for: .doNotDisturb, at: futureEndDate.addingTimeInterval(1)) == false,
             "mode restoration does not revive expired timed states"
         )
+
+        let customModeID = SwitchModeID(rawValue: "custom.self-test")
+        let availableModeIDs = Set(SwitchModeID.allCases + [customModeID])
+        let migratedModeIDs = SwitchStore.migratedEnabledModeIDs(
+            storedModeIDs: [.focus, customModeID],
+            availableModeIDs: availableModeIDs,
+            legacyRemovedBuiltInModeIDs: [.presentation]
+        )
+        reporter.check(
+            migratedModeIDs.contains(.presentation),
+            "legacy deleted presets return to the mode library"
+        )
+        reporter.check(
+            migratedModeIDs.contains(.focus)
+                && migratedModeIDs.contains(customModeID)
+                && !migratedModeIDs.contains(.meeting),
+            "preset migration preserves hidden presets and custom mode visibility"
+        )
     }
 
     private static func checkSystemSettingsURLs(_ reporter: inout SelfTestReporter) {
