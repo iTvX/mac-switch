@@ -123,6 +123,14 @@ enum SystemSettingsLinks {
     }
 
     @discardableResult
+    static func openBluetoothPrivacy() -> Bool {
+        openSystemSettings(
+            primary: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
+            fallback: "x-apple.systempreferences:com.apple.Bluetooth"
+        )
+    }
+
+    @discardableResult
     static func openDisplays() -> Bool {
         openSystemSettings(
             primary: "x-apple.systempreferences:com.apple.Displays-Settings.extension",

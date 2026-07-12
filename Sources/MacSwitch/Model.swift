@@ -836,6 +836,7 @@ final class SwitchStore: ObservableObject {
     private let shortcutManager = GlobalShortcutManager()
     private let refreshQueue = DispatchQueue(label: "com.maxyu.macswitch.snapshot-refresh", qos: .utility)
     private let actionQueue = DispatchQueue(label: "com.maxyu.macswitch.switch-actions", qos: .userInitiated)
+    private let bluetoothActionQueue = DispatchQueue(label: "com.maxyu.macswitch.bluetooth-audio", qos: .userInitiated)
     private var timer: Timer?
     private var snapshotVersions: [SwitchKind: Int] = [:]
     private var actionVersions: [SwitchKind: Int] = [:]
@@ -1820,7 +1821,8 @@ final class SwitchStore: ObservableObject {
         }
 
         let controller = self.controller
-        actionQueue.async { [weak self] in
+        let operationQueue = kind == .bluetoothAudio ? bluetoothActionQueue : actionQueue
+        operationQueue.async { [weak self] in
             let result = controller.set(kind, enabled: enabled, keepAwakeDuration: duration)
             DispatchQueue.main.async {
                 self?.applySetResult(result, for: kind, enabled: enabled, actionVersion: actionVersion)
@@ -2123,6 +2125,14 @@ final class SwitchStore: ObservableObject {
     private func schedulePostActionRefresh(for kind: SwitchKind) {
         var kinds: Set<SwitchKind> = [kind]
         kinds.formUnion(conflictingActionKinds(for: kind))
+        if kind == .bluetoothAudio {
+            for delay in [1.2, 4.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.refreshAsync(.bluetoothAudio)
+                }
+            }
+            return
+        }
         guard kind.isMomentaryAction || kinds.count > 1 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.refreshAsync(kinds: Array(kinds))
@@ -2701,7 +2711,7 @@ private extension SwitchKind {
 
     var snapshotRequiresMainThread: Bool {
         switch self {
-        case .bluetoothAudio, .nightShift, .trueTone,
+        case .nightShift, .trueTone,
              .screenResolution, .screenClean, .lockKeyboard, .emptyPasteboard, .hideWindows:
             return true
         default:

@@ -1487,6 +1487,12 @@ private enum ErrorFixRouter {
         if lowercased.contains("headphones") || lowercased.contains("audio device") || lowercased.contains("device not found") {
             return ErrorRemediation(title: "Open Bluetooth Audio", symbol: "headphones")
         }
+        if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
+            return ErrorRemediation(title: "Open Bluetooth Privacy", symbol: "hand.raised")
+        }
+        if lowercased.contains("audio output") || lowercased.contains("sound settings") {
+            return ErrorRemediation(title: "Open Sound", symbol: "speaker.wave.2")
+        }
         if lowercased.contains("bluetooth") {
             return ErrorRemediation(title: "Open Bluetooth", symbol: "antenna.radiowaves.left.and.right")
         }
@@ -1555,6 +1561,14 @@ private enum ErrorFixRouter {
         }
         if lowercased.contains("headphones") || lowercased.contains("audio device") || lowercased.contains("device not found") {
             openCustomize(.bluetoothAudio, store: store)
+            return
+        }
+        if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
+            clearLastErrorIfOpened(SystemSettingsLinks.openBluetoothPrivacy(), store: store)
+            return
+        }
+        if lowercased.contains("audio output") || lowercased.contains("sound settings") {
+            clearLastErrorIfOpened(SystemSettingsLinks.openSound(), store: store)
             return
         }
         if lowercased.contains("bluetooth") {
@@ -4238,6 +4252,7 @@ private struct BluetoothAudioPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
     @State private var selectedAddress = BluetoothAudioPreferences.selectedAddress
     @State private var devices: [BluetoothAudioDeviceOption] = []
+    @State private var bluetoothAuthorizationMessage: String?
     @State private var bluetoothPoweredOn = true
     @State private var isRefreshingDevices = false
     @State private var pendingDeviceRefresh = false
@@ -4249,7 +4264,21 @@ private struct BluetoothAudioPreferencesPanel: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
 
-            if isRefreshingDevices && devices.isEmpty {
+            if let bluetoothAuthorizationMessage {
+                Text(bluetoothAuthorizationMessage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.red)
+                Button {
+                    reportOpenResult(
+                        SystemSettingsLinks.openBluetoothPrivacy(),
+                        store: store,
+                        failureMessage: "Could not open Bluetooth privacy settings."
+                    )
+                } label: {
+                    Label("Open Bluetooth Privacy", systemImage: "hand.raised")
+                }
+                .buttonStyle(.bordered)
+            } else if isRefreshingDevices && devices.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -4301,9 +4330,9 @@ private struct BluetoothAudioPreferencesPanel: View {
                 }
 
                 Picker("Device:", selection: $selectedAddress) {
-                    Text("Automatic").tag("")
+                    Text("Automatic (last connected)").tag("")
                     ForEach(devices) { device in
-                        Text(device.name + (device.isConnected ? " - connected" : ""))
+                        Text(device.name + deviceStatusSuffix(device))
                             .tag(device.address)
                     }
                 }
@@ -4312,6 +4341,18 @@ private struct BluetoothAudioPreferencesPanel: View {
                 .onChange(of: selectedAddress) { _, value in
                     BluetoothAudioPreferences.selectedAddress = value
                     store.refreshAsync(.bluetoothAudio)
+                }
+
+                if selectedAddress.isEmpty {
+                    if let automaticTargetDevice {
+                        Label("Automatic target: \(automaticTargetDevice.name)", systemImage: "clock.arrow.circlepath")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Choose a device once so Automatic can reconnect it reliably.", systemImage: "info.circle")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 
@@ -4349,8 +4390,20 @@ private struct BluetoothAudioPreferencesPanel: View {
     private var selectedDeviceMissing: Bool {
         let normalized = BluetoothAudioPreferences.selectedAddress
         return !normalized.isEmpty && !devices.contains {
-            $0.address.caseInsensitiveCompare(normalized) == .orderedSame
+            BluetoothAudioPreferences.addressesMatch($0.address, normalized)
         }
+    }
+
+    private var automaticTargetDevice: BluetoothAudioDeviceOption? {
+        guard let address = BluetoothAudioPreferences.automaticTargetAddress(in: devices) else { return nil }
+        return devices.first { BluetoothAudioPreferences.addressesMatch($0.address, address) }
+    }
+
+    private func deviceStatusSuffix(_ device: BluetoothAudioDeviceOption) -> String {
+        if device.isAudioReady {
+            return device.isDefaultOutput ? " - current output" : " - audio ready"
+        }
+        return device.isConnected ? " - connected" : ""
     }
 
     private func reloadDevices(resetMissingSelection: Bool) {
@@ -4363,17 +4416,19 @@ private struct BluetoothAudioPreferencesPanel: View {
         let shouldResetMissingSelection = resetMissingSelection
 
         DispatchQueue.global(qos: .utility).async {
-            let poweredOn = BluetoothAudioPreferences.bluetoothPoweredOn
+            let authorizationMessage = BluetoothAudioPreferences.authorizationMessage
+            let poweredOn = authorizationMessage == nil && BluetoothAudioPreferences.bluetoothPoweredOn
             let refreshedDevices = poweredOn ? BluetoothAudioPreferences.deviceOptions : []
 
             DispatchQueue.main.async {
                 let latestAddress = BluetoothAudioPreferences.selectedAddress
+                bluetoothAuthorizationMessage = authorizationMessage
                 bluetoothPoweredOn = poweredOn
                 devices = refreshedDevices
 
                 if shouldResetMissingSelection,
                    !latestAddress.isEmpty,
-                   !refreshedDevices.contains(where: { $0.address.caseInsensitiveCompare(latestAddress) == .orderedSame }) {
+                   !refreshedDevices.contains(where: { BluetoothAudioPreferences.addressesMatch($0.address, latestAddress) }) {
                     selectedAddress = ""
                     BluetoothAudioPreferences.selectedAddress = ""
                 } else if selectedAddress != latestAddress {

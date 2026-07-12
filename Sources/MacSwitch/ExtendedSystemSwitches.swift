@@ -1,5 +1,6 @@
 import AppKit
 import CoreAudio
+import CoreBluetooth
 import CoreGraphics
 import Foundation
 import IOBluetooth
@@ -97,10 +98,31 @@ struct BluetoothAudioDeviceOption: Identifiable, Equatable {
     let address: String
     let name: String
     let isConnected: Bool
+    let isAudioReady: Bool
+    let isDefaultOutput: Bool
+}
+
+private enum BluetoothAudioExecution {
+    private static let queueKey = DispatchSpecificKey<UInt8>()
+    private static let queue: DispatchQueue = {
+        let queue = DispatchQueue(label: "com.maxyu.macswitch.bluetooth-ipc", qos: .userInitiated)
+        queue.setSpecific(key: queueKey, value: 1)
+        return queue
+    }()
+
+    static func sync<T>(_ operation: () -> T) -> T {
+        if DispatchQueue.getSpecific(key: queueKey) != nil {
+            return operation()
+        }
+        return queue.sync {
+            autoreleasepool(invoking: operation)
+        }
+    }
 }
 
 enum BluetoothAudioPreferences {
     static let selectedAddressKey = "switch.bluetoothAudio.selectedAddress"
+    static let lastConnectedAddressKey = "switch.bluetoothAudio.lastConnectedAddress"
     private static let legacySelectedAddressKey = ["switch.", "headphones", "Connect.selectedAddress"].joined()
 
     static var selectedAddress: String {
@@ -118,67 +140,179 @@ enum BluetoothAudioPreferences {
         }
     }
 
+    static var lastConnectedAddress: String {
+        get { normalizedAddress(UserDefaults.standard.string(forKey: lastConnectedAddressKey) ?? "") }
+        set {
+            let normalized = normalizedAddress(newValue)
+            guard normalized != lastConnectedAddress else { return }
+            if normalized.isEmpty {
+                UserDefaults.standard.removeObject(forKey: lastConnectedAddressKey)
+            } else {
+                UserDefaults.standard.set(normalized, forKey: lastConnectedAddressKey)
+            }
+        }
+    }
+
+    static var authorizationMessage: String? {
+        switch CBManager.authorization {
+        case .denied:
+            return "Bluetooth access is turned off for Mac Switch."
+        case .restricted:
+            return "Bluetooth access is restricted on this Mac."
+        case .notDetermined, .allowedAlways:
+            return nil
+        @unknown default:
+            return "Bluetooth access is unavailable."
+        }
+    }
+
     static var deviceOptions: [BluetoothAudioDeviceOption] {
-        audioDevices.map {
-            BluetoothAudioDeviceOption(
-                address: $0.addressString,
-                name: $0.nameOrAddress,
-                isConnected: $0.isConnected()
+        BluetoothAudioExecution.sync {
+            deviceOptions(for: audioDevices)
+        }
+    }
+
+    fileprivate static func deviceOptions(for devices: [IOBluetoothDevice]) -> [BluetoothAudioDeviceOption] {
+        let endpoints = BluetoothAudioOutputMonitor.endpoints
+        return devices.map { device in
+            let endpoint = BluetoothAudioOutputMonitor.endpoint(for: device, in: endpoints)
+            return BluetoothAudioDeviceOption(
+                address: device.addressString,
+                name: device.nameOrAddress,
+                isConnected: device.isConnected(),
+                isAudioReady: endpoint != nil,
+                isDefaultOutput: endpoint?.isDefaultOutput == true
             )
         }
         .sorted {
             if $0.isConnected != $1.isConnected {
                 return $0.isConnected && !$1.isConnected
             }
+            if $0.isDefaultOutput != $1.isDefaultOutput {
+                return $0.isDefaultOutput && !$1.isDefaultOutput
+            }
             return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 
     static var bluetoothPoweredOn: Bool {
-        IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
+        BluetoothAudioExecution.sync {
+            IOBluetoothHostController.default()?.powerState == kBluetoothHCIPowerStateON
+        }
     }
 
     fileprivate static var audioDevices: [IOBluetoothDevice] {
         let paired = (IOBluetoothDevice.pairedDevices() ?? []).compactMap { $0 as? IOBluetoothDevice }
-        return paired.filter(isHeadphoneDevice)
+        return paired.filter(isAudioOutputDevice)
     }
 
-    fileprivate static var selectedDevice: IOBluetoothDevice? {
+    fileprivate static func selectedDevice(in devices: [IOBluetoothDevice]) -> IOBluetoothDevice? {
         let selected = selectedAddress
         guard !selected.isEmpty else { return nil }
-        return audioDevices.first {
-            $0.addressString.caseInsensitiveCompare(selected) == .orderedSame
+        return devices.first { addressesMatch($0.addressString, selected) }
+    }
+
+    fileprivate static func selectedDeviceMissing(in devices: [IOBluetoothDevice]) -> Bool {
+        !selectedAddress.isEmpty && selectedDevice(in: devices) == nil
+    }
+
+    fileprivate static func targetDeviceForConnect(
+        in devices: [IOBluetoothDevice],
+        options: [BluetoothAudioDeviceOption]
+    ) -> IOBluetoothDevice? {
+        if let selectedDevice = selectedDevice(in: devices) {
+            return selectedDevice
         }
-    }
-
-    static var selectedDeviceMissing: Bool {
-        !selectedAddress.isEmpty && selectedDevice == nil
-    }
-
-    fileprivate static func targetDeviceForConnect() -> IOBluetoothDevice? {
-        selectedDevice
-            ?? audioDevices.first(where: { !$0.isConnected() })
-            ?? audioDevices.first
+        guard let targetAddress = automaticTargetAddress(in: options) else { return nil }
+        return devices.first { addressesMatch($0.addressString, targetAddress) }
     }
 
     private static func normalizedAddress(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    fileprivate static func statusSubtitle(for device: IOBluetoothDevice, connected: Bool) -> String {
-        if connected {
-            return batterySubtitle(for: device) ?? "Connected"
-        }
-        return "Disconnected"
+    static func addressesMatch(_ lhs: String, _ rhs: String) -> Bool {
+        let left = addressKey(lhs)
+        let right = addressKey(rhs)
+        return !left.isEmpty && left == right
     }
 
-    private static func isHeadphoneDevice(_ device: IOBluetoothDevice) -> Bool {
-        if device.deviceClassMajor == kBluetoothDeviceClassMajorAudio {
-            return true
+    static func automaticTargetAddress(
+        in options: [BluetoothAudioDeviceOption],
+        lastAddress: String? = nil
+    ) -> String? {
+        guard !options.isEmpty else { return nil }
+        let remembered = lastAddress ?? lastConnectedAddress
+        let connected = options.filter(\.isConnected)
+
+        if let match = connected.first(where: { addressesMatch($0.address, remembered) }) {
+            return match.address
         }
-        let name = (device.name ?? "").lowercased()
-        return ["airpods", "headphone", "headset", "earbuds", "buds", "beats", "bose", "sony", "jabra", "wh-", "wf-"]
-            .contains { name.contains($0) }
+        if let defaultOutput = connected.first(where: \.isDefaultOutput) {
+            return defaultOutput.address
+        }
+        if let audioReady = connected.first(where: \.isAudioReady) {
+            return audioReady.address
+        }
+        if let firstConnected = connected.first {
+            return firstConnected.address
+        }
+        if let match = options.first(where: { addressesMatch($0.address, remembered) }) {
+            return match.address
+        }
+        return options.count == 1 ? options[0].address : nil
+    }
+
+    static func rememberConnectedAddress(_ address: String) {
+        lastConnectedAddress = address
+    }
+
+    fileprivate static func statusSubtitle(
+        for device: IOBluetoothDevice,
+        connected: Bool,
+        audioReady: Bool
+    ) -> String {
+        let name = device.nameOrAddress ?? "Bluetooth Audio"
+        if connected {
+            let status = batterySubtitle(for: device) ?? (audioReady ? "Audio ready" : "Connected")
+            return "\(name) - \(status)"
+        }
+        return "\(name) - Disconnected"
+    }
+
+    static func isSupportedAudioOutput(major: Int, minor: Int, name: String) -> Bool {
+        let normalizedName = name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        guard !normalizedName.contains("find my") else { return false }
+
+        if major == Int(kBluetoothDeviceClassMajorAudio) {
+            let nonOutputMinorClasses = [
+                Int(kBluetoothDeviceClassMinorAudioMicrophone),
+                Int(kBluetoothDeviceClassMinorAudioSetTopBox),
+                Int(kBluetoothDeviceClassMinorAudioVCR),
+                Int(kBluetoothDeviceClassMinorAudioVideoCamera),
+                Int(kBluetoothDeviceClassMinorAudioCamcorder),
+                Int(kBluetoothDeviceClassMinorAudioVideoMonitor)
+            ]
+            return !nonOutputMinorClasses.contains(minor)
+        }
+
+        let audioNameHints = [
+            "airpods", "headphone", "headset", "earbuds", "ear buds", "buds",
+            "beats", "bose", "jabra", "speaker", "soundbar", "wh-", "wf-"
+        ]
+        return audioNameHints.contains { normalizedName.contains($0) }
+    }
+
+    private static func isAudioOutputDevice(_ device: IOBluetoothDevice) -> Bool {
+        isSupportedAudioOutput(
+            major: Int(device.deviceClassMajor),
+            minor: Int(device.deviceClassMinor),
+            name: device.nameOrAddress ?? ""
+        )
+    }
+
+    private static func addressKey(_ value: String) -> String {
+        value.lowercased().filter(\.isHexDigit)
     }
 
     private static func batterySubtitle(for device: IOBluetoothDevice) -> String? {
@@ -205,6 +339,182 @@ enum BluetoothAudioPreferences {
               value > 0
         else { return nil }
         return value
+    }
+}
+
+private struct BluetoothAudioOutputEndpoint {
+    let deviceID: AudioDeviceID
+    let name: String
+    let uid: String
+    let isDefaultOutput: Bool
+}
+
+private enum BluetoothAudioOutputMonitor {
+    static var endpoints: [BluetoothAudioOutputEndpoint] {
+        let defaultOutput = defaultOutputDevice
+        return audioDeviceIDs.compactMap { deviceID in
+            guard let transport = uint32Property(
+                objectID: deviceID,
+                selector: kAudioDevicePropertyTransportType
+            ),
+            transport == kAudioDeviceTransportTypeBluetooth
+                || transport == kAudioDeviceTransportTypeBluetoothLE,
+            uint32Property(objectID: deviceID, selector: kAudioDevicePropertyDeviceIsAlive) == 1,
+            hasOutputChannels(deviceID)
+            else { return nil }
+
+            return BluetoothAudioOutputEndpoint(
+                deviceID: deviceID,
+                name: stringProperty(objectID: deviceID, selector: kAudioObjectPropertyName) ?? "",
+                uid: stringProperty(objectID: deviceID, selector: kAudioDevicePropertyDeviceUID) ?? "",
+                isDefaultOutput: deviceID == defaultOutput
+            )
+        }
+    }
+
+    static func endpoint(
+        for device: IOBluetoothDevice,
+        in endpoints: [BluetoothAudioOutputEndpoint]? = nil
+    ) -> BluetoothAudioOutputEndpoint? {
+        let available = endpoints ?? self.endpoints
+        let addressKey = normalizedAddressKey(device.addressString)
+        if !addressKey.isEmpty,
+           let addressMatch = available.first(where: {
+               normalizedAddressKey($0.uid).contains(addressKey)
+           }) {
+            return addressMatch
+        }
+
+        let nameKey = normalizedNameKey(device.nameOrAddress ?? "")
+        guard !nameKey.isEmpty else { return nil }
+        return available.first { normalizedNameKey($0.name) == nameKey }
+    }
+
+    static func isOutputReady(for device: IOBluetoothDevice) -> Bool {
+        endpoint(for: device) != nil
+    }
+
+    static func waitForOutput(for device: IOBluetoothDevice, timeout: TimeInterval = 12) -> Bool {
+        waitForCondition(timeout: timeout, interval: 0.2) {
+            isOutputReady(for: device)
+        }
+    }
+
+    private static var audioDeviceIDs: [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize
+        ) == noErr,
+        dataSize >= UInt32(MemoryLayout<AudioDeviceID>.size)
+        else { return [] }
+
+        var devices = Array(
+            repeating: AudioDeviceID(0),
+            count: Int(dataSize) / MemoryLayout<AudioDeviceID>.size
+        )
+        let status = devices.withUnsafeMutableBytes { bytes in
+            guard let baseAddress = bytes.baseAddress else { return kAudioHardwareUnspecifiedError }
+            return AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject),
+                &address,
+                0,
+                nil,
+                &dataSize,
+                baseAddress
+            )
+        }
+        return status == noErr ? devices.filter { $0 != 0 } : []
+    }
+
+    private static var defaultOutputDevice: AudioDeviceID? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var deviceID = AudioDeviceID(0)
+        var dataSize = UInt32(MemoryLayout<AudioDeviceID>.size)
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &dataSize,
+            &deviceID
+        )
+        return status == noErr && deviceID != 0 ? deviceID : nil
+    }
+
+    private static func uint32Property(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector
+    ) -> UInt32? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value = UInt32(0)
+        var dataSize = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value)
+        return status == noErr ? value : nil
+    }
+
+    private static func stringProperty(
+        objectID: AudioObjectID,
+        selector: AudioObjectPropertySelector
+    ) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var value: Unmanaged<CFString>?
+        var dataSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        let status = AudioObjectGetPropertyData(objectID, &address, 0, nil, &dataSize, &value)
+        guard status == noErr, let value else { return nil }
+        return value.takeRetainedValue() as String
+    }
+
+    private static func hasOutputChannels(_ deviceID: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var dataSize: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr,
+              dataSize >= UInt32(MemoryLayout<AudioBufferList>.size)
+        else { return false }
+
+        let storage = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(dataSize),
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { storage.deallocate() }
+        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &dataSize, storage) == noErr else {
+            return false
+        }
+        let bufferList = storage.bindMemory(to: AudioBufferList.self, capacity: 1)
+        return UnsafeMutableAudioBufferListPointer(bufferList).contains { $0.mNumberChannels > 0 }
+    }
+
+    private static func normalizedAddressKey(_ value: String) -> String {
+        value.lowercased().filter(\.isHexDigit)
+    }
+
+    private static func normalizedNameKey(_ value: String) -> String {
+        let folded = value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return folded.unicodeScalars.filter(CharacterSet.alphanumerics.contains).map(String.init).joined()
     }
 }
 
@@ -1138,58 +1448,118 @@ struct ScreenSaverSwitch {
 
 struct BluetoothAudioSwitch {
     func snapshot() -> SwitchSnapshot {
+        BluetoothAudioExecution.sync {
+            serializedSnapshot()
+        }
+    }
+
+    private func serializedSnapshot() -> SwitchSnapshot {
+        if let authorizationMessage = BluetoothAudioPreferences.authorizationMessage {
+            return switchSnapshot(
+                isAvailable: false,
+                subtitle: "Review Bluetooth privacy",
+                warning: authorizationMessage
+            )
+        }
         guard BluetoothAudioPreferences.bluetoothPoweredOn else {
             return switchSnapshot(isAvailable: false, warning: "Please turn on Bluetooth")
         }
         let devices = BluetoothAudioPreferences.audioDevices
         guard !devices.isEmpty else {
-            return switchSnapshot(isAvailable: false, warning: "Device not found.")
+            return switchSnapshot(isAvailable: false, warning: "No paired Bluetooth audio device found.")
         }
-        if !BluetoothAudioPreferences.selectedAddress.isEmpty,
-           BluetoothAudioPreferences.selectedDevice == nil {
+        if BluetoothAudioPreferences.selectedDeviceMissing(in: devices) {
             return switchSnapshot(isOn: false, isAvailable: false, subtitle: "Choose another device", warning: "Selected device not found.")
         }
-        let selected = BluetoothAudioPreferences.selectedDevice
-        let connected = selected.map { $0.isConnected() ? $0 : nil }
-            ?? devices.first(where: { $0.isConnected() })
-        let target = selected ?? connected ?? devices.first
-        let subtitle = target.map {
-            BluetoothAudioPreferences.statusSubtitle(for: $0, connected: $0.isConnected())
+        let options = BluetoothAudioPreferences.deviceOptions(for: devices)
+        let selected = BluetoothAudioPreferences.selectedDevice(in: devices)
+        let target = selected ?? BluetoothAudioPreferences.targetDeviceForConnect(in: devices, options: options)
+        guard let target else {
+            return switchSnapshot(
+                isOn: false,
+                isAvailable: false,
+                subtitle: "Choose a device",
+                warning: "Choose a Bluetooth audio device in Customize > Bluetooth Audio."
+            )
+        }
+
+        let connected = target.isConnected()
+        let targetOption = options.first {
+            BluetoothAudioPreferences.addressesMatch($0.address, target.addressString)
+        }
+        let audioReady = targetOption?.isAudioReady == true
+        if connected && audioReady && selected == nil {
+            BluetoothAudioPreferences.rememberConnectedAddress(target.addressString)
         }
         return switchSnapshot(
-            isOn: connected != nil,
-            subtitle: subtitle,
-            warning: nil
+            isOn: connected,
+            subtitle: BluetoothAudioPreferences.statusSubtitle(
+                for: target,
+                connected: connected,
+                audioReady: audioReady
+            ),
+            warning: connected && !audioReady
+                ? "Bluetooth is connected, but the audio output is not ready."
+                : nil
         )
     }
 
     func setEnabled(_ enabled: Bool) -> String? {
+        BluetoothAudioExecution.sync {
+            serializedSetEnabled(enabled)
+        }
+    }
+
+    private func serializedSetEnabled(_ enabled: Bool) -> String? {
+        if let authorizationMessage = BluetoothAudioPreferences.authorizationMessage {
+            return authorizationMessage
+        }
         guard BluetoothAudioPreferences.bluetoothPoweredOn else {
             return "Please turn on Bluetooth"
         }
         let devices = BluetoothAudioPreferences.audioDevices
-        guard !devices.isEmpty else { return "Device not found." }
-        if BluetoothAudioPreferences.selectedDeviceMissing {
+        guard !devices.isEmpty else { return "No paired Bluetooth audio device found." }
+        if BluetoothAudioPreferences.selectedDeviceMissing(in: devices) {
             return "Selected device not found. Choose another device in Customize > Bluetooth Audio."
         }
+        let options = BluetoothAudioPreferences.deviceOptions(for: devices)
 
         if enabled {
-            guard let target = BluetoothAudioPreferences.targetDeviceForConnect() else {
-                return "Device not found."
+            guard let target = BluetoothAudioPreferences.targetDeviceForConnect(in: devices, options: options) else {
+                return "Choose a Bluetooth audio device in Customize > Bluetooth Audio."
             }
             let targetName = displayName(for: target)
-            let result = target.openConnection()
-            guard result == kIOReturnSuccess || waitForDevice(target, connected: true, timeout: 1.5) else {
-                return "\(targetName) is not responding."
+            if !target.isConnected() {
+                let result = target.openConnection()
+                guard result == kIOReturnSuccess
+                        || waitForDevice(target, connected: true, timeout: 2)
+                else {
+                    return "\(targetName) is not responding."
+                }
             }
-            return waitForDevice(target, connected: true) ? nil : "\(targetName) did not connect."
+            guard waitForDevice(target, connected: true, timeout: 2) else {
+                return "\(targetName) did not connect."
+            }
+            BluetoothAudioPreferences.rememberConnectedAddress(target.addressString)
+            guard BluetoothAudioOutputMonitor.waitForOutput(for: target) else {
+                return "\(targetName) connected to Bluetooth, but its audio output is not ready. Open Sound settings and try again."
+            }
+            return nil
         }
 
         var failed: [String] = []
-        let targets = BluetoothAudioPreferences.selectedDevice.map { [$0] } ?? devices
+        let targets = BluetoothAudioPreferences.selectedDevice(in: devices)
+            .map { [$0] }
+            ?? BluetoothAudioPreferences.targetDeviceForConnect(in: devices, options: options).map { [$0] }
+            ?? []
         for device in targets where device.isConnected() {
             let result = device.closeConnection()
-            if result != kIOReturnSuccess || !waitForDevice(device, connected: false) {
+            if result != kIOReturnSuccess,
+               !waitForDevice(device, connected: false, timeout: 2) {
+                failed.append(displayName(for: device))
+                continue
+            }
+            if !waitForDevice(device, connected: false) {
                 failed.append(displayName(for: device))
             }
         }
