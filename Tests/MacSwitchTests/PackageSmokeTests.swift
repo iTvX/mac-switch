@@ -21,6 +21,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Eject Disk exclusion matching works without writing preferences"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("built-in modes use reversible switches"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("mode restoration does not revive expired timed states"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("legacy deleted presets return to the mode library"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("preset migration preserves hidden presets and custom mode visibility"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Bluetooth Automatic reuses the last successful device"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Bluetooth Automatic rejects an ambiguous uninitialized target"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Bluetooth device filtering rejects Find My companion records"), result.combinedOutput)
@@ -251,7 +253,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("LinearGradient("))
     }
 
-    func testSwitchModesAreBuiltInRestorableAndSafeByDefault() throws {
+    func testSwitchModesKeepBuiltInsAndSafelyDeleteCustomModes() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
         let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
@@ -285,10 +287,15 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct CustomModeSettingsRow",
             to: "private struct CustomModeDetailPanel"
         )
-        let restoreBuiltInModesSource = try extract(
+        let deleteCustomModeSource = try extract(
             storeSource,
-            from: "func restoreBuiltInModes()",
-            to: "@discardableResult\n    func createCustomMode()"
+            from: "func deleteCustomMode(_ modeID: SwitchModeID)",
+            to: "func toggleMode(_ mode: SwitchModeDefinition)"
+        )
+        let deactivateModeSource = try extract(
+            storeSource,
+            from: "private func deactivateMode(_ mode: SwitchModeDefinition)",
+            to: "private func beginModeOperation"
         )
 
         XCTAssertTrue(model.contains("struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIterable"))
@@ -309,22 +316,33 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(modeDefinitionSource.contains(".lockScreen"))
         XCTAssertTrue(model.contains("struct ActiveSwitchModeSession: Codable, Equatable"))
         XCTAssertTrue(storeSource.contains("@Published var enabledModeIDs: Set<SwitchModeID>"))
-        XCTAssertTrue(storeSource.contains("@Published var removedBuiltInModeIDs: Set<SwitchModeID>"))
+        XCTAssertFalse(storeSource.contains("@Published var removedBuiltInModeIDs"))
         XCTAssertTrue(storeSource.contains("@Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession]"))
         XCTAssertTrue(storeSource.contains("@Published var customModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("@Published private(set) var pendingCustomModeDeletionID: SwitchModeID?"))
         XCTAssertTrue(storeSource.contains("var visibleModes: [SwitchModeDefinition]"))
         XCTAssertTrue(storeSource.contains("var builtInModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("var builtInModes: [SwitchModeDefinition] {\n        SwitchModeDefinition.builtIn"))
         XCTAssertTrue(storeSource.contains("var allModes: [SwitchModeDefinition]"))
         XCTAssertTrue(storeSource.contains("builtInModes + customModes"))
-        XCTAssertTrue(storeSource.contains("var hasBuiltInModeOverrides: Bool"))
+        XCTAssertFalse(storeSource.contains("var hasBuiltInModeOverrides"))
         XCTAssertTrue(storeSource.contains("enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil"))
-        XCTAssertTrue(storeSource.contains("func deleteBuiltInMode(_ modeID: SwitchModeID)"))
-        XCTAssertTrue(storeSource.contains("func restoreBuiltInModes()"))
-        XCTAssertTrue(storeSource.contains("removedBuiltInModeIDs.removeAll()\n        enabledModeIDs.formUnion(SwitchModeID.allCases)"))
-        XCTAssertFalse(restoreBuiltInModesSource.contains("customModes"), "restoring presets must not modify custom modes")
+        XCTAssertFalse(storeSource.contains("func deleteBuiltInMode"))
+        XCTAssertFalse(storeSource.contains("func restoreBuiltInModes"))
+        XCTAssertTrue(storeSource.contains("legacyRemovedBuiltInModeIDsKey"))
+        XCTAssertTrue(storeSource.contains("defaults.removeObject(forKey: Self.legacyRemovedBuiltInModeIDsKey)"))
+        XCTAssertTrue(storeSource.contains("static func migratedEnabledModeIDs("))
+        XCTAssertTrue(storeSource.contains("enabled.formUnion(legacyRemovedBuiltInModeIDs.intersection(availableModeIDs))"))
         XCTAssertTrue(storeSource.contains("func createCustomMode() -> SwitchModeID"))
         XCTAssertTrue(storeSource.contains("func updateCustomMode(_ mode: SwitchModeDefinition)"))
         XCTAssertTrue(storeSource.contains("func deleteCustomMode(_ modeID: SwitchModeID)"))
+        XCTAssertTrue(deleteCustomModeSource.contains("pendingCustomModeDeletionID = modeID"))
+        XCTAssertTrue(deleteCustomModeSource.contains("deactivateMode(mode)"))
+        XCTAssertTrue(deleteCustomModeSource.contains("private func removeCustomMode"))
+        XCTAssertFalse(deleteCustomModeSource.contains("activeModeSessions.removeValue"))
+        XCTAssertTrue(deactivateModeSource.contains("finishPendingCustomModeDeletionIfNeeded(mode.id)"))
+        XCTAssertTrue(deactivateModeSource.contains("pendingCustomModeDeletionID = nil"))
+        XCTAssertTrue(deactivateModeSource.contains("if failures.isEmpty"))
         XCTAssertTrue(storeSource.contains("func toggleMode(_ mode: SwitchModeDefinition)"))
         XCTAssertTrue(storeSource.contains("func isModeInteractionDisabled(_ mode: SwitchModeDefinition)"))
         XCTAssertTrue(storeSource.contains("Turn off the current mode before starting another mode."))
@@ -339,10 +357,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("originalDoNotDisturbEndDate:"))
         XCTAssertTrue(storeSource.contains("activeModeSessions.removeValue(forKey: mode.id)"))
         XCTAssertTrue(storeSource.contains("private func saveCustomModes()"))
-        XCTAssertTrue(storeSource.contains("private func saveRemovedBuiltInModeIDs()"))
+        XCTAssertFalse(storeSource.contains("private func saveRemovedBuiltInModeIDs"))
         XCTAssertTrue(storeSource.contains("private func saveActiveModeSessions()"))
         XCTAssertTrue(model.contains("static let enabledModeIDs = \"switch.modes.enabled\""))
-        XCTAssertTrue(model.contains("static let removedBuiltInModeIDs = \"switch.modes.removedBuiltIn\""))
+        XCTAssertFalse(model.contains("static let removedBuiltInModeIDs ="))
         XCTAssertTrue(model.contains("static let activeModeSessions = \"switch.modes.activeSessions\""))
         XCTAssertTrue(model.contains("static let customModes = \"switch.modes.custom\""))
         XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
@@ -359,17 +377,20 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(modesSource.contains("store.createCustomMode()"))
         XCTAssertTrue(modesSource.contains("store.updateCustomMode(updated)"))
         XCTAssertTrue(modesSource.contains("store.deleteCustomMode(mode.id)"))
-        XCTAssertTrue(modesSource.contains("store.deleteBuiltInMode(mode.id)"))
-        XCTAssertTrue(modesSource.contains("store.restoreBuiltInModes()"))
-        XCTAssertTrue(modesSource.contains("Label(\"Restore Presets\", systemImage: \"arrow.counterclockwise\")"))
+        XCTAssertFalse(modesSource.contains("store.deleteBuiltInMode"))
+        XCTAssertFalse(modesSource.contains("store.restoreBuiltInModes"))
+        XCTAssertFalse(modesSource.contains("Restore Presets"))
+        XCTAssertFalse(modesSource.contains("Built-in modes removed"))
         XCTAssertFalse(builtInModeSettingsRowSource.contains("@State private var confirmsDeletion"))
         XCTAssertFalse(builtInModeSettingsRowSource.contains("confirmationDialog("))
-        XCTAssertFalse(builtInModeSettingsRowSource.contains("Delete Preset"))
-        XCTAssertTrue(builtInModeSettingsRowSource.contains("Button(role: .destructive) {\n                store.deleteBuiltInMode(mode.id)"))
+        XCTAssertFalse(builtInModeSettingsRowSource.contains("trash"))
+        XCTAssertFalse(builtInModeSettingsRowSource.contains("Button(role: .destructive)"))
         XCTAssertTrue(customModeSettingsRowSource.contains("@State private var confirmsDeletion = false"))
         XCTAssertTrue(customModeSettingsRowSource.contains("confirmationDialog("))
-        XCTAssertTrue(customModeSettingsRowSource.contains("Button(\"Delete Mode\", role: .destructive)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("Turn Off & Delete"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("restore the switch states from before this mode was activated"))
         XCTAssertTrue(customModeSettingsRowSource.contains("This custom mode cannot be recovered."))
+        XCTAssertTrue(customModeSettingsRowSource.contains(".disabled(store.isModeInteractionDisabled(mode))"))
         XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
         XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, $0)"))
         XCTAssertTrue(modesSource.contains("Turn this mode off before hiding it."))

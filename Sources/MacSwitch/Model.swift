@@ -712,6 +712,7 @@ enum ActionSafetyPreferences {
 
 final class SwitchStore: ObservableObject {
     private static let customizationDefaultsVersion = 2
+    private static let legacyRemovedBuiltInModeIDsKey = "switch.modes.removedBuiltIn"
     private static let legacyDefaultEnabledKinds: Set<SwitchKind> = [
         .hideDesktopIcons,
         .darkMode,
@@ -734,10 +735,6 @@ final class SwitchStore: ObservableObject {
 
     @Published var enabledModeIDs: Set<SwitchModeID> {
         didSet { saveEnabledModeIDs() }
-    }
-
-    @Published var removedBuiltInModeIDs: Set<SwitchModeID> {
-        didSet { saveRemovedBuiltInModeIDs() }
     }
 
     @Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession] {
@@ -825,6 +822,7 @@ final class SwitchStore: ObservableObject {
     @Published private(set) var actionsInProgress: Set<SwitchKind> = []
     @Published private(set) var actionsPreparing: Set<SwitchKind> = []
     @Published private(set) var activeModeOperationID: SwitchModeID?
+    @Published private(set) var pendingCustomModeDeletionID: SwitchModeID?
     @Published private(set) var isRefreshing = false
     @Published private(set) var isUpdatingStartAtLogin = false
     @Published private(set) var startAtLoginNeedsRepair = false
@@ -879,15 +877,11 @@ final class SwitchStore: ObservableObject {
     }
 
     var builtInModes: [SwitchModeDefinition] {
-        SwitchModeDefinition.builtIn.filter { !removedBuiltInModeIDs.contains($0.id) }
+        SwitchModeDefinition.builtIn
     }
 
     var allModes: [SwitchModeDefinition] {
         builtInModes + customModes
-    }
-
-    var hasBuiltInModeOverrides: Bool {
-        !removedBuiltInModeIDs.isEmpty || !Set(SwitchModeID.allCases).isSubset(of: enabledModeIDs)
     }
 
     var effectiveLanguage: AppLanguage {
@@ -931,25 +925,22 @@ final class SwitchStore: ObservableObject {
         customModes = loadedCustomModes
 
         let builtInModeIDs = Set(SwitchModeID.allCases)
-        let loadedRemovedBuiltInModeIDs = Set(
-            defaults.stringArray(forKey: DefaultsKey.removedBuiltInModeIDs)?
+        let legacyRemovedBuiltInModeIDs = Set(
+            defaults.stringArray(forKey: Self.legacyRemovedBuiltInModeIDsKey)?
                 .map(SwitchModeID.init(rawValue:)) ?? []
         ).intersection(builtInModeIDs)
-        removedBuiltInModeIDs = loadedRemovedBuiltInModeIDs
+        defaults.removeObject(forKey: Self.legacyRemovedBuiltInModeIDsKey)
 
-        let loadedBuiltInModes = SwitchModeDefinition.builtIn.filter {
-            !loadedRemovedBuiltInModeIDs.contains($0.id)
-        }
-        let loadedModeDefinitions = loadedBuiltInModes + loadedCustomModes
+        let loadedModeDefinitions = SwitchModeDefinition.builtIn + loadedCustomModes
         let validModeIDs = Set(loadedModeDefinitions.map(\.id))
         let modesWithSwitches = Set(loadedModeDefinitions.filter { !$0.items.isEmpty }.map(\.id))
         let storedModeIDs = defaults.stringArray(forKey: DefaultsKey.enabledModeIDs)?
             .map(SwitchModeID.init(rawValue:))
-        if let storedModeIDs {
-            enabledModeIDs = Set(storedModeIDs).intersection(modesWithSwitches)
-        } else {
-            enabledModeIDs = builtInModeIDs.subtracting(loadedRemovedBuiltInModeIDs)
-        }
+        enabledModeIDs = Self.migratedEnabledModeIDs(
+            storedModeIDs: storedModeIDs,
+            availableModeIDs: modesWithSwitches,
+            legacyRemovedBuiltInModeIDs: legacyRemovedBuiltInModeIDs
+        )
         activeModeSessions = Self.loadActiveModeSessions(from: defaults, validModeIDs: validModeIDs)
 
         shortcuts = Self.loadShortcuts(from: defaults)
@@ -982,7 +973,6 @@ final class SwitchStore: ObservableObject {
         startAtLogin = LoginItemManager.initialIsEnabled
         saveOrder()
         saveEnabledKinds()
-        saveRemovedBuiltInModeIDs()
         saveEnabledModeIDs()
         refreshStartAtLoginStatusAsync()
 
@@ -1218,6 +1208,9 @@ final class SwitchStore: ObservableObject {
     }
 
     func modeStatusText(for mode: SwitchModeDefinition) -> String {
+        if pendingCustomModeDeletionID == mode.id {
+            return "Restoring before deletion..."
+        }
         if isModeActive(mode.id) {
             return "Active"
         }
@@ -1245,30 +1238,6 @@ final class SwitchStore: ObservableObject {
             }
             enabledModeIDs.remove(modeID)
         }
-    }
-
-    func deleteBuiltInMode(_ modeID: SwitchModeID) {
-        guard modeID.isBuiltIn,
-              !removedBuiltInModeIDs.contains(modeID),
-              let mode = SwitchModeDefinition.builtIn.first(where: { $0.id == modeID })
-        else { return }
-
-        if isModeActive(modeID) || activeModeOperationID == modeID {
-            lastError = "Turn this mode off before deleting it."
-            return
-        }
-        if isModeInteractionDisabled(mode) {
-            lastError = "Wait for the current mode operation to finish before deleting it."
-            return
-        }
-
-        enabledModeIDs.remove(modeID)
-        removedBuiltInModeIDs.insert(modeID)
-    }
-
-    func restoreBuiltInModes() {
-        removedBuiltInModeIDs.removeAll()
-        enabledModeIDs.formUnion(SwitchModeID.allCases)
     }
 
     @discardableResult
@@ -1305,17 +1274,29 @@ final class SwitchStore: ObservableObject {
 
     func deleteCustomMode(_ modeID: SwitchModeID) {
         guard modeID.isCustom,
-              customModes.contains(where: { $0.id == modeID })
+              let mode = customModes.first(where: { $0.id == modeID })
         else { return }
 
-        if isModeActive(modeID) || activeModeOperationID == modeID {
-            lastError = "Turn this mode off before deleting it."
+        guard activeModeOperationID == nil,
+              !isModeInteractionDisabled(mode)
+        else {
+            lastError = "Wait for the current mode operation to finish before deleting it."
             return
         }
 
+        if isModeActive(modeID) {
+            pendingCustomModeDeletionID = modeID
+            deactivateMode(mode)
+            return
+        }
+
+        removeCustomMode(modeID)
+    }
+
+    private func removeCustomMode(_ modeID: SwitchModeID) {
+        guard activeModeSessions[modeID] == nil else { return }
         customModes.removeAll { $0.id == modeID }
         enabledModeIDs.remove(modeID)
-        activeModeSessions.removeValue(forKey: modeID)
     }
 
     func toggleMode(_ mode: SwitchModeDefinition) {
@@ -1418,6 +1399,7 @@ final class SwitchStore: ObservableObject {
 
         guard !kinds.isEmpty else {
             activeModeSessions.removeValue(forKey: mode.id)
+            finishPendingCustomModeDeletionIfNeeded(mode.id)
             return
         }
 
@@ -1434,11 +1416,21 @@ final class SwitchStore: ObservableObject {
                     self.enforceDarkModeScheduleAsync()
                     self.enforceDoNotDisturbExpirationAsync()
                 } else {
+                    self.pendingCustomModeDeletionID = nil
                     self.lastError = "Mode \"\(mode.title)\" could not fully restore its previous state. Retry turning it off. \(self.modeFailureDescription(failures))"
                 }
                 self.finishModeOperation(mode.id, reservedKinds: kinds)
+                if failures.isEmpty {
+                    self.finishPendingCustomModeDeletionIfNeeded(mode.id)
+                }
             }
         }
+    }
+
+    private func finishPendingCustomModeDeletionIfNeeded(_ modeID: SwitchModeID) {
+        guard pendingCustomModeDeletionID == modeID else { return }
+        pendingCustomModeDeletionID = nil
+        removeCustomMode(modeID)
     }
 
     private func beginModeOperation(_ modeID: SwitchModeID, reserving kinds: Set<SwitchKind>) {
@@ -2220,11 +2212,6 @@ final class SwitchStore: ObservableObject {
         defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.enabledModeIDs)
     }
 
-    private func saveRemovedBuiltInModeIDs() {
-        let ordered = SwitchModeID.allCases.filter { removedBuiltInModeIDs.contains($0) }
-        defaults.set(ordered.map(\.rawValue), forKey: DefaultsKey.removedBuiltInModeIDs)
-    }
-
     private func saveActiveModeSessions() {
         let orderedSessions = allModes.map(\.id).compactMap { activeModeSessions[$0] }
         guard let data = try? JSONEncoder().encode(orderedSessions) else { return }
@@ -2624,6 +2611,19 @@ final class SwitchStore: ObservableObject {
         return loaded
     }
 
+    static func migratedEnabledModeIDs(
+        storedModeIDs: [SwitchModeID]?,
+        availableModeIDs: Set<SwitchModeID>,
+        legacyRemovedBuiltInModeIDs: Set<SwitchModeID>
+    ) -> Set<SwitchModeID> {
+        guard let storedModeIDs else {
+            return Set(SwitchModeID.allCases).intersection(availableModeIDs)
+        }
+        var enabled = Set(storedModeIDs).intersection(availableModeIDs)
+        enabled.formUnion(legacyRemovedBuiltInModeIDs.intersection(availableModeIDs))
+        return enabled
+    }
+
     private static func deduplicatedKinds(_ kinds: [SwitchKind]) -> [SwitchKind] {
         var seen: Set<SwitchKind> = []
         return kinds.filter { seen.insert($0).inserted }
@@ -2691,7 +2691,6 @@ private enum DefaultsKey {
     static let appLanguage = "app.language"
     static let shortcuts = "switch.shortcuts"
     static let enabledModeIDs = "switch.modes.enabled"
-    static let removedBuiltInModeIDs = "switch.modes.removedBuiltIn"
     static let activeModeSessions = "switch.modes.activeSessions"
     static let customModes = "switch.modes.custom"
     static let customizationDefaultsVersion = "switch.customizationDefaultsVersion"
