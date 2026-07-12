@@ -306,11 +306,6 @@ enum RegressionDiagnostics {
     }
 
     private static func checkModeSafety(_ reporter: inout SelfTestReporter) {
-        let builtInItems = SwitchModeDefinition.builtIn.flatMap(\.items)
-        reporter.check(
-            builtInItems.allSatisfy { $0.kind.isModeEligible },
-            "built-in modes use reversible switches"
-        )
         reporter.check(
             !SwitchKind.screenClean.isModeEligible
                 && !SwitchKind.lockKeyboard.isModeEligible
@@ -322,7 +317,7 @@ enum RegressionDiagnostics {
         let now = Date()
         let futureEndDate = now.addingTimeInterval(300)
         let timedSession = ActiveSwitchModeSession(
-            modeID: .meeting,
+            modeID: SwitchModeID(rawValue: "custom.self-test"),
             originalStates: [.keepAwake: true, .doNotDisturb: true],
             originalKeepAwakeEndDate: futureEndDate,
             originalDoNotDisturbEndDate: futureEndDate
@@ -338,22 +333,11 @@ enum RegressionDiagnostics {
             "mode restoration does not revive expired timed states"
         )
 
-        let customModeID = SwitchModeID(rawValue: "custom.self-test")
-        let availableModeIDs = Set(SwitchModeID.allCases + [customModeID])
-        let migratedModeIDs = SwitchStore.migratedEnabledModeIDs(
-            storedModeIDs: [.focus, customModeID],
-            availableModeIDs: availableModeIDs,
-            legacyRemovedBuiltInModeIDs: [.presentation]
-        )
+        let retiredPresetIDs = ["presentation", "focus", "meeting", "cleanDesktop"]
+            .map(SwitchModeID.init(rawValue:))
         reporter.check(
-            migratedModeIDs.contains(.presentation),
-            "legacy deleted presets return to the mode library"
-        )
-        reporter.check(
-            migratedModeIDs.contains(.focus)
-                && migratedModeIDs.contains(customModeID)
-                && !migratedModeIDs.contains(.meeting),
-            "preset migration preserves hidden presets and custom mode visibility"
+            retiredPresetIDs.allSatisfy { !$0.isCustom },
+            "retired preset identifiers cannot enter the custom mode library"
         )
     }
 

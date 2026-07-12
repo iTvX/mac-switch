@@ -2836,21 +2836,27 @@ private struct ModesLibraryPanel: View {
 
             Divider()
 
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ModeLibrarySectionHeader(title: "PRESETS", count: store.builtInModes.count)
-                    SettingsDivider()
+            if store.customModes.isEmpty {
+                VStack(spacing: 9) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 26, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
 
-                    ForEach(Array(store.builtInModes.enumerated()), id: \.element.id) { index, mode in
-                        BuiltInModeSettingsRow(mode: mode, store: store)
+                    Text("No modes yet")
+                        .font(.system(size: 13, weight: .semibold))
 
-                        if index < store.builtInModes.count - 1 {
-                            SettingsDivider()
-                        }
-                    }
-
-                    if !store.customModes.isEmpty {
-                        SettingsDivider()
+                    Text("Create a mode and choose the switches that fit your workflow.")
+                        .font(.system(size: 11.2))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
                         ModeLibrarySectionHeader(title: "CUSTOM", count: store.customModes.count)
                         SettingsDivider()
 
@@ -2892,45 +2898,6 @@ private struct ModeLibrarySectionHeader: View {
         .padding(.horizontal, 12)
         .frame(height: 28)
         .background(PreferencesColors.surface)
-    }
-}
-
-private struct BuiltInModeSettingsRow: View {
-    let mode: SwitchModeDefinition
-    @ObservedObject var store: SwitchStore
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
-                get: { store.enabledModeIDs.contains(mode.id) },
-                set: { store.setModeVisible(mode.id, $0) }
-            ))
-            .toggleStyle(.checkbox)
-            .labelsHidden()
-            .frame(width: 20)
-            .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id))
-            .help(store.isModeActive(mode.id) ? "Turn this mode off before hiding it." : "Show this mode in the menu")
-
-            Image(systemName: mode.symbolName)
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Color.accentColor)
-                .font(.system(size: 15, weight: .medium))
-                .frame(width: 22, height: 22)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(mode.title)
-                    .font(.system(size: 12.7, weight: .medium))
-                    .lineLimit(1)
-                Text(store.isModeActive(mode.id) ? "Active" : mode.subtitle)
-                    .font(.system(size: 10.8, weight: .regular))
-                    .foregroundStyle(store.isModeActive(mode.id) ? Color.accentColor : Color.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 12)
-        .frame(height: 50)
     }
 }
 

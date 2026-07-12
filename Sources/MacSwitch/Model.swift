@@ -132,7 +132,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIterable {
+struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable {
     let rawValue: String
 
     init(rawValue: String) {
@@ -150,18 +150,8 @@ struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIter
 
     var id: String { rawValue }
 
-    static let presentation = SwitchModeID(rawValue: "presentation")
-    static let focus = SwitchModeID(rawValue: "focus")
-    static let meeting = SwitchModeID(rawValue: "meeting")
-    static let cleanDesktop = SwitchModeID(rawValue: "cleanDesktop")
-    static let allCases: [SwitchModeID] = [.presentation, .focus, .meeting, .cleanDesktop]
-
     static func custom() -> SwitchModeID {
         SwitchModeID(rawValue: "custom.\(UUID().uuidString.lowercased())")
-    }
-
-    var isBuiltIn: Bool {
-        Self.allCases.contains(self)
     }
 
     var isCustom: Bool {
@@ -176,63 +166,7 @@ struct SwitchModeDefinition: Identifiable, Codable, Equatable {
     var symbolName: String
     var items: [SwitchModeItem]
 
-    var isBuiltIn: Bool {
-        id.isBuiltIn
-    }
-
-    static let builtIn: [SwitchModeDefinition] = [
-        SwitchModeDefinition(
-            id: .presentation,
-            title: "Presentation",
-            subtitle: "Stay awake, silence alerts, and clean the desktop.",
-            symbolName: "rectangle.on.rectangle.angled",
-            items: [
-                SwitchModeItem(kind: .keepAwake, targetIsOn: true),
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true),
-                SwitchModeItem(kind: .hideDesktopIcons, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .focus,
-            title: "Focus",
-            subtitle: "Reduce visual noise for deep work.",
-            symbolName: "target",
-            items: [
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true),
-                SwitchModeItem(kind: .darkMode, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .meeting,
-            title: "Meeting",
-            subtitle: "Keep the Mac awake and mute interruptions.",
-            symbolName: "person.2.wave.2",
-            items: [
-                SwitchModeItem(kind: .keepAwake, targetIsOn: true),
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true)
-            ]
-        ),
-        SwitchModeDefinition(
-            id: .cleanDesktop,
-            title: "Clean Desk",
-            subtitle: "Hide desktop clutter and keep hidden files hidden.",
-            symbolName: "sparkles.rectangle.stack",
-            items: [
-                SwitchModeItem(kind: .hideDesktopIcons, targetIsOn: true),
-                SwitchModeItem(kind: .hideWidgets, targetIsOn: true),
-                SwitchModeItem(kind: .hideDock, targetIsOn: true),
-                SwitchModeItem(kind: .showHiddenFiles, targetIsOn: false)
-            ]
-        )
-    ]
-
     var compactTitle: String {
-        if id == .presentation { return "Present" }
-        if id == .focus { return "Focus" }
-        if id == .meeting { return "Meet" }
-        if id == .cleanDesktop { return "Clean" }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count <= 8 {
             return trimmed.isEmpty ? "Mode" : trimmed
@@ -713,6 +647,12 @@ enum ActionSafetyPreferences {
 final class SwitchStore: ObservableObject {
     private static let customizationDefaultsVersion = 2
     private static let legacyRemovedBuiltInModeIDsKey = "switch.modes.removedBuiltIn"
+    private static let legacyPresetModeIDs: Set<SwitchModeID> = [
+        SwitchModeID(rawValue: "presentation"),
+        SwitchModeID(rawValue: "focus"),
+        SwitchModeID(rawValue: "meeting"),
+        SwitchModeID(rawValue: "cleanDesktop")
+    ]
     private static let legacyDefaultEnabledKinds: Set<SwitchKind> = [
         .hideDesktopIcons,
         .darkMode,
@@ -845,6 +785,7 @@ final class SwitchStore: ObservableObject {
     private var darkModeScheduleEnforcementInFlight = false
     private var doNotDisturbExpirationEnforcementInFlight = false
     private var doNotDisturbExpirationWorkItem: DispatchWorkItem?
+    private var legacyPresetRestorationWorkItem: DispatchWorkItem?
     private var scheduledFollowUpRefreshes: Set<SwitchKind> = []
     private var pendingHideAfterDeactivation: Set<SwitchKind> = []
     private var keepAwakeRestoreEndDate: Date?
@@ -876,12 +817,8 @@ final class SwitchStore: ObservableObject {
         allModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }
     }
 
-    var builtInModes: [SwitchModeDefinition] {
-        SwitchModeDefinition.builtIn
-    }
-
     var allModes: [SwitchModeDefinition] {
-        builtInModes + customModes
+        customModes
     }
 
     var effectiveLanguage: AppLanguage {
@@ -924,24 +861,17 @@ final class SwitchStore: ObservableObject {
         let loadedCustomModes = Self.loadCustomModes(from: defaults)
         customModes = loadedCustomModes
 
-        let builtInModeIDs = Set(SwitchModeID.allCases)
-        let legacyRemovedBuiltInModeIDs = Set(
-            defaults.stringArray(forKey: Self.legacyRemovedBuiltInModeIDsKey)?
-                .map(SwitchModeID.init(rawValue:)) ?? []
-        ).intersection(builtInModeIDs)
         defaults.removeObject(forKey: Self.legacyRemovedBuiltInModeIDsKey)
 
-        let loadedModeDefinitions = SwitchModeDefinition.builtIn + loadedCustomModes
-        let validModeIDs = Set(loadedModeDefinitions.map(\.id))
-        let modesWithSwitches = Set(loadedModeDefinitions.filter { !$0.items.isEmpty }.map(\.id))
+        let customModeIDs = Set(loadedCustomModes.map(\.id))
+        let modesWithSwitches = Set(loadedCustomModes.filter { !$0.items.isEmpty }.map(\.id))
         let storedModeIDs = defaults.stringArray(forKey: DefaultsKey.enabledModeIDs)?
             .map(SwitchModeID.init(rawValue:))
-        enabledModeIDs = Self.migratedEnabledModeIDs(
-            storedModeIDs: storedModeIDs,
-            availableModeIDs: modesWithSwitches,
-            legacyRemovedBuiltInModeIDs: legacyRemovedBuiltInModeIDs
+        enabledModeIDs = Set(storedModeIDs ?? []).intersection(modesWithSwitches)
+        activeModeSessions = Self.loadActiveModeSessions(
+            from: defaults,
+            validModeIDs: customModeIDs.union(Self.legacyPresetModeIDs)
         )
-        activeModeSessions = Self.loadActiveModeSessions(from: defaults, validModeIDs: validModeIDs)
 
         shortcuts = Self.loadShortcuts(from: defaults)
 
@@ -1006,6 +936,7 @@ final class SwitchStore: ObservableObject {
             requestDarkModeLocation()
         }
         registerShortcuts()
+        scheduleLegacyPresetRestoration()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.enforceDarkModeScheduleAsync()
             self?.enforceDoNotDisturbExpirationAsync()
@@ -1248,13 +1179,9 @@ final class SwitchStore: ObservableObject {
             title: uniqueCustomModeTitle(),
             subtitle: "Custom workflow",
             symbolName: "slider.horizontal.3",
-            items: [
-                SwitchModeItem(kind: .keepAwake, targetIsOn: true),
-                SwitchModeItem(kind: .doNotDisturb, targetIsOn: true)
-            ]
+            items: []
         )
         customModes.append(mode)
-        enabledModeIDs.insert(id)
         return id
     }
 
@@ -1265,10 +1192,13 @@ final class SwitchStore: ObservableObject {
               !isModeInteractionDisabled(mode)
         else { return }
 
+        let wasEmpty = customModes[index].items.isEmpty
         let sanitized = sanitizedCustomMode(mode)
         customModes[index] = sanitized
         if sanitized.items.isEmpty {
             enabledModeIDs.remove(sanitized.id)
+        } else if wasEmpty {
+            enabledModeIDs.insert(sanitized.id)
         }
     }
 
@@ -1394,6 +1324,9 @@ final class SwitchStore: ObservableObject {
               !kinds.contains(where: isActionBusy)
         else {
             lastError = "Finish the current switch update before turning off this mode."
+            if Self.legacyPresetModeIDs.contains(mode.id) {
+                scheduleLegacyPresetRestoration(after: 30)
+            }
             return
         }
 
@@ -1418,6 +1351,9 @@ final class SwitchStore: ObservableObject {
                 } else {
                     self.pendingCustomModeDeletionID = nil
                     self.lastError = "Mode \"\(mode.title)\" could not fully restore its previous state. Retry turning it off. \(self.modeFailureDescription(failures))"
+                    if Self.legacyPresetModeIDs.contains(mode.id) {
+                        self.scheduleLegacyPresetRestoration(after: 30)
+                    }
                 }
                 self.finishModeOperation(mode.id, reservedKinds: kinds)
                 if failures.isEmpty {
@@ -1431,6 +1367,40 @@ final class SwitchStore: ObservableObject {
         guard pendingCustomModeDeletionID == modeID else { return }
         pendingCustomModeDeletionID = nil
         removeCustomMode(modeID)
+    }
+
+    private func scheduleLegacyPresetRestoration(after delay: TimeInterval = 0.8) {
+        guard activeModeSessions.keys.contains(where: Self.legacyPresetModeIDs.contains) else {
+            legacyPresetRestorationWorkItem?.cancel()
+            legacyPresetRestorationWorkItem = nil
+            return
+        }
+
+        legacyPresetRestorationWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.legacyPresetRestorationWorkItem = nil
+            self.restoreLegacyPresetSessionIfNeeded()
+        }
+        legacyPresetRestorationWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    private func restoreLegacyPresetSessionIfNeeded() {
+        guard activeModeOperationID == nil else {
+            scheduleLegacyPresetRestoration(after: 1)
+            return
+        }
+        guard let modeID = activeModeSessions.keys.first(where: Self.legacyPresetModeIDs.contains) else { return }
+
+        let retiredMode = SwitchModeDefinition(
+            id: modeID,
+            title: "Previous Mode",
+            subtitle: "",
+            symbolName: "slider.horizontal.3",
+            items: []
+        )
+        deactivateMode(retiredMode)
     }
 
     private func beginModeOperation(_ modeID: SwitchModeID, reserving kinds: Set<SwitchKind>) {
@@ -2066,6 +2036,8 @@ final class SwitchStore: ObservableObject {
         timer?.invalidate()
         timer = nil
         cancelDoNotDisturbExpirationMonitor()
+        legacyPresetRestorationWorkItem?.cancel()
+        legacyPresetRestorationWorkItem = nil
         controller.prepareForTermination()
     }
 
@@ -2213,7 +2185,7 @@ final class SwitchStore: ObservableObject {
     }
 
     private func saveActiveModeSessions() {
-        let orderedSessions = allModes.map(\.id).compactMap { activeModeSessions[$0] }
+        let orderedSessions = activeModeSessions.values.sorted { $0.modeID.rawValue < $1.modeID.rawValue }
         guard let data = try? JSONEncoder().encode(orderedSessions) else { return }
         defaults.set(data, forKey: DefaultsKey.activeModeSessions)
     }
@@ -2609,19 +2581,6 @@ final class SwitchStore: ObservableObject {
             break
         }
         return loaded
-    }
-
-    static func migratedEnabledModeIDs(
-        storedModeIDs: [SwitchModeID]?,
-        availableModeIDs: Set<SwitchModeID>,
-        legacyRemovedBuiltInModeIDs: Set<SwitchModeID>
-    ) -> Set<SwitchModeID> {
-        guard let storedModeIDs else {
-            return Set(SwitchModeID.allCases).intersection(availableModeIDs)
-        }
-        var enabled = Set(storedModeIDs).intersection(availableModeIDs)
-        enabled.formUnion(legacyRemovedBuiltInModeIDs.intersection(availableModeIDs))
-        return enabled
     }
 
     private static func deduplicatedKinds(_ kinds: [SwitchKind]) -> [SwitchKind] {
