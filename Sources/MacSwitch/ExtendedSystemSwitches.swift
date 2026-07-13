@@ -1236,8 +1236,6 @@ struct ShowHiddenFilesSwitch {
 }
 
 struct MuteMicrophoneSwitch {
-    private let previousVolumeKey = "switch.muteMicrophone.previousVolume"
-
     func snapshot() -> SwitchSnapshot {
         guard let device = defaultInputDevice else {
             return switchSnapshot(isAvailable: false, warning: "No input device")
@@ -1271,7 +1269,7 @@ struct MuteMicrophoneSwitch {
                 return "macOS accepted the microphone mute request, but input mute did not change."
             }
             if !enabled {
-                UserDefaults.standard.removeObject(forKey: previousVolumeKey)
+                MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier(for: device))
             }
             return nil
         }
@@ -1279,9 +1277,11 @@ struct MuteMicrophoneSwitch {
         guard let currentVolume = readVolume(device: device) else {
             return "The current microphone does not expose mute or input volume control."
         }
+        let restoreIdentifier = restoreIdentifier(for: device)
         if enabled {
-            UserDefaults.standard.set(Double(currentVolume), forKey: previousVolumeKey)
+            MicrophoneVolumeRestoreStore.save(Double(currentVolume), for: restoreIdentifier)
             guard setVolume(0, device: device) else {
+                MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier)
                 return "Could not mute microphone input volume."
             }
             return waitForVolume(device: device) { $0 <= 0.001 }
@@ -1289,12 +1289,12 @@ struct MuteMicrophoneSwitch {
                 : "macOS accepted the request, but microphone input volume did not mute."
         }
 
-        let previous = UserDefaults.standard.object(forKey: previousVolumeKey) as? Double
+        let previous = MicrophoneVolumeRestoreStore.volume(for: restoreIdentifier)
         let restored = Float32(previous ?? 0.65)
         let target = max(restored, 0.25)
         if setVolume(target, device: device),
            waitForVolume(device: device, matches: target) {
-            UserDefaults.standard.removeObject(forKey: previousVolumeKey)
+            MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier)
             return nil
         }
         return "Could not restore microphone input volume."
@@ -1310,6 +1310,24 @@ struct MuteMicrophoneSwitch {
         var size = UInt32(MemoryLayout<AudioDeviceID>.size)
         let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
         return status == noErr && device != 0 ? device : nil
+    }
+
+    private func restoreIdentifier(for device: AudioDeviceID) -> String {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var uid: Unmanaged<CFString>?
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid) == noErr,
+           let uid {
+            let value = uid.takeRetainedValue() as String
+            if !value.isEmpty {
+                return "uid:\(value)"
+            }
+        }
+        return "id:\(device)"
     }
 
     private func readMute(device: AudioDeviceID) -> Bool? {
@@ -1425,6 +1443,53 @@ struct MuteMicrophoneSwitch {
                 mScope: kAudioDevicePropertyScopeInput,
                 mElement: $0
             )
+        }
+    }
+}
+
+enum MicrophoneVolumeRestoreStore {
+    private static let volumesKey = "switch.muteMicrophone.previousVolumesByDevice"
+    private static let legacyVolumeKey = "switch.muteMicrophone.previousVolume"
+
+    static func volume(
+        for deviceIdentifier: String,
+        defaults: UserDefaults = .standard
+    ) -> Double? {
+        if let number = defaults.dictionary(forKey: volumesKey)?[deviceIdentifier] as? NSNumber {
+            let value = number.doubleValue
+            return value.isFinite && (0...1).contains(value) ? value : nil
+        }
+
+        guard let number = defaults.object(forKey: legacyVolumeKey) as? NSNumber else { return nil }
+        let value = number.doubleValue
+        defaults.removeObject(forKey: legacyVolumeKey)
+        guard value.isFinite && (0...1).contains(value) else { return nil }
+        save(value, for: deviceIdentifier, defaults: defaults)
+        return value
+    }
+
+    static func save(
+        _ volume: Double,
+        for deviceIdentifier: String,
+        defaults: UserDefaults = .standard
+    ) {
+        guard !deviceIdentifier.isEmpty, volume.isFinite else { return }
+        var volumes = defaults.dictionary(forKey: volumesKey) ?? [:]
+        volumes[deviceIdentifier] = min(max(volume, 0), 1)
+        defaults.set(volumes, forKey: volumesKey)
+        defaults.removeObject(forKey: legacyVolumeKey)
+    }
+
+    static func clear(
+        for deviceIdentifier: String,
+        defaults: UserDefaults = .standard
+    ) {
+        var volumes = defaults.dictionary(forKey: volumesKey) ?? [:]
+        volumes.removeValue(forKey: deviceIdentifier)
+        if volumes.isEmpty {
+            defaults.removeObject(forKey: volumesKey)
+        } else {
+            defaults.set(volumes, forKey: volumesKey)
         }
     }
 }
@@ -1970,6 +2035,7 @@ struct LockScreenSwitch {
 struct XcodeCleanSwitch {
     private static var cachedSize: (date: Date, bytes: UInt64)?
     private static var isCalculating = false
+    private static var cacheGeneration: UInt64 = 0
     private static let cacheTTL: TimeInterval = 120
     private static let emptyCacheTTL: TimeInterval = 6
     private static let cacheQueue = DispatchQueue(label: "com.maxyu.macswitch.xcode-clean-size-cache")
@@ -2046,6 +2112,7 @@ struct XcodeCleanSwitch {
 
     private static func setCachedSize(_ bytes: UInt64) {
         cacheQueue.sync {
+            cacheGeneration &+= 1
             cachedSize = (Date(), bytes)
             isCalculating = false
         }
@@ -2053,22 +2120,27 @@ struct XcodeCleanSwitch {
 
     static func invalidateCachedSize() {
         cacheQueue.sync {
+            cacheGeneration &+= 1
             cachedSize = nil
             isCalculating = false
         }
     }
 
     private static func startSizeCalculationIfNeeded() {
-        let shouldStart = cacheQueue.sync { () -> Bool in
-            guard !isCalculating else { return false }
+        let calculationGeneration = cacheQueue.sync { () -> UInt64? in
+            guard !isCalculating else { return nil }
             isCalculating = true
-            return true
+            return cacheGeneration
         }
-        guard shouldStart else { return }
+        guard let calculationGeneration else { return }
 
         DispatchQueue.global(qos: .utility).async {
             let bytes = directorySize(at: XcodeCleanPreferences.derivedDataURL)
-            setCachedSize(bytes)
+            cacheQueue.sync {
+                guard calculationGeneration == cacheGeneration else { return }
+                cachedSize = (Date(), bytes)
+                isCalculating = false
+            }
         }
     }
 
