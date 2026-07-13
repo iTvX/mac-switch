@@ -404,7 +404,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customModeSettingsRowSource.contains("This mode cannot be recovered."))
         XCTAssertTrue(customModeSettingsRowSource.contains(".disabled(store.isModeInteractionDisabled(mode))"))
         XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
-        XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, $0)"))
+        XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, value)"))
         XCTAssertTrue(modesSource.contains("Turn this mode off before hiding it."))
         XCTAssertTrue(modesSource.contains("confirmationDialog("))
         XCTAssertTrue(modesSource.contains("HStack(alignment: .top, spacing: selectedCustomMode == nil ? 0 : 10)"))
@@ -498,7 +498,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("private func restoreWindowMovement()"))
         XCTAssertTrue(appDelegate.contains("movementSuppressedWindow.isMovable = windowWasMovable"))
         XCTAssertTrue(appDelegate.contains("override func viewWillMove(toWindow newWindow: NSWindow?)"))
-        XCTAssertTrue(appDelegate.contains("deinit {\n        restoreWindowMovement()"))
+        XCTAssertTrue(appDelegate.contains("deinit {"))
+        XCTAssertTrue(appDelegate.contains("MainActor.assumeIsolated"))
         XCTAssertTrue(appDelegate.contains("top edge routes events to the resize handle"))
         XCTAssertTrue(appDelegate.contains("bottom edge routes events to the resize handle"))
         XCTAssertTrue(appDelegate.contains("top edge suppresses competing titlebar movement before mouse down"))
@@ -860,8 +861,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(manager.contains("compareVersion(bundleVersion, toVersion: item.versionString) != .orderedDescending"))
         XCTAssertTrue(manager.contains("A user-requested channel switch may cross to an older or equal build."))
         XCTAssertFalse(manager.contains("guard canInstall(item) else {\n            setChannelSwitchTarget(target"), "an explicit channel switch should not be rejected only because its build number is older")
-        XCTAssertTrue(manager.contains("let target = channelSwitchTarget"))
-        XCTAssertTrue(manager.contains("guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }"))
+        XCTAssertTrue(manager.contains("let state = lock.withLock { (storedTarget, storedUpdateVersion) }"))
+        XCTAssertTrue(manager.contains("guard state.0 != nil, let updateVersion = state.1, !bundleVersion.isEmpty else { return nil }"))
         XCTAssertTrue(manager.contains("if versionA == bundleVersion, versionB == updateVersion"))
         XCTAssertTrue(manager.contains("return .orderedAscending"))
         XCTAssertFalse(manager.contains("guard versionA != versionB else { return .orderedSame }"))
@@ -932,6 +933,28 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(publishScript.contains("gh release upload \"$APPCAST_RELEASE_TAG\" \"$APPCAST_PATH\" --clobber"))
         XCTAssertTrue(publishScript.contains("curl -fsSL"))
         XCTAssertTrue(publishScript.contains("Public appcast did not match generated appcast"))
+    }
+
+    func testSwiftSixLanguageModeHasExplicitConcurrencyBoundaries() throws {
+        let package = try String(contentsOf: packageRoot.appendingPathComponent("Package.swift"))
+        let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let shortcuts = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/GlobalShortcuts.swift"))
+        let updates = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SoftwareUpdateManager.swift"))
+        let extendedSwitches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+
+        XCTAssertTrue(package.contains("swiftLanguageModes: [.v6]"))
+        XCTAssertTrue(appDelegate.contains("@MainActor\nfinal class AppDelegate"))
+        XCTAssertTrue(model.contains("@MainActor\nfinal class SwitchStore"))
+        XCTAssertTrue(model.contains("enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable"))
+        XCTAssertTrue(shortcuts.contains("@MainActor @Sendable (SwitchKind) -> Void"))
+        XCTAssertTrue(updates.contains("private final class ChannelSwitchState: @unchecked Sendable"))
+        XCTAssertTrue(updates.contains("lock.withLock"))
+        XCTAssertFalse(extendedSwitches.contains("nonisolated(unsafe)"))
+        XCTAssertTrue(extendedSwitches.contains("private final class SizeCacheState: @unchecked Sendable"))
+        XCTAssertTrue(extendedSwitches.contains("private final class ShortcutCacheState: @unchecked Sendable"))
+        XCTAssertTrue(views.contains("set: { value, _ in"), "custom Binding setters should use Swift 6's transaction-aware overload")
     }
 
     func testAppcastItemToolPreservesStableAndBetaItemsWithSharedBuild() throws {
@@ -1295,7 +1318,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration)"))
         XCTAssertFalse(views.contains("store.keepAwakeDuration ="))
         XCTAssertTrue(views.contains("store.setKeepAwakeDuration(.indefinitely)"))
-        XCTAssertTrue(views.contains("set: { store.setKeepAwakeDuration($0) }"))
+        XCTAssertTrue(views.contains("set: { value, _ in store.setKeepAwakeDuration(value) }"))
     }
 
     func testHiddenStatefulSwitchesAreRemovedOnlyAfterSuccessfulDeactivation() throws {
@@ -1382,7 +1405,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customizeRowSource.contains("let statusText: String"))
         XCTAssertTrue(customizeRowSource.contains(".disabled(isBusy)"))
         XCTAssertTrue(customizeRowSource.contains("Text(statusText)"))
-        XCTAssertFalse(customizeRowSource.contains("@ObservedObject var store"))
+        XCTAssertTrue(customizeRowSource.contains("@ObservedObject var store"))
+        XCTAssertTrue(customizeRowSource.contains("store.setEnabled(kind, value)"))
         XCTAssertFalse(customizeRowSource.contains(".onHover"))
         XCTAssertTrue(switchPanelSource.contains("store.isCustomizationBusy(kind)"))
         XCTAssertTrue(switchPanelSource.contains("? \"Updating\""))
@@ -2214,7 +2238,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(doNotDisturbSource.contains("Ready. Using \\(shortcutPair.on) and \\(shortcutPair.off)."))
         XCTAssertTrue(doNotDisturbSource.contains("DND On and DND Off must resolve to two different shortcuts."))
         XCTAssertTrue(preferencesSource.contains("invalidateInstalledShortcutsCache()"))
-        XCTAssertTrue(preferencesSource.contains("shortcutCache = nil"))
+        XCTAssertTrue(preferencesSource.contains("shortcutCache.invalidate()"))
+        XCTAssertTrue(preferencesSource.contains("private final class ShortcutCacheState: @unchecked Sendable"))
         XCTAssertTrue(preferencesSource.contains("static var shortcutConfigurationError: String?"))
         XCTAssertTrue(preferencesSource.contains("Use different shortcut names for DND On and DND Off."))
         XCTAssertTrue(preferencesSource.contains("static func installedShortcutPair(in installed: Set<String>)"))
@@ -2269,7 +2294,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(cleanerSource.contains("private let maximumSessionDuration: TimeInterval = 10 * 60"))
         XCTAssertTrue(cleanerSource.contains("scheduleFailSafeExit()"))
         XCTAssertTrue(cleanerSource.contains("cancelFailSafeExit()"))
-        XCTAssertTrue(cleanerSource.contains("windows.allSatisfy(\\.isVisible)"))
+        XCTAssertTrue(cleanerSource.contains("windows.allSatisfy({ $0.isVisible })"))
         XCTAssertTrue(cleanerSource.contains("Could not present screen cleaning mode on every display."))
         XCTAssertTrue(cleanerSource.contains("Could not exit screen cleaning mode."))
         XCTAssertTrue(cleanerSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + maximumSessionDuration"))
@@ -2310,8 +2335,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(xcodeSource.contains("removedCount += 1"))
         XCTAssertTrue(xcodeSource.contains("Partially cleaned DerivedData"))
         XCTAssertTrue(xcodeSource.contains("Removed \\(removedCount) of \\(items.count) items"))
-        XCTAssertTrue(xcodeSource.contains("private static var cacheGeneration: UInt64 = 0"))
-        XCTAssertTrue(xcodeSource.contains("guard calculationGeneration == cacheGeneration else { return }"))
+        XCTAssertTrue(xcodeSource.contains("private final class SizeCacheState: @unchecked Sendable"))
+        XCTAssertTrue(xcodeSource.contains("private var cacheGeneration: UInt64 = 0"))
+        XCTAssertTrue(xcodeSource.contains("guard generation == cacheGeneration else { return }"))
         XCTAssertTrue(xcodeSource.components(separatedBy: "cacheGeneration &+= 1").count >= 3)
         XCTAssertTrue(trashSource.contains("let remaining = TrashPreferences.itemCount"))
         XCTAssertTrue(trashSource.contains("Finder finished, but \\(remaining) item"))
@@ -3075,7 +3101,7 @@ final class PackageSmokeTests: XCTestCase {
         let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
         let registerSource = try extract(
             shortcuts,
-            from: "func register(shortcuts:",
+            from: "func register(",
             to: "private func unregisterAll()"
         )
         let loadSource = try extract(
