@@ -77,12 +77,13 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
 
     private let defaults = UserDefaults.standard
     private let bundleVersion: String
-    private let channelSwitchLock = NSLock()
+    private let channelSwitchState = ChannelSwitchState()
     private var updaterController: SPUStandardUpdaterController?
     private var updaterObservations: [NSKeyValueObservation] = []
-    private var channelSwitchTarget: SoftwareUpdateChannel?
-    private var channelSwitchUpdateVersion: String?
-    private lazy var versionComparator = ChannelSwitchVersionComparator(manager: self)
+    private lazy var versionComparator = ChannelSwitchVersionComparator(
+        state: channelSwitchState,
+        bundleVersion: bundleVersion
+    )
 
     var hasPendingChannelSwitch: Bool {
         updateChannel != currentBuildChannel
@@ -207,39 +208,15 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     }
 
     private func currentChannelSwitchTarget() -> SoftwareUpdateChannel? {
-        channelSwitchLock.lock()
-        defer { channelSwitchLock.unlock() }
-        return channelSwitchTarget
+        channelSwitchState.target
     }
 
     private func setChannelSwitchTarget(_ target: SoftwareUpdateChannel?, updateVersion: String?) {
-        channelSwitchLock.lock()
-        channelSwitchTarget = target
-        channelSwitchUpdateVersion = updateVersion
-        channelSwitchLock.unlock()
+        channelSwitchState.set(target: target, updateVersion: updateVersion)
     }
 
     private func clearChannelSwitch() {
         setChannelSwitchTarget(nil, updateVersion: nil)
-    }
-
-    fileprivate func channelSwitchComparisonOverride(versionA: String, versionB: String) -> ComparisonResult? {
-        channelSwitchLock.lock()
-        let target = channelSwitchTarget
-        let updateVersion = channelSwitchUpdateVersion
-        channelSwitchLock.unlock()
-
-        guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }
-        if versionA == bundleVersion, versionB == updateVersion {
-            // Channel switching can intentionally install a different package with an
-            // older or equal CFBundleVersion.
-            // Sparkle asks whether the selected item is newer by comparing host -> item.
-            return .orderedAscending
-        }
-        if updateVersion != bundleVersion, versionA == updateVersion, versionB == bundleVersion {
-            return .orderedDescending
-        }
-        return nil
     }
 
     private func bestItem(in items: [SUAppcastItem], for channel: SoftwareUpdateChannel) -> SUAppcastItem? {
@@ -255,15 +232,56 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     }
 }
 
-private final class ChannelSwitchVersionComparator: NSObject, SUVersionComparison {
-    private weak var manager: SoftwareUpdateManager?
+private final class ChannelSwitchState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedTarget: SoftwareUpdateChannel?
+    private var storedUpdateVersion: String?
 
-    init(manager: SoftwareUpdateManager) {
-        self.manager = manager
+    var target: SoftwareUpdateChannel? {
+        lock.withLock { storedTarget }
+    }
+
+    func set(target: SoftwareUpdateChannel?, updateVersion: String?) {
+        lock.withLock {
+            storedTarget = target
+            storedUpdateVersion = updateVersion
+        }
+    }
+
+    func comparisonOverride(
+        versionA: String,
+        versionB: String,
+        bundleVersion: String
+    ) -> ComparisonResult? {
+        let state = lock.withLock { (storedTarget, storedUpdateVersion) }
+        guard state.0 != nil, let updateVersion = state.1, !bundleVersion.isEmpty else { return nil }
+        if versionA == bundleVersion, versionB == updateVersion {
+            // Channel switching can intentionally install a different package with an
+            // older or equal CFBundleVersion.
+            return .orderedAscending
+        }
+        if updateVersion != bundleVersion, versionA == updateVersion, versionB == bundleVersion {
+            return .orderedDescending
+        }
+        return nil
+    }
+}
+
+private final class ChannelSwitchVersionComparator: NSObject, SUVersionComparison {
+    private let state: ChannelSwitchState
+    private let bundleVersion: String
+
+    init(state: ChannelSwitchState, bundleVersion: String) {
+        self.state = state
+        self.bundleVersion = bundleVersion
     }
 
     func compareVersion(_ versionA: String, toVersion versionB: String) -> ComparisonResult {
-        if let override = manager?.channelSwitchComparisonOverride(versionA: versionA, versionB: versionB) {
+        if let override = state.comparisonOverride(
+            versionA: versionA,
+            versionB: versionB,
+            bundleVersion: bundleVersion
+        ) {
             return override
         }
         return SUStandardVersionComparator.default.compareVersion(versionA, toVersion: versionB)

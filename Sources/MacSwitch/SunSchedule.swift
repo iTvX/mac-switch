@@ -24,7 +24,8 @@ struct SunWindow: Equatable {
     }
 }
 
-final class SunScheduleProvider: NSObject, CLLocationManagerDelegate {
+@MainActor
+final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDelegate {
     var onUpdate: (() -> Void)?
 
     private let defaults: UserDefaults
@@ -137,9 +138,7 @@ final class SunScheduleProvider: NSObject, CLLocationManagerDelegate {
     }
 
     private func notify() {
-        DispatchQueue.main.async { [weak self] in
-            self?.onUpdate?()
-        }
+        onUpdate?()
     }
 }
 

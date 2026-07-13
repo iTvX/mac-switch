@@ -39,5 +39,5 @@ let package = Package(
             path: "Tests/MacSwitchTests"
         )
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

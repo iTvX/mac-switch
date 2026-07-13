@@ -3,6 +3,7 @@ import Combine
 import CoreGraphics
 import SwiftUI
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private enum PreferencesLayoutMode: String {
         case compact
@@ -386,7 +387,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startPreferencesResizeTimer() {
         preferencesResizeTimer?.invalidate()
         let timer = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.flushQueuedPreferencesResize()
+            Task { @MainActor [weak self] in
+                self?.flushQueuedPreferencesResize()
+            }
         }
         timer.tolerance = 1.0 / 240.0
         preferencesResizeTimer = timer
@@ -990,7 +993,9 @@ private final class PreferencesVerticalResizeHandleView: NSView {
     }
 
     deinit {
-        restoreWindowMovement()
+        MainActor.assumeIsolated {
+            restoreWindowMovement()
+        }
     }
 
     private func suppressWindowMovementForTopEdge() {

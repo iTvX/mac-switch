@@ -807,8 +807,7 @@ enum DoNotDisturbPreferences {
     private static let customOnShortcutKey = "switch.doNotDisturb.customOnShortcutName"
     private static let customOffShortcutKey = "switch.doNotDisturb.customOffShortcutName"
     private static let cacheTTL: TimeInterval = 5
-    private static let cacheQueue = DispatchQueue(label: "com.maxyu.macswitch.dnd-shortcut-cache")
-    private static var shortcutCache: (date: Date, shortcuts: Set<String>, error: String?)?
+    private static let shortcutCache = ShortcutCacheState()
 
     static var customOnShortcutName: String {
         get { UserDefaults.standard.string(forKey: customOnShortcutKey) ?? "" }
@@ -853,21 +852,16 @@ enum DoNotDisturbPreferences {
     }
 
     static func invalidateInstalledShortcutsCache() {
-        cacheQueue.sync {
-            shortcutCache = nil
-        }
+        shortcutCache.invalidate()
     }
 
     static var installedShortcutsError: String? {
-        cacheQueue.sync {
-            shortcutCache?.error
-        }
+        shortcutCache.error
     }
 
     private static func loadInstalledShortcuts(forceRefresh: Bool) -> Set<String> {
         if !forceRefresh,
-           let cached = cacheQueue.sync(execute: { shortcutCache }),
-           Date().timeIntervalSince(cached.date) < cacheTTL {
+           let cached = shortcutCache.validEntry(ttl: cacheTTL) {
             return cached.shortcuts
         }
 
@@ -876,16 +870,42 @@ enum DoNotDisturbPreferences {
             let error = conciseOneLineFailure(
                 ProcessRunner.failureMessage(for: result, fallback: "Could not read Shortcuts.")
             )
-            cacheQueue.sync {
-                shortcutCache = (Date(), [], error)
-            }
+            shortcutCache.store(shortcuts: [], error: error)
             return []
         }
         let shortcuts = Set(result.output.split(separator: "\n").map { normalizedShortcutName(String($0)) }.filter { !$0.isEmpty })
-        cacheQueue.sync {
-            shortcutCache = (Date(), shortcuts, nil)
-        }
+        shortcutCache.store(shortcuts: shortcuts, error: nil)
         return shortcuts
+    }
+
+    private final class ShortcutCacheState: @unchecked Sendable {
+        typealias Entry = (date: Date, shortcuts: Set<String>, error: String?)
+
+        private let queue = DispatchQueue(label: "com.maxyu.macswitch.dnd-shortcut-cache")
+        private var entry: Entry?
+
+        var error: String? {
+            queue.sync { entry?.error }
+        }
+
+        func validEntry(ttl: TimeInterval) -> Entry? {
+            queue.sync {
+                guard let entry, Date().timeIntervalSince(entry.date) < ttl else { return nil }
+                return entry
+            }
+        }
+
+        func store(shortcuts: Set<String>, error: String?) {
+            queue.sync {
+                entry = (Date(), shortcuts, error)
+            }
+        }
+
+        func invalidate() {
+            queue.sync {
+                entry = nil
+            }
+        }
     }
 
     static var onShortcutInstalled: Bool {
@@ -2033,16 +2053,13 @@ struct LockScreenSwitch {
 }
 
 struct XcodeCleanSwitch {
-    private static var cachedSize: (date: Date, bytes: UInt64)?
-    private static var isCalculating = false
-    private static var cacheGeneration: UInt64 = 0
     private static let cacheTTL: TimeInterval = 120
     private static let emptyCacheTTL: TimeInterval = 6
-    private static let cacheQueue = DispatchQueue(label: "com.maxyu.macswitch.xcode-clean-size-cache")
+    private static let sizeCache = SizeCacheState()
 
     func snapshot() -> SwitchSnapshot {
         if let bytes = Self.cachedDerivedDataSize() {
-            let size = bytes == 0 ? "Zero" : Self.byteFormatter.string(fromByteCount: Int64(bytes))
+            let size = bytes == 0 ? "Zero" : Self.formattedByteCount(bytes)
             return switchSnapshot(isAvailable: bytes > 0, subtitle: "DerivedData: \(size)")
         }
         return switchSnapshot(subtitle: "DerivedData: Calculating...")
@@ -2093,15 +2110,15 @@ struct XcodeCleanSwitch {
         }
     }
 
-    private static var byteFormatter: ByteCountFormatter = {
+    private static func formattedByteCount(_ bytes: UInt64) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file
-        return formatter
-    }()
+        return formatter.string(fromByteCount: Int64(bytes))
+    }
 
     private static func cachedDerivedDataSize() -> UInt64? {
-        let cached = cacheQueue.sync { cachedSize }
+        let cached = sizeCache.entry
         if let cached,
            Date().timeIntervalSince(cached.date) < (cached.bytes == 0 ? emptyCacheTTL : cacheTTL) {
             return cached.bytes
@@ -2111,33 +2128,62 @@ struct XcodeCleanSwitch {
     }
 
     private static func setCachedSize(_ bytes: UInt64) {
-        cacheQueue.sync {
-            cacheGeneration &+= 1
-            cachedSize = (Date(), bytes)
-            isCalculating = false
-        }
+        sizeCache.set(bytes)
     }
 
     static func invalidateCachedSize() {
-        cacheQueue.sync {
-            cacheGeneration &+= 1
-            cachedSize = nil
-            isCalculating = false
-        }
+        sizeCache.invalidate()
     }
 
     private static func startSizeCalculationIfNeeded() {
-        let calculationGeneration = cacheQueue.sync { () -> UInt64? in
-            guard !isCalculating else { return nil }
-            isCalculating = true
-            return cacheGeneration
-        }
+        let calculationGeneration = sizeCache.beginCalculation()
         guard let calculationGeneration else { return }
 
         DispatchQueue.global(qos: .utility).async {
             let bytes = directorySize(at: XcodeCleanPreferences.derivedDataURL)
-            cacheQueue.sync {
-                guard calculationGeneration == cacheGeneration else { return }
+            sizeCache.completeCalculation(bytes: bytes, generation: calculationGeneration)
+        }
+    }
+
+    private final class SizeCacheState: @unchecked Sendable {
+        typealias Entry = (date: Date, bytes: UInt64)
+
+        private let queue = DispatchQueue(label: "com.maxyu.macswitch.xcode-clean-size-cache")
+        private var cachedSize: Entry?
+        private var isCalculating = false
+        private var cacheGeneration: UInt64 = 0
+
+        var entry: Entry? {
+            queue.sync { cachedSize }
+        }
+
+        func set(_ bytes: UInt64) {
+            queue.sync {
+                cacheGeneration &+= 1
+                cachedSize = (Date(), bytes)
+                isCalculating = false
+            }
+        }
+
+        func invalidate() {
+            queue.sync {
+                cacheGeneration &+= 1
+                cachedSize = nil
+                isCalculating = false
+            }
+        }
+
+        func beginCalculation() -> UInt64? {
+            queue.sync {
+                guard !isCalculating else { return nil }
+                isCalculating = true
+                return cacheGeneration
+            }
+        }
+
+        func completeCalculation(bytes: UInt64, generation: UInt64) {
+            queue.sync {
+                guard generation == cacheGeneration else { return }
                 cachedSize = (Date(), bytes)
                 isCalculating = false
             }

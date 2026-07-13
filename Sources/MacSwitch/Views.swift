@@ -431,7 +431,7 @@ private struct DashboardDragState: Equatable {
 }
 
 private struct DashboardRowFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [SwitchKind: CGRect] = [:]
+    static let defaultValue: [SwitchKind: CGRect] = [:]
 
     static func reduce(value: inout [SwitchKind: CGRect], nextValue: () -> [SwitchKind: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
@@ -1280,7 +1280,7 @@ private struct KeepAwakeDurationMenu: View {
 
             Toggle("Keep awake when the lid is closed", isOn: Binding(
                 get: { keepAwakeWhenLidClosed },
-                set: { value in
+                set: { value, _ in
                     keepAwakeWhenLidClosed = value
                     KeepAwakePreferences.keepAwakeWhenLidClosed = value
                     if store.snapshots[.keepAwake]?.isOn == true {
@@ -1467,6 +1467,7 @@ private struct ErrorRemediation {
     let symbol: String
 }
 
+@MainActor
 private enum ErrorFixRouter {
     static func remediation(for message: String) -> ErrorRemediation? {
         let lowercased = message.lowercased()
@@ -1637,6 +1638,7 @@ private enum ErrorFixRouter {
 }
 
 @discardableResult
+@MainActor
 private func reportOpenResult(_ opened: Bool, store: SwitchStore, failureMessage: String) -> Bool {
     if !opened {
         store.lastError = failureMessage
@@ -1647,16 +1649,18 @@ private func reportOpenResult(_ opened: Bool, store: SwitchStore, failureMessage
 }
 
 @discardableResult
+@MainActor
 private func openWorkspaceURLOrReport(_ url: URL, store: SwitchStore, failureMessage: String) -> Bool {
     reportOpenResult(openWorkspaceURL(url), store: store, failureMessage: failureMessage)
 }
 
+@MainActor
 private func scheduleAfterSwitchActionSettles(
     store: SwitchStore,
     kind: SwitchKind,
     delay: TimeInterval = 0.25,
     remainingAttempts: Int = 300,
-    action: @escaping () -> Void
+    action: @escaping @MainActor @Sendable () -> Void
 ) {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
         if store.isActionBusy(kind), remainingAttempts > 0 {
@@ -2890,7 +2894,7 @@ private struct CustomModeSettingsRow: View {
         HStack(spacing: 10) {
             Toggle("", isOn: Binding(
                 get: { store.enabledModeIDs.contains(mode.id) },
-                set: { store.setModeVisible(mode.id, $0) }
+                set: { value, _ in store.setModeVisible(mode.id, value) }
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
@@ -3190,7 +3194,7 @@ private struct CustomModeSwitchTargetRow: View {
         HStack(spacing: 10) {
             Toggle("", isOn: Binding(
                 get: { isIncluded },
-                set: setIncluded
+                set: { value, _ in setIncluded(value) }
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
@@ -3211,7 +3215,7 @@ private struct CustomModeSwitchTargetRow: View {
 
             Picker("", selection: Binding(
                 get: { targetIsOn },
-                set: setTarget
+                set: { value, _ in setTarget(value) }
             )) {
                 Text("On").tag(true)
                 Text("Off").tag(false)
@@ -3292,16 +3296,20 @@ private enum AppLinks {
     static let diskUtility = URL(fileURLWithPath: "/System/Applications/Utilities/Disk Utility.app")
 }
 
+@MainActor
 private enum AppDiagnostics {
     private static let refreshPollInterval: TimeInterval = 0.1
     private static let refreshPollLimit = 12
 
-    static func copyToPasteboard(store: SwitchStore, completion: @escaping () -> Void) {
+    static func copyToPasteboard(
+        store: SwitchStore,
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) {
         store.refreshAllAsync()
         DispatchQueue.global(qos: .utility).async {
             let loginSummary = LoginItemManager.diagnosticSummary
             let accessibilityTrusted = AccessibilityPermission.isTrusted
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 writeWhenRefreshSettled(
                     store: store,
                     loginSummary: loginSummary,
@@ -3318,7 +3326,7 @@ private enum AppDiagnostics {
         loginSummary: String,
         accessibilityTrusted: Bool,
         remainingAttempts: Int,
-        completion: @escaping () -> Void
+        completion: @escaping @MainActor @Sendable () -> Void
     ) {
         guard store.isRefreshing && remainingAttempts > 0 else {
             NSPasteboard.general.clearContents()
@@ -3581,7 +3589,7 @@ private struct AboutPreferencesView: View {
     private var updateChannelBinding: Binding<SoftwareUpdateChannel> {
         Binding(
             get: { softwareUpdates.updateChannel },
-            set: { newChannel in
+            set: { newChannel, _ in
                 guard store.activeModeOperationID == nil, store.activeModeSessions.isEmpty else {
                     store.lastError = "Turn off the active mode before changing update channels."
                     return
@@ -3878,12 +3886,12 @@ private struct CustomizePreferencesView: View {
                                     ForEach(sortedKinds) { kind in
                                         CustomizeRow(
                                             kind: kind,
+                                            store: store,
                                             title: store.switchTitle(kind),
                                             isSelected: selectedKind == kind,
                                             isEnabled: store.enabledKinds.contains(kind),
                                             isBusy: store.isCustomizationBusy(kind),
                                             statusText: store.customizationStatusText(for: kind),
-                                            setEnabled: { store.setEnabled(kind, $0) },
                                             openOptions: {
                                                 toggleDetailPanel(for: kind)
                                             }
@@ -3994,19 +4002,19 @@ private struct CustomizePreferencesView: View {
 
 private struct CustomizeRow: View {
     let kind: SwitchKind
+    @ObservedObject var store: SwitchStore
     let title: String
     let isSelected: Bool
     let isEnabled: Bool
     let isBusy: Bool
     let statusText: String
-    let setEnabled: (Bool) -> Void
     let openOptions: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Toggle("", isOn: Binding(
                 get: { isEnabled },
-                set: setEnabled
+                set: { value, _ in store.setEnabled(kind, value) }
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
@@ -4447,7 +4455,7 @@ private struct ConfirmationToggle: View {
     var body: some View {
         Toggle(title, isOn: Binding(
             get: { required },
-            set: { value in
+            set: { value, _ in
                 required = value
                 ActionSafetyPreferences.setConfirmationRequired(value, for: kind)
             }
@@ -4876,7 +4884,7 @@ private struct KeepAwakePreferencesPanel: View {
                 .foregroundStyle(.secondary)
             Picker("", selection: Binding(
                 get: { store.keepAwakeDuration },
-                set: { store.setKeepAwakeDuration($0) }
+                set: { value, _ in store.setKeepAwakeDuration(value) }
             )) {
                 ForEach(KeepAwakeDuration.allCases) { duration in
                     Text(duration.menuTitle).tag(duration)
@@ -4890,7 +4898,7 @@ private struct KeepAwakePreferencesPanel: View {
 
             Toggle("Keep awake when the lid is closed", isOn: Binding(
                 get: { keepAwakeWhenLidClosed },
-                set: { value in
+                set: { value, _ in
                     keepAwakeWhenLidClosed = value
                     KeepAwakePreferences.keepAwakeWhenLidClosed = value
                     if store.snapshots[.keepAwake]?.isOn == true {
@@ -5077,7 +5085,7 @@ private struct NightShiftPreferencesPanel: View {
             } else {
                 Toggle("Auto change from sunrise to sunset", isOn: Binding(
                     get: { autoScheduleEnabled },
-                    set: { value in
+                    set: { value, _ in
                         updateNightShiftAutoSchedule(value)
                     }
                 ))
@@ -5184,7 +5192,7 @@ private struct TimeOfDayPickerRow: View {
                 .frame(width: 46, alignment: .trailing)
             Stepper(value: Binding(
                 get: { time.hour },
-                set: { time = TimeOfDay(hour: min(max($0, 0), 23), minute: time.minute) }
+                set: { value, _ in time = TimeOfDay(hour: min(max(value, 0), 23), minute: time.minute) }
             ), in: 0...23) {
                 Text(String(format: "%02d", time.hour))
                     .monospacedDigit()
@@ -5192,7 +5200,7 @@ private struct TimeOfDayPickerRow: View {
             }
             Stepper(value: Binding(
                 get: { time.minute },
-                set: { time = TimeOfDay(hour: time.hour, minute: min(max($0, 0), 59)) }
+                set: { value, _ in time = TimeOfDay(hour: time.hour, minute: min(max(value, 0), 59)) }
             ), in: 0...59, step: 5) {
                 Text(String(format: "%02d", time.minute))
                     .monospacedDigit()

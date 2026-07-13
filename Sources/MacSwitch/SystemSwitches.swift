@@ -187,19 +187,21 @@ enum SystemSettingsLinks {
     }
 }
 
-struct SwitchOperationResult {
+struct SwitchOperationResult: Sendable {
     var snapshot: SwitchSnapshot
     var error: String?
 }
 
 enum AccessibilityPermission {
+    private static let promptOption = "AXTrustedCheckOptionPrompt"
+
     static var isTrusted: Bool {
         AXIsProcessTrusted()
     }
 
     @discardableResult
     static func requestAndOpenSettings() -> Bool {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let options = [promptOption: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
         return openSettings()
     }
@@ -236,7 +238,8 @@ enum AutomationPermission {
     }
 }
 
-final class SystemSwitchController {
+// Calls are partitioned between serial worker queues and the main thread by SwitchStore.
+final class SystemSwitchController: @unchecked Sendable {
     var onExternalChange: ((SwitchKind) -> Void)?
 
     private let keepAwake = KeepAwakeManager()
@@ -265,11 +268,13 @@ final class SystemSwitchController {
     private let lowPowerMode = LowPowerModeSwitch()
     private let energyMode = EnergyModeSwitch()
     private lazy var screenCleaner: ScreenCleaner = {
-        let cleaner = ScreenCleaner()
-        cleaner.onFinished = { [weak self] in
-            self?.onExternalChange?(.screenClean)
+        MainActor.assumeIsolated {
+            let cleaner = ScreenCleaner()
+            cleaner.onFinished = { [weak self] in
+                self?.onExternalChange?(.screenClean)
+            }
+            return cleaner
         }
-        return cleaner
     }()
 
     init() {
@@ -316,7 +321,7 @@ final class SystemSwitchController {
         case .screenResolution:
             return screenResolution.snapshot()
         case .screenClean:
-            return screenCleaner.snapshot()
+            return MainActor.assumeIsolated { screenCleaner.snapshot() }
         case .lockKeyboard:
             return keyboardLocker.snapshot()
         case .lockScreen:
@@ -386,8 +391,13 @@ final class SystemSwitchController {
             let error = screenResolution.setEnabled(enabled)
             return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
         case .screenClean:
-            let error = screenCleaner.setEnabled(enabled)
-            return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
+            return MainActor.assumeIsolated {
+                let error = screenCleaner.setEnabled(enabled)
+                return SwitchOperationResult(
+                    snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration),
+                    error: error
+                )
+            }
         case .lockKeyboard:
             let error = keyboardLocker.setEnabled(enabled)
             return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
@@ -430,7 +440,9 @@ final class SystemSwitchController {
     func prepareForTermination() {
         _ = keepAwake.setEnabled(false, duration: nil)
         _ = keyboardLocker.setEnabled(false)
-        _ = screenCleaner.setEnabled(false)
+        MainActor.assumeIsolated {
+            _ = screenCleaner.setEnabled(false)
+        }
     }
 }
 
@@ -750,7 +762,7 @@ private struct BlueLightStatus {
     var available = ObjCBool(false)
 }
 
-private final class CoreBrightnessClient {
+private final class CoreBrightnessClient: @unchecked Sendable {
     static let shared = CoreBrightnessClient()
 
     private let handle: UnsafeMutableRawPointer?
@@ -950,6 +962,7 @@ private final class KeyboardLocker {
     }
 }
 
+@MainActor
 private final class ScreenCleaner {
     var onFinished: (() -> Void)?
 
@@ -960,7 +973,9 @@ private final class ScreenCleaner {
     private var failSafeExitWorkItem: DispatchWorkItem?
 
     deinit {
-        finish()
+        MainActor.assumeIsolated {
+            finish()
+        }
     }
 
     var isActive: Bool { !windows.isEmpty || eventTap.isActive }
@@ -989,7 +1004,7 @@ private final class ScreenCleaner {
             }
             installExitMonitors()
             scheduleFailSafeExit()
-            guard windows.allSatisfy(\.isVisible), eventTap.isActive else {
+            guard windows.allSatisfy({ $0.isVisible }), eventTap.isActive else {
                 finish()
                 return "Could not present screen cleaning mode on every display."
             }
@@ -1021,7 +1036,7 @@ private final class ScreenCleaner {
             window.makeKeyAndOrderFront(nil)
             return window
         }
-        if windows.isEmpty || !windows.allSatisfy(\.isVisible) {
+        if windows.isEmpty || !windows.allSatisfy({ $0.isVisible }) {
             windows.forEach { $0.orderOut(nil) }
             windows.removeAll()
             return false
@@ -1124,7 +1139,8 @@ enum ScreenCleanExitEvent {
     }
 }
 
-private final class EventBlocker {
+// The event tap is installed on the main run loop and all mutation is routed there.
+private final class EventBlocker: @unchecked Sendable {
     private let mode: EventBlockMode
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -1144,7 +1160,7 @@ private final class EventBlocker {
         if isActive { return nil }
         self.onEscape = onEscape
 
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else {
             return "Accessibility permission is required."
         }
@@ -1243,7 +1259,7 @@ private let eventTapCallback: CGEventTapCallBack = { proxy, type, event, refcon 
     return blocker.handle(proxy: proxy, type: type, event: event)
 }
 
-private final class ProcessOutputBuffer {
+private final class ProcessOutputBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
 

@@ -9,7 +9,7 @@ extension Notification.Name {
     static let quitMacSwitch = Notification.Name("quitMacSwitch")
 }
 
-enum SwitchKind: String, CaseIterable, Codable, Identifiable {
+enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case stageManager
     case hideWidgets
     case muteMicrophone
@@ -132,7 +132,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable {
+struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, Sendable {
     let rawValue: String
 
     init(rawValue: String) {
@@ -159,7 +159,7 @@ struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable {
     }
 }
 
-struct SwitchModeDefinition: Identifiable, Codable, Equatable {
+struct SwitchModeDefinition: Identifiable, Codable, Equatable, Sendable {
     let id: SwitchModeID
     var title: String
     var subtitle: String
@@ -175,12 +175,12 @@ struct SwitchModeDefinition: Identifiable, Codable, Equatable {
     }
 }
 
-struct SwitchModeItem: Codable, Equatable {
+struct SwitchModeItem: Codable, Equatable, Sendable {
     let kind: SwitchKind
     var targetIsOn: Bool
 }
 
-struct ActiveSwitchModeSession: Codable, Equatable {
+struct ActiveSwitchModeSession: Codable, Equatable, Sendable {
     let modeID: SwitchModeID
     private let rawOriginalStates: [String: Bool]
     let originalKeepAwakeEndDate: Date?
@@ -235,7 +235,7 @@ struct ActiveSwitchModeSession: Codable, Equatable {
     }
 }
 
-enum KeepAwakeDuration: String, CaseIterable, Codable, Identifiable {
+enum KeepAwakeDuration: String, CaseIterable, Codable, Identifiable, Sendable {
     case indefinitely
     case fiveMinutes
     case fifteenMinutes
@@ -298,7 +298,7 @@ enum KeepAwakeDuration: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-enum DoNotDisturbDuration: String, CaseIterable, Codable, Identifiable {
+enum DoNotDisturbDuration: String, CaseIterable, Codable, Identifiable, Sendable {
     case indefinitely
     case fiveMinutes
     case fifteenMinutes
@@ -393,7 +393,7 @@ enum DarkModeScheduleMode: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct TimeOfDay: Codable, Equatable, Hashable {
+struct TimeOfDay: Codable, Equatable, Hashable, Sendable {
     var hour: Int
     var minute: Int
 
@@ -563,7 +563,7 @@ enum MenuBarIcon: String, CaseIterable, Codable, Identifiable {
     }
 }
 
-struct SwitchSnapshot: Equatable {
+struct SwitchSnapshot: Equatable, Sendable {
     var isOn: Bool
     var isAvailable: Bool
     var subtitle: String?
@@ -644,6 +644,7 @@ enum ActionSafetyPreferences {
     }
 }
 
+@MainActor
 final class SwitchStore: ObservableObject {
     private static let customizationDefaultsVersion = 2
     private static let legacyRemovedBuiltInModeIDsKey = "switch.modes.removedBuiltIn"
@@ -791,14 +792,14 @@ final class SwitchStore: ObservableObject {
     private var keepAwakeRestoreEndDate: Date?
     private var modeReservedKinds: Set<SwitchKind> = []
 
-    private struct ModeStep {
+    private struct ModeStep: Sendable {
         let kind: SwitchKind
         let targetIsOn: Bool
         let endDate: Date?
         let forcesIndefiniteDuration: Bool
     }
 
-    private struct ModeStepFailure {
+    private struct ModeStepFailure: Sendable {
         let kind: SwitchKind
         let message: String
     }
@@ -934,9 +935,11 @@ final class SwitchStore: ObservableObject {
         registerShortcuts()
         scheduleLegacyPresetRestoration()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            self?.enforceDarkModeScheduleAsync()
-            self?.enforceDoNotDisturbExpirationAsync()
-            self?.refreshVisibleAsync()
+            Task { @MainActor [weak self] in
+                self?.enforceDarkModeScheduleAsync()
+                self?.enforceDoNotDisturbExpirationAsync()
+                self?.refreshVisibleAsync()
+            }
         }
     }
 
@@ -1416,18 +1419,19 @@ final class SwitchStore: ObservableObject {
 
     private func captureFreshModeSnapshots(
         for kinds: Set<SwitchKind>,
-        completion: @escaping ([SwitchKind: SwitchSnapshot]) -> Void
+        completion: @escaping @MainActor @Sendable ([SwitchKind: SwitchSnapshot]) -> Void
     ) {
         let duration = keepAwakeDuration
         let controller = self.controller
         let mainKinds = kinds.filter(\.snapshotRequiresMainThread)
         let backgroundKinds = kinds.filter { !$0.snapshotRequiresMainThread }
-        var captured = Dictionary(uniqueKeysWithValues: mainKinds.map { kind in
+        let captured = Dictionary(uniqueKeysWithValues: mainKinds.map { kind in
             (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
         })
 
-        let finish: ([SwitchKind: SwitchSnapshot]) -> Void = { [weak self] backgroundSnapshots in
+        let finish: @MainActor @Sendable ([SwitchKind: SwitchSnapshot]) -> Void = { [weak self] backgroundSnapshots in
             guard let self else { return }
+            var captured = captured
             for (kind, rawSnapshot) in backgroundSnapshots {
                 captured[kind] = rawSnapshot
             }
@@ -1441,7 +1445,7 @@ final class SwitchStore: ObservableObject {
         }
 
         guard !backgroundKinds.isEmpty else {
-            DispatchQueue.main.async { finish([:]) }
+            finish([:])
             return
         }
 
@@ -1449,7 +1453,7 @@ final class SwitchStore: ObservableObject {
             let backgroundSnapshots = Dictionary(uniqueKeysWithValues: backgroundKinds.map { kind in
                 (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
             })
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 finish(backgroundSnapshots)
             }
         }
@@ -1510,7 +1514,7 @@ final class SwitchStore: ObservableObject {
         index: Int = 0,
         failures: [ModeStepFailure] = [],
         stopOnFailure: Bool,
-        completion: @escaping ([ModeStepFailure]) -> Void
+        completion: @escaping @MainActor @Sendable ([ModeStepFailure]) -> Void
     ) {
         guard index < steps.count else {
             completion(failures)
@@ -1537,7 +1541,10 @@ final class SwitchStore: ObservableObject {
         }
     }
 
-    private func performModeStep(_ step: ModeStep, completion: @escaping (ModeStepFailure?) -> Void) {
+    private func performModeStep(
+        _ step: ModeStep,
+        completion: @escaping @MainActor @Sendable (ModeStepFailure?) -> Void
+    ) {
         invalidatePendingSnapshot(for: step.kind)
         let actionVersion = nextActionVersion(for: step.kind)
         actionsInProgress.insert(step.kind)
@@ -1547,7 +1554,7 @@ final class SwitchStore: ObservableObject {
 
         let duration = keepAwakeDuration
         let controller = self.controller
-        let operation: () -> SwitchOperationResult = {
+        let operation: @Sendable () -> SwitchOperationResult = {
             if step.kind == .keepAwake, step.targetIsOn {
                 let requestedDuration = step.endDate.map { max(1, $0.timeIntervalSinceNow) }
                 return controller.setKeepAwake(
@@ -1558,7 +1565,7 @@ final class SwitchStore: ObservableObject {
             }
             return controller.set(step.kind, enabled: step.targetIsOn, keepAwakeDuration: duration)
         }
-        let finish: (SwitchOperationResult) -> Void = { [weak self] result in
+        let finish: @MainActor @Sendable (SwitchOperationResult) -> Void = { [weak self] result in
             guard let self, self.isCurrentAction(step.kind, version: actionVersion) else { return }
             self.applySetResult(result, for: step.kind, enabled: step.targetIsOn, actionVersion: actionVersion)
             self.applyModeDurationPersistence(for: step, result: result)
@@ -1581,7 +1588,7 @@ final class SwitchStore: ObservableObject {
         } else {
             actionQueue.async {
                 let result = operation()
-                DispatchQueue.main.async {
+                Task { @MainActor in
                     finish(result)
                 }
             }
