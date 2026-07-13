@@ -24,6 +24,7 @@ enum RegressionDiagnostics {
         checkScreenCleanExitEvents(&reporter)
         checkSystemSettingsURLs(&reporter)
         checkBluetoothAudioSelection(&reporter)
+        checkMicrophoneVolumeRestoreIsolation(&reporter)
         checkSunScheduleDateAlignment(&reporter)
         checkShortcutValidation(&reporter)
         checkDoNotDisturbShortcutStatus(&reporter)
@@ -436,6 +437,32 @@ enum RegressionDiagnostics {
                 name: "AirPods Pro - Find My"
             ),
             "Bluetooth device filtering rejects Find My companion records"
+        )
+    }
+
+    private static func checkMicrophoneVolumeRestoreIsolation(_ reporter: inout SelfTestReporter) {
+        let suiteName = "com.maxyu.macswitch.selftest.microphone.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            reporter.fail("microphone restore test defaults available")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        MicrophoneVolumeRestoreStore.save(0.35, for: "uid:desk", defaults: defaults)
+        MicrophoneVolumeRestoreStore.save(0.8, for: "uid:travel", defaults: defaults)
+        reporter.check(
+            MicrophoneVolumeRestoreStore.volume(for: "uid:desk", defaults: defaults) == 0.35
+                && MicrophoneVolumeRestoreStore.volume(for: "uid:travel", defaults: defaults) == 0.8,
+            "microphone restore volumes stay isolated by input device"
+        )
+
+        MicrophoneVolumeRestoreStore.clear(for: "uid:desk", defaults: defaults)
+        reporter.check(
+            MicrophoneVolumeRestoreStore.volume(for: "uid:desk", defaults: defaults) == nil
+                && MicrophoneVolumeRestoreStore.volume(for: "uid:travel", defaults: defaults) == 0.8,
+            "clearing one microphone restore volume preserves other devices"
         )
     }
 
