@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+@testable import MacSwitch
 
 final class PackageSmokeTests: XCTestCase {
     func testSafeSelfTestExecutablePasses() throws {
@@ -19,6 +20,14 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("shortcut validation rejects reserved keys"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Eject Disk asks for confirmation by default"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Eject Disk exclusion matching works without writing preferences"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("modes exclude blocking and lossy switches"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("mode restoration does not revive expired timed states"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("retired preset identifiers cannot enter the custom mode library"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth Automatic reuses the last successful device"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth Automatic rejects an ambiguous uninitialized target"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth device filtering rejects Find My companion records"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("microphone restore volumes stay isolated by input device"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("clearing one microphone restore volume preserves other devices"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Play Music: skipped in safe self-test to avoid Automation prompts"), result.combinedOutput)
         XCTAssertFalse(result.combinedOutput.contains(NSHomeDirectory()), "safe self-test output should redact the current user's home path")
     }
@@ -30,6 +39,12 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertEqual(result.status, 0, result.combinedOutput)
         XCTAssertTrue(result.output.contains("Preferences window exists"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Preferences window is onscreen"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("top edge expands the window upward"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("top edge cannot move the window past minimum height"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("bottom edge expands the window downward"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("bottom edge cannot move the window past minimum height"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status item uses the compact width"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status button matches the compact width"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Result: PASS"), result.combinedOutput)
     }
 
@@ -41,6 +56,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Dashboard window exists"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Dashboard window is onscreen"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Dashboard window size is"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("status item uses the compact width"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Result: PASS"), result.combinedOutput)
     }
 
@@ -167,6 +183,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains("dashboardVisualKinds = store.visibleKinds"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuKind = nil"))
         XCTAssertTrue(dashboardSource.contains("dashboardQuickMenuOpeningEventNumber = nil"))
+        XCTAssertTrue(dashboardSource.contains("DashboardModesStrip(store: store)"))
+        XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
+        XCTAssertTrue(views.contains("private struct DashboardModeButton"))
+        XCTAssertTrue(views.contains("store.toggleMode(mode)"))
         XCTAssertTrue(views.contains("private struct DashboardRowFramePreferenceKey: PreferenceKey"))
         XCTAssertTrue(views.contains("static let coordinateSpaceName = \"MacSwitchDashboardCoordinateSpace\""))
         XCTAssertTrue(controlRowSource.contains("@Binding var quickMenuKind: SwitchKind?"))
@@ -220,7 +240,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(views.contains("Move Up"))
         XCTAssertFalse(views.contains("Move Down"))
         XCTAssertTrue(appDelegate.contains("private var currentDashboardSize: NSSize"))
-        XCTAssertTrue(appDelegate.contains("DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)"))
+        XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
         XCTAssertTrue(appDelegate.contains("window.setContentSize(size)"))
         XCTAssertTrue(appDelegate.contains("resizeVisibleDashboardKeepingTopEdge()"))
         XCTAssertTrue(appDelegate.contains("let hostingView = NSHostingView(rootView: DashboardView(store: store))"))
@@ -238,6 +258,176 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("LinearGradient("))
     }
 
+    func testSwitchModesAreCustomOnlyAndSafelyDeleteActiveModes() throws {
+        let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let modeLocalization = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ModeLocalization.swift"))
+        let modeDefinitionSource = try extract(
+            model,
+            from: "struct SwitchModeDefinition",
+            to: "enum KeepAwakeDuration"
+        )
+        let storeSource = try extract(
+            model,
+            from: "final class SwitchStore",
+            to: "private enum DefaultsKey"
+        )
+        let generalSource = try extract(
+            views,
+            from: "private struct GeneralPreferencesView",
+            to: "private struct ModesPreferencesView"
+        )
+        let modesSource = try extract(
+            views,
+            from: "private struct ModesPreferencesView",
+            to: "private enum AppLinks"
+        )
+        let customModeSettingsRowSource = try extract(
+            modesSource,
+            from: "private struct CustomModeSettingsRow",
+            to: "private struct CustomModeDetailPanel"
+        )
+        let deleteCustomModeSource = try extract(
+            storeSource,
+            from: "func deleteCustomMode(_ modeID: SwitchModeID)",
+            to: "func toggleMode(_ mode: SwitchModeDefinition)"
+        )
+        let deactivateModeSource = try extract(
+            storeSource,
+            from: "private func deactivateMode(_ mode: SwitchModeDefinition)",
+            to: "private func beginModeOperation"
+        )
+        let createCustomModeSource = try extract(
+            storeSource,
+            from: "func createCustomMode() -> SwitchModeID",
+            to: "func updateCustomMode(_ mode: SwitchModeDefinition)"
+        )
+        let updateCustomModeSource = try extract(
+            storeSource,
+            from: "func updateCustomMode(_ mode: SwitchModeDefinition)",
+            to: "func deleteCustomMode(_ modeID: SwitchModeID)"
+        )
+
+        XCTAssertTrue(model.contains("struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable"))
+        XCTAssertFalse(model.contains("struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, CaseIterable"))
+        XCTAssertTrue(model.contains("static func custom() -> SwitchModeID"))
+        XCTAssertTrue(model.contains("var isCustom: Bool"))
+        XCTAssertTrue(modeDefinitionSource.contains("struct SwitchModeDefinition: Identifiable, Codable, Equatable"))
+        XCTAssertTrue(modeDefinitionSource.contains("struct SwitchModeItem: Codable, Equatable"))
+        XCTAssertFalse(modeDefinitionSource.contains("static let builtIn"))
+        XCTAssertFalse(modeDefinitionSource.contains("id: .presentation"))
+        XCTAssertFalse(modeDefinitionSource.contains("id: .focus"))
+        XCTAssertFalse(modeDefinitionSource.contains("id: .meeting"))
+        XCTAssertFalse(modeDefinitionSource.contains("id: .cleanDesktop"))
+        XCTAssertTrue(model.contains("struct ActiveSwitchModeSession: Codable, Equatable"))
+        XCTAssertTrue(storeSource.contains("@Published var enabledModeIDs: Set<SwitchModeID>"))
+        XCTAssertTrue(storeSource.contains("@Published var activeModeSessions: [SwitchModeID: ActiveSwitchModeSession]"))
+        XCTAssertTrue(storeSource.contains("@Published var customModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("@Published private(set) var pendingCustomModeDeletionID: SwitchModeID?"))
+        XCTAssertTrue(storeSource.contains("var visibleModes: [SwitchModeDefinition]"))
+        XCTAssertFalse(storeSource.contains("var builtInModes: [SwitchModeDefinition]"))
+        XCTAssertFalse(storeSource.contains("var allModes: [SwitchModeDefinition]"))
+        XCTAssertTrue(storeSource.contains("customModes.filter { enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil }"))
+        XCTAssertTrue(storeSource.contains("enabledModeIDs.contains($0.id) || activeModeSessions[$0.id] != nil"))
+        XCTAssertTrue(storeSource.contains("private static let legacyPresetModeIDs"))
+        XCTAssertTrue(storeSource.contains("legacyRemovedBuiltInModeIDsKey"))
+        XCTAssertTrue(storeSource.contains("defaults.removeObject(forKey: Self.legacyRemovedBuiltInModeIDsKey)"))
+        XCTAssertTrue(storeSource.contains("enabledModeIDs = Set(storedModeIDs ?? []).intersection(modesWithSwitches)"))
+        XCTAssertTrue(storeSource.contains("validModeIDs: customModeIDs.union(Self.legacyPresetModeIDs)"))
+        XCTAssertFalse(storeSource.contains("static func migratedEnabledModeIDs("))
+        XCTAssertTrue(storeSource.contains("func createCustomMode() -> SwitchModeID"))
+        XCTAssertTrue(createCustomModeSource.contains("items: []"))
+        XCTAssertFalse(createCustomModeSource.contains("enabledModeIDs.insert(id)"))
+        XCTAssertFalse(createCustomModeSource.contains("SwitchModeItem("))
+        XCTAssertTrue(storeSource.contains("func updateCustomMode(_ mode: SwitchModeDefinition)"))
+        XCTAssertTrue(updateCustomModeSource.contains("let wasEmpty = customModes[index].items.isEmpty"))
+        XCTAssertTrue(updateCustomModeSource.contains("else if wasEmpty"))
+        XCTAssertTrue(updateCustomModeSource.contains("enabledModeIDs.insert(sanitized.id)"))
+        XCTAssertTrue(storeSource.contains("func deleteCustomMode(_ modeID: SwitchModeID)"))
+        XCTAssertTrue(deleteCustomModeSource.contains("pendingCustomModeDeletionID = modeID"))
+        XCTAssertTrue(deleteCustomModeSource.contains("deactivateMode(mode)"))
+        XCTAssertTrue(deleteCustomModeSource.contains("private func removeCustomMode"))
+        XCTAssertFalse(deleteCustomModeSource.contains("activeModeSessions.removeValue"))
+        XCTAssertTrue(deactivateModeSource.contains("finishPendingCustomModeDeletionIfNeeded(mode.id)"))
+        XCTAssertTrue(deactivateModeSource.contains("pendingCustomModeDeletionID = nil"))
+        XCTAssertTrue(deactivateModeSource.contains("if failures.isEmpty"))
+        XCTAssertTrue(storeSource.contains("func toggleMode(_ mode: SwitchModeDefinition)"))
+        XCTAssertTrue(storeSource.contains("func isModeInteractionDisabled(_ mode: SwitchModeDefinition)"))
+        XCTAssertTrue(storeSource.contains("modeText(.turnOffCurrentBeforeStarting)"))
+        XCTAssertFalse(storeSource.contains("Switch the update channel to Beta before starting a mode."))
+        XCTAssertTrue(storeSource.contains("modeText(.turnOffBeforeHiding)"))
+        XCTAssertTrue(storeSource.contains("modeText(.addSwitchBeforeStarting, mode.title)"))
+        XCTAssertTrue(storeSource.contains("let items = Self.deduplicatedModeItems(mode.items).filter { $0.kind.isModeEligible }"))
+        XCTAssertTrue(storeSource.contains("captureFreshModeSnapshots(for: kinds)"))
+        XCTAssertTrue(storeSource.contains("runModeSteps(steps, stopOnFailure: true)"))
+        XCTAssertTrue(storeSource.contains("let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)"))
+        XCTAssertTrue(storeSource.contains("originalKeepAwakeEndDate:"))
+        XCTAssertTrue(storeSource.contains("originalDoNotDisturbEndDate:"))
+        XCTAssertTrue(storeSource.contains("activeModeSessions.removeValue(forKey: mode.id)"))
+        XCTAssertTrue(storeSource.contains("private func saveCustomModes()"))
+        XCTAssertTrue(storeSource.contains("private func saveActiveModeSessions()"))
+        XCTAssertTrue(storeSource.contains("activeModeSessions.values.sorted"))
+        XCTAssertTrue(storeSource.contains("scheduleLegacyPresetRestoration()"))
+        XCTAssertTrue(storeSource.contains("private func restoreLegacyPresetSessionIfNeeded()"))
+        XCTAssertTrue(storeSource.contains("scheduleLegacyPresetRestoration(after: 30)"))
+        XCTAssertTrue(storeSource.contains("legacyPresetRestorationWorkItem?.cancel()"))
+        XCTAssertTrue(model.contains("static let enabledModeIDs = \"switch.modes.enabled\""))
+        XCTAssertTrue(model.contains("static let activeModeSessions = \"switch.modes.activeSessions\""))
+        XCTAssertTrue(model.contains("static let customModes = \"switch.modes.custom\""))
+        XCTAssertTrue(views.contains("private struct DashboardModesStrip"))
+        XCTAssertTrue(views.contains("private struct DashboardModeButton"))
+        XCTAssertTrue(views.contains("private struct DashboardModesMenu"))
+        XCTAssertTrue(views.contains("ViewThatFits(in: .horizontal)"))
+        XCTAssertTrue(views.contains("isDisabled: store.isModeInteractionDisabled(mode)"))
+        XCTAssertFalse(generalSource.contains("ModesSettingsSection(store: store)"))
+        XCTAssertTrue(modesSource.contains("private struct ModesLibraryPanel"))
+        XCTAssertTrue(modesSource.contains("private struct CustomModeSettingsRow"))
+        XCTAssertTrue(modesSource.contains("private struct CustomModeDetailPanel"))
+        XCTAssertFalse(modesSource.contains("private struct CustomModeEditor"))
+        XCTAssertTrue(modesSource.contains("private struct CustomModeSwitchTargetRow"))
+        XCTAssertTrue(modesSource.contains("store.createCustomMode()"))
+        XCTAssertTrue(modesSource.contains("store.updateCustomMode(updated)"))
+        XCTAssertTrue(modesSource.contains("store.deleteCustomMode(mode.id)"))
+        XCTAssertFalse(modesSource.contains("BuiltInModeSettingsRow"))
+        XCTAssertFalse(modesSource.contains("store.builtInModes"))
+        XCTAssertFalse(modesSource.contains("PRESETS"))
+        XCTAssertFalse(modesSource.contains("Restore Presets"))
+        XCTAssertTrue(modesSource.contains("store.modeText(.noModesYet)"))
+        XCTAssertTrue(modesSource.contains("store.modeText(.createModePrompt)"))
+        XCTAssertFalse(modesSource.contains("ModeLibrarySectionHeader"))
+        XCTAssertFalse(modesSource.contains("CUSTOM"))
+        XCTAssertTrue(modesSource.contains("store.modesInMenuText(store.visibleModes.count)"))
+        XCTAssertTrue(modesSource.contains("store.modeCountText(store.customModes.count)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("@State private var confirmsDeletion = false"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("confirmationDialog("))
+        XCTAssertTrue(customModeSettingsRowSource.contains("store.modeText(.turnOffAndDelete)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("store.modeText(.deleteActiveModeMessage)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains("store.modeText(.deleteModeIrreversible)"))
+        XCTAssertTrue(customModeSettingsRowSource.contains(".disabled(store.isModeInteractionDisabled(mode))"))
+        XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
+        XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, value)"))
+        XCTAssertTrue(modesSource.contains("store.modeText(.turnOffBeforeHiding)"))
+        XCTAssertTrue(modeLocalization.contains(".simplifiedChinese:"))
+        XCTAssertTrue(modeLocalization.contains(".traditionalChinese:"))
+        XCTAssertTrue(modeLocalization.contains(".spanish:"))
+        XCTAssertTrue(modeLocalization.contains(".japanese:"))
+        XCTAssertTrue(modeLocalization.contains(".korean:"))
+        XCTAssertTrue(modeLocalization.contains(".german:"))
+        XCTAssertTrue(modeLocalization.contains(".french:"))
+        XCTAssertTrue(modeLocalization.contains(".italian:"))
+        XCTAssertTrue(modeLocalization.contains(".portuguese:"))
+        XCTAssertTrue(modesSource.contains("confirmationDialog("))
+        XCTAssertTrue(modesSource.contains("HStack(alignment: .top, spacing: selectedCustomMode == nil ? 0 : 10)"))
+        XCTAssertTrue(modesSource.contains("publishModesLayout(detailVisible: true)"))
+        XCTAssertTrue(modesSource.contains("publishModesLayout(detailVisible: false)"))
+        XCTAssertTrue(modesSource.contains(".transition(.move(edge: .trailing).combined(with: .opacity))"))
+        XCTAssertTrue(appDelegate.contains("store.$enabledModeIDs"))
+        XCTAssertTrue(appDelegate.contains("store.$activeModeSessions"))
+        XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
+        XCTAssertFalse(appDelegate.contains("softwareUpdates.updateChannel != .beta"))
+    }
+
     func testPreferencesWindowIsVerticallyResizableAndScreenClamped() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
@@ -253,22 +443,27 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("private static var openCustomizeOnLaunch"))
         XCTAssertTrue(appDelegate.contains("CommandLine.arguments.contains(\"--open-customize\")"))
         XCTAssertTrue(appDelegate.contains("store.preferredPreferencesTab = \"customize\""))
-        XCTAssertTrue(appDelegate.contains("uiRegressionMode || preferencesSmokeMode || dashboardSmokeMode || openPreferencesOnLaunch || openCustomizeOnLaunch"))
+        XCTAssertTrue(appDelegate.contains("uiRegressionMode || preferencesSmokeMode || dashboardSmokeMode || openPreferencesOnLaunch"))
+        XCTAssertTrue(appDelegate.contains("openCustomizeOnLaunch || openDashboardOnLaunch"))
+        XCTAssertTrue(appDelegate.contains("CommandLine.arguments.contains(\"--open-dashboard\")"))
         XCTAssertTrue(appDelegate.contains("private let preferencesCompactContentSize = NSSize(width: 580, height: 440)"))
         XCTAssertTrue(appDelegate.contains("private let preferencesExpandedContentSize = NSSize(width: 980, height: 460)"))
-        XCTAssertTrue(appDelegate.contains("private let preferencesMinimumContentHeight: CGFloat = 390"))
+        XCTAssertTrue(appDelegate.contains("private let preferencesMinimumContentHeight: CGFloat = 320"))
         XCTAssertTrue(appDelegate.contains("name: .setMacSwitchPreferencesLayout"))
         XCTAssertTrue(appDelegate.contains("private func resizePreferencesWindow(layoutMode: PreferencesLayoutMode, animate: Bool)"))
         XCTAssertTrue(appDelegate.contains("private func applyPreferencesResizeConstraints(to window: NSWindow, layoutMode: PreferencesLayoutMode)"))
+        XCTAssertTrue(appDelegate.contains("window.contentView?.layoutSubtreeIfNeeded()"))
         XCTAssertTrue(appDelegate.contains("private func constrainedPreferencesFrameSize(for window: NSWindow, proposedFrameSize: NSSize) -> NSSize"))
+        XCTAssertTrue(appDelegate.contains("private func preferencesMinimumFrameHeight(for window: NSWindow) -> CGFloat"))
+        XCTAssertTrue(appDelegate.contains("private func evaluatePreferencesResizeSmokeTest() -> UISmokeResult"))
         XCTAssertTrue(appDelegate.contains("private func makePreferencesContentController("))
-        XCTAssertTrue(appDelegate.contains("private func beginPreferencesWindowResize(initialFrame: NSRect)"))
-        XCTAssertTrue(appDelegate.contains("private func queuePreferencesWindowResizeFromBottom(initialFrame: NSRect, deltaY: CGFloat)"))
+        XCTAssertTrue(appDelegate.contains("private func beginPreferencesWindowResize(edge: PreferencesVerticalResizeEdge, initialFrame: NSRect)"))
+        XCTAssertTrue(appDelegate.contains("private func queuePreferencesWindowResize("))
         XCTAssertTrue(appDelegate.contains("private func flushQueuedPreferencesResize(display: Bool = false)"))
         XCTAssertTrue(appDelegate.contains("private func endPreferencesWindowResize()"))
         XCTAssertTrue(appDelegate.contains("private func startPreferencesResizeTimer()"))
-        XCTAssertTrue(appDelegate.contains("private func preferencesWindowResizeFrameFromBottom("))
-        XCTAssertTrue(appDelegate.contains("private func maximumPreferencesFrameHeightFromBottom("))
+        XCTAssertTrue(appDelegate.contains("private func preferencesWindowResizeFrame("))
+        XCTAssertTrue(appDelegate.contains("private func maximumPreferencesFrameHeight("))
         XCTAssertTrue(appDelegate.contains("private func pixelAligned(_ value: CGFloat, for window: NSWindow) -> CGFloat"))
         XCTAssertTrue(appDelegate.contains("private struct PreferencesResizeState"))
         XCTAssertTrue(appDelegate.contains("private var preferencesResizeState: PreferencesResizeState?"))
@@ -288,20 +483,47 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("max(baseContentSize.height, currentContentHeight)"))
         XCTAssertTrue(appDelegate.contains("window.contentMinSize = minContentSize"))
         XCTAssertTrue(appDelegate.contains("window.contentMaxSize = maxContentSize"))
-        XCTAssertTrue(appDelegate.contains("window.minSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: minContentSize)).size"))
+        XCTAssertTrue(appDelegate.contains("minFrameSize.height = max(minFrameSize.height, preferencesMinimumFrameHeight(for: window))"))
+        XCTAssertTrue(appDelegate.contains("window.minSize = minFrameSize"))
         XCTAssertTrue(appDelegate.contains("window.maxSize = window.frameRect(forContentRect: NSRect(origin: .zero, size: maxContentSize)).size"))
         XCTAssertTrue(appDelegate.contains("let minContentSize = NSSize(width: contentWidth, height: preferencesMinimumContentHeight)"))
         XCTAssertTrue(appDelegate.contains("width: contentWidth,"))
         XCTAssertTrue(appDelegate.contains("height: max(maximumContentHeight, preferencesMinimumContentHeight)"))
         XCTAssertTrue(appDelegate.contains("let proposedContentHeight = window.contentRect("))
         XCTAssertTrue(appDelegate.contains("let contentSize = NSSize(width: contentWidth, height: contentHeight)"))
-        XCTAssertTrue(appDelegate.contains("PreferencesVerticalResizeHandleView(edge: .bottom)"))
-        XCTAssertFalse(appDelegate.contains("PreferencesVerticalResizeHandleView(edge: .top)"))
+        XCTAssertTrue(appDelegate.contains("case top"))
+        XCTAssertTrue(appDelegate.contains("case bottom"))
+        XCTAssertTrue(appDelegate.contains("let topHandle = makeResizeHandle(for: .top)"))
+        XCTAssertTrue(appDelegate.contains("let bottomHandle = makeResizeHandle(for: .bottom)"))
         XCTAssertTrue(appDelegate.contains("static let handleThickness: CGFloat = 8"))
+        XCTAssertTrue(appDelegate.contains("override var mouseDownCanMoveWindow: Bool { false }"))
+        XCTAssertTrue(appDelegate.contains("override func acceptsFirstMouse(for event: NSEvent?) -> Bool"))
+        XCTAssertTrue(appDelegate.contains("override func updateTrackingAreas()"))
+        XCTAssertTrue(appDelegate.contains("options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect]"))
+        XCTAssertTrue(appDelegate.contains("override func mouseEntered(with event: NSEvent)"))
+        XCTAssertTrue(appDelegate.contains("override func mouseExited(with event: NSEvent)"))
+        XCTAssertTrue(appDelegate.contains("private func suppressWindowMovementForTopEdge()"))
+        XCTAssertTrue(appDelegate.contains("guard edge == .top, let window else { return }"))
+        XCTAssertTrue(appDelegate.contains("windowWasMovable = window.isMovable"))
+        XCTAssertTrue(appDelegate.contains("window.isMovable = false"))
+        XCTAssertTrue(appDelegate.contains("private func restoreWindowMovement()"))
+        XCTAssertTrue(appDelegate.contains("movementSuppressedWindow.isMovable = windowWasMovable"))
+        XCTAssertTrue(appDelegate.contains("override func viewWillMove(toWindow newWindow: NSWindow?)"))
+        XCTAssertTrue(appDelegate.contains("deinit {"))
+        XCTAssertTrue(appDelegate.contains("MainActor.assumeIsolated"))
+        XCTAssertTrue(appDelegate.contains("top edge routes events to the resize handle"))
+        XCTAssertTrue(appDelegate.contains("bottom edge routes events to the resize handle"))
+        XCTAssertTrue(appDelegate.contains("top edge suppresses competing titlebar movement before mouse down"))
+        XCTAssertTrue(appDelegate.contains("top edge restores titlebar movement after exit"))
+        XCTAssertTrue(appDelegate.contains("let contentLayoutInset = max(window.frame.height - window.contentLayoutRect.height, 0)"))
+        XCTAssertTrue(appDelegate.contains("let titlebarInset = max(window.contentView?.safeAreaInsets.top ?? 0, contentLayoutInset)"))
+        XCTAssertTrue(appDelegate.contains("frameSize.height = max(frameSize.height, preferencesMinimumFrameHeight(for: window))"))
+        XCTAssertFalse(appDelegate.contains("MAC_SWITCH_RESIZE_DIAGNOSTICS"))
         XCTAssertTrue(appDelegate.contains("bottomHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness)"))
-        XCTAssertTrue(appDelegate.contains("bottomHandle.resizeBegan = { [weak self] initialFrame in"))
-        XCTAssertTrue(appDelegate.contains("bottomHandle.resizeChanged = { [weak self] initialFrame, deltaY in"))
-        XCTAssertTrue(appDelegate.contains("bottomHandle.resizeEnded = { [weak self] in"))
+        XCTAssertTrue(appDelegate.contains("topHandle.heightAnchor.constraint(equalToConstant: PreferencesVerticalResizeHandleView.handleThickness)"))
+        XCTAssertTrue(appDelegate.contains("handle.resizeBegan = { [weak self] initialFrame in"))
+        XCTAssertTrue(appDelegate.contains("handle.resizeChanged = { [weak self] initialFrame, deltaY in"))
+        XCTAssertTrue(appDelegate.contains("handle.resizeEnded = { [weak self] in"))
         XCTAssertTrue(appDelegate.contains("window.contentView?.viewWillStartLiveResize()"))
         XCTAssertTrue(appDelegate.contains("window.contentView?.viewDidEndLiveResize()"))
         XCTAssertTrue(appDelegate.contains("window.isMovableByWindowBackground = false"))
@@ -314,18 +536,18 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains("flushQueuedPreferencesResize(display: true)"))
         XCTAssertTrue(appDelegate.contains("window.contentView?.needsLayout = true"))
         XCTAssertTrue(appDelegate.contains("window.contentView?.needsDisplay = true"))
-        XCTAssertTrue(appDelegate.contains("private static let verticalResizeCursor = NSCursor("))
-        XCTAssertTrue(appDelegate.contains("private static func verticalResizeCursorImage() -> NSImage"))
-        XCTAssertTrue(appDelegate.contains("private static func drawVerticalResizeCursor(in path: NSBezierPath)"))
-        XCTAssertTrue(appDelegate.contains("addCursorRect(bounds, cursor: Self.verticalResizeCursor)"))
-        XCTAssertFalse(appDelegate.contains("cursor: .resizeUpDown"))
+        XCTAssertFalse(appDelegate.contains("verticalResizeCursorImage"))
+        XCTAssertFalse(appDelegate.contains("drawVerticalResizeCursor"))
+        XCTAssertTrue(appDelegate.contains(".frameResize(position: edge.frameResizePosition, directions: .all)"))
+        XCTAssertTrue(appDelegate.contains("return .resizeUpDown"))
+        XCTAssertTrue(appDelegate.contains("override func cursorUpdate(with event: NSEvent)"))
         XCTAssertTrue(appDelegate.contains("resizeBegan?(initialFrame)"))
         XCTAssertTrue(appDelegate.contains("resizeChanged?(initialFrame, deltaY)"))
         XCTAssertTrue(appDelegate.contains("resizeEnded?()"))
         XCTAssertTrue(appDelegate.contains("frame.size.width = min(frame.width, visibleFrame.width)"))
         XCTAssertTrue(appDelegate.contains("frame.size.height = min(frame.height, visibleFrame.height)"))
         XCTAssertTrue(appDelegate.contains("window.setFrame(frame, display: true)"))
-        XCTAssertTrue(views.contains(".frame(minWidth: 540, minHeight: 390)"))
+        XCTAssertTrue(views.contains(".frame(minWidth: 540, minHeight: 320)"))
         XCTAssertTrue(views.contains(".frame(width: 132)"))
         XCTAssertTrue(views.contains(".frame(maxWidth: .infinity, maxHeight: .infinity)"))
         XCTAssertTrue(views.contains("VisualEffectView(material: .hudWindow"))
@@ -353,6 +575,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appDelegate.contains(".sink { [weak self] icon in self?.updateStatusIcon(icon) }"))
         XCTAssertTrue(appDelegate.contains("private func updateStatusIcon(_ icon: MenuBarIcon)"))
         XCTAssertTrue(appDelegate.contains("let image = icon.templateImage()"))
+        XCTAssertTrue(appDelegate.contains("button.imageScaling = .scaleProportionallyDown"))
+        XCTAssertTrue(appDelegate.contains("button.alignment = .center"))
         XCTAssertTrue(menuBarIconSource.contains("func templateImage(size: NSSize = NSSize(width: 18, height: 18)) -> NSImage"))
         XCTAssertTrue(menuBarIconSource.contains("image.isTemplate = true"))
         XCTAssertTrue(views.contains("Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))"))
@@ -397,6 +621,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(localization.contains(".followSystem: \"システムに合わせる\""))
         XCTAssertTrue(localization.contains(".followSystem: \"시스템 따르기\""))
         XCTAssertTrue(localization.contains(".followSystem: \"System folgen\""))
+        XCTAssertTrue(localization.contains(".modes: \"模式\""))
+        XCTAssertTrue(localization.contains(".modesSubtitle: \"Crea, revisa y personaliza flujos de trabajo con un clic.\""))
 
         XCTAssertTrue(model.contains("@Published var appLanguage: AppLanguage"))
         XCTAssertTrue(model.contains("DefaultsKey.appLanguage"))
@@ -503,11 +729,13 @@ final class PackageSmokeTests: XCTestCase {
         let readinessScript = try String(contentsOf: readinessScriptURL)
         let readme = try String(contentsOf: packageRoot.appendingPathComponent("README.md"))
         let releaseWorkflow = try String(contentsOf: packageRoot.appendingPathComponent(".github/workflows/release.yml"))
+        let prCheckWorkflow = try String(contentsOf: packageRoot.appendingPathComponent(".github/workflows/pr-check.yml"))
         let privateCiPrefix = ascii([83, 65, 89, 76, 69, 84, 95])
         let privateCiName = ascii([115, 97, 121, 108, 101, 116])
         let oldNotaryProfile = ascii([109, 97, 99, 45, 115, 119, 105, 116, 99, 104, 45, 99, 108, 101, 97, 110, 45, 110, 111, 116, 97, 114, 121])
 
-        XCTAssertTrue(releaseWorkflow.contains("branches:\n      - main"), "release workflow should run automatically after PR merges to main")
+        XCTAssertTrue(releaseWorkflow.contains("branches:\n      - main\n      - beta-pr40-modes"), "release workflow should run automatically after PR merges to stable or beta")
+        XCTAssertTrue(prCheckWorkflow.contains("      - beta-pr40-modes"), "beta pull requests should run the same Swift checks as main")
         XCTAssertTrue(releaseWorkflow.contains("paths-ignore:"), "release workflow should not run for documentation-only changes")
         XCTAssertTrue(releaseWorkflow.contains("\"README.md\""), "README-only changes should not trigger notarized app releases")
         XCTAssertTrue(releaseWorkflow.contains("\"docs/**\""), "documentation image changes should not trigger notarized app releases")
@@ -518,6 +746,11 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(releaseWorkflow.contains("Build number must contain digits only"))
         XCTAssertTrue(releaseWorkflow.contains("BUILD_NUMBER: ${{ steps.release_tag.outputs.build_number }}"))
         XCTAssertTrue(releaseWorkflow.contains("Beta channel releases must be marked as prerelease"), "beta channel releases should be prereleases")
+        XCTAssertTrue(releaseWorkflow.contains("case \"$GITHUB_REF_NAME\" in"), "automatic release settings should be selected from the merged branch")
+        XCTAssertTrue(releaseWorkflow.contains("beta-pr40-modes)"), "the beta branch should have an automatic release policy")
+        XCTAssertTrue(releaseWorkflow.contains("prerelease=true\n                update_channel=beta"), "beta merges should publish beta prereleases")
+        XCTAssertTrue(releaseWorkflow.contains("tag=\"v${short_version}\""), "beta merges should use their explicit prerelease version as the tag")
+        XCTAssertTrue(releaseWorkflow.contains("increment CFBundleShortVersionString before merging"), "reusing a beta version should fail before an existing release can be replaced")
         XCTAssertTrue(releaseWorkflow.contains("Allowing beta prerelease tag $tag outside $default_branch"), "beta prereleases should support test-branch tags")
         XCTAssertTrue(releaseWorkflow.contains("echo \"create_tag=$create_tag\" >> \"$GITHUB_OUTPUT\""), "automatic releases should record whether the tag is generated")
         XCTAssertTrue(releaseWorkflow.contains("echo \"update_channel=$update_channel\" >> \"$GITHUB_OUTPUT\""), "release job should pass the channel to appcast generation")
@@ -613,6 +846,8 @@ final class PackageSmokeTests: XCTestCase {
         let buildScript = try String(contentsOf: packageRoot.appendingPathComponent("Scripts/build_release.sh"))
         let appcastScriptURL = packageRoot.appendingPathComponent("Scripts/generate_appcast.sh")
         let appcastScript = try String(contentsOf: appcastScriptURL)
+        let appcastTool = try String(contentsOf: packageRoot.appendingPathComponent("Scripts/appcast_item_tool.py"))
+        let releaseWorkflow = try String(contentsOf: packageRoot.appendingPathComponent(".github/workflows/release.yml"))
         let publishScriptURL = packageRoot.appendingPathComponent("Scripts/publish_appcast.sh")
         let publishScript = try String(contentsOf: publishScriptURL)
 
@@ -625,19 +860,14 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(manager.contains("updaterDelegate: self"))
         XCTAssertTrue(manager.contains("enum SoftwareUpdateChannel"))
         XCTAssertTrue(manager.contains("@Published var updateChannel: SoftwareUpdateChannel"))
+        XCTAssertTrue(manager.contains("?? detectedBuildChannel"), "fresh beta installs should stay on the beta channel")
         XCTAssertTrue(manager.contains("func allowedChannels(for updater: SPUUpdater) -> Set<String>"))
         XCTAssertTrue(manager.contains("updateChannel.allowedSparkleChannels"))
-        XCTAssertTrue(manager.contains("func bestValidUpdate(in appcast: SUAppcast, for updater: SPUUpdater) -> SUAppcastItem?"))
-        XCTAssertTrue(manager.contains("func versionComparator(for updater: SPUUpdater) -> SUVersionComparison?"))
-        XCTAssertTrue(manager.contains("hasPendingChannelSwitch ? updateChannel : nil"))
-        XCTAssertTrue(manager.contains("ChannelSwitchVersionComparator"))
-        XCTAssertTrue(manager.contains("guard canInstall(item) else"))
-        XCTAssertTrue(manager.contains("compareVersion(bundleVersion, toVersion: item.versionString) != .orderedDescending"))
-        XCTAssertTrue(manager.contains("let target = channelSwitchTarget"))
-        XCTAssertTrue(manager.contains("guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }"))
-        XCTAssertTrue(manager.contains("if versionA == bundleVersion, versionB == updateVersion"))
-        XCTAssertTrue(manager.contains("return .orderedAscending"))
-        XCTAssertFalse(manager.contains("guard versionA != versionB else { return .orderedSame }"))
+        XCTAssertFalse(manager.contains("bestValidUpdate(in:"))
+        XCTAssertFalse(manager.contains("versionComparator(for updater:"))
+        XCTAssertFalse(manager.contains("ChannelSwitchVersionComparator"))
+        XCTAssertFalse(manager.contains("requiresBetaChannel"))
+        XCTAssertFalse(manager.contains("hasPendingChannelSwitch"))
         XCTAssertTrue(manager.contains("didFinishUpdateCycleFor"))
         XCTAssertTrue(manager.contains("didAbortWithError"))
         XCTAssertTrue(manager.contains("observe(updater: controller.updater)"))
@@ -645,6 +875,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(manager.contains("updater.observe(\\.automaticallyChecksForUpdates"))
         XCTAssertTrue(appDelegate.contains("SoftwareUpdateManager.shared"))
         XCTAssertTrue(appDelegate.contains("softwareUpdates.start()"))
+        XCTAssertFalse(appDelegate.contains("softwareUpdates.requiresBetaChannel"))
         XCTAssertFalse(generalPreferencesSource.contains("SettingsGroup(\"Updates\")"))
         XCTAssertFalse(generalPreferencesSource.contains("softwareUpdates"))
         XCTAssertTrue(aboutPreferencesSource.contains("SettingsGroup(\"Updates\")"))
@@ -652,8 +883,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(aboutPreferencesSource.contains("softwareUpdates.checkForUpdates()"))
         XCTAssertTrue(aboutPreferencesSource.contains("title: \"Update Channel\""))
         XCTAssertTrue(aboutPreferencesSource.contains("SoftwareUpdateChannel.allCases"))
-        XCTAssertTrue(aboutPreferencesSource.contains("softwareUpdates.hasPendingChannelSwitch"))
-        XCTAssertTrue(aboutPreferencesSource.contains("switch this install to the"))
+        XCTAssertTrue(aboutPreferencesSource.contains("Picker(\"\", selection: $softwareUpdates.updateChannel)"))
+        XCTAssertFalse(aboutPreferencesSource.contains("Turn off the active mode before changing update channels."))
+        XCTAssertFalse(aboutPreferencesSource.contains("softwareUpdates.hasPendingChannelSwitch"))
         XCTAssertTrue(aboutPreferencesSource.contains("automaticallyChecksForUpdates"))
         XCTAssertTrue(aboutPreferencesSource.contains("automaticallyDownloadsUpdates"))
         XCTAssertFalse(aboutPreferencesSource.contains("Periodically check the official release feed for new versions."))
@@ -681,7 +913,19 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(appcastScript.contains("APPCAST_CHANNEL"))
         XCTAssertTrue(appcastScript.contains("APPCAST_MAXIMUM_VERSIONS"))
         XCTAssertTrue(appcastScript.contains("--channel \"$APPCAST_CHANNEL\""))
+        XCTAssertTrue(appcastScript.contains("appcast_item_tool.py\" assert-newer"))
         XCTAssertTrue(appcastScript.contains("appcast_item_tool.py\" merge"))
+        XCTAssertTrue(appcastScript.contains("Existing appcast could not be downloaded"))
+        XCTAssertTrue(appcastTool.contains("def command_assert_newer"))
+        XCTAssertTrue(appcastTool.contains("must be greater than the existing maximum"))
+        XCTAssertTrue(releaseWorkflow.contains("build_number=\"$(date -u +%Y%m%d%H%M%S)\""))
+        let appcastGeneration = try XCTUnwrap(releaseWorkflow.range(of: "- name: Generate Sparkle appcast"))
+        let tagPublication = try XCTUnwrap(releaseWorkflow.range(of: "- name: Publish generated release tag"))
+        XCTAssertLessThan(
+            appcastGeneration.lowerBound,
+            tagPublication.lowerBound,
+            "appcast signing and monotonic-version validation must finish before publishing a release tag"
+        )
         XCTAssertTrue(appcastScript.contains("expected_enclosure_url=\"${DOWNLOAD_URL_PREFIX}${UPDATE_ASSET_NAME}\""))
         XCTAssertTrue(appcastScript.contains("GITHUB_REPOSITORY"))
         XCTAssertTrue(appcastScript.contains("https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/"))
@@ -704,7 +948,31 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(publishScript.contains("Public appcast did not match generated appcast"))
     }
 
-    func testAppcastItemToolPreservesStableAndBetaItemsWithSharedBuild() throws {
+    func testSwiftSixLanguageModeHasExplicitConcurrencyBoundaries() throws {
+        let package = try String(contentsOf: packageRoot.appendingPathComponent("Package.swift"))
+        let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let shortcuts = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/GlobalShortcuts.swift"))
+        let updates = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SoftwareUpdateManager.swift"))
+        let systemSwitches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
+        let extendedSwitches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+
+        XCTAssertTrue(package.contains("swiftLanguageModes: [.v6]"))
+        XCTAssertTrue(appDelegate.contains("@MainActor\nfinal class AppDelegate"))
+        XCTAssertTrue(model.contains("@MainActor\nfinal class SwitchStore"))
+        XCTAssertTrue(model.contains("enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable"))
+        XCTAssertTrue(shortcuts.contains("@MainActor @Sendable (SwitchKind) -> Void"))
+        XCTAssertFalse(updates.contains("ChannelSwitchVersionComparator"))
+        XCTAssertTrue(systemSwitches.contains("protocol SystemSwitchControlling: AnyObject, Sendable"))
+        XCTAssertTrue(systemSwitches.contains("final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable"))
+        XCTAssertFalse(extendedSwitches.contains("nonisolated(unsafe)"))
+        XCTAssertTrue(extendedSwitches.contains("private final class SizeCacheState: @unchecked Sendable"))
+        XCTAssertTrue(extendedSwitches.contains("private final class ShortcutCacheState: @unchecked Sendable"))
+        XCTAssertTrue(views.contains("set: { value, _ in"), "custom Binding setters should use Swift 6's transaction-aware overload")
+    }
+
+    func testAppcastItemToolRequiresMonotonicBuildsAndPreservesChannels() throws {
         let fileManager = FileManager.default
         let tempDir = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try fileManager.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -714,16 +982,39 @@ final class PackageSmokeTests: XCTestCase {
         let betaURL = "https://updates.example.invalid/v1.0.0-beta.3/Mac.Switch.zip"
         let existing = tempDir.appendingPathComponent("existing.xml")
         let incoming = tempDir.appendingPathComponent("incoming.xml")
+        let nonMonotonicIncoming = tempDir.appendingPathComponent("non-monotonic.xml")
         let merged = tempDir.appendingPathComponent("merged.xml")
         try appcastXML(items: [
             appcastItem(title: "1.0.0", version: "20260704131627", channel: nil, url: stableURL),
             appcastItem(title: "1.0.0-beta.1", version: "20260704121536", channel: "beta", url: "https://updates.example.invalid/v1.0.0-beta.1/Mac.Switch.zip")
         ]).write(to: existing, atomically: true, encoding: .utf8)
         try appcastXML(items: [
-            appcastItem(title: "1.0.0-beta.3", version: "20260704131627", channel: "beta", url: betaURL)
+            appcastItem(title: "1.0.0-beta.3", version: "20260704131628", channel: "beta", url: betaURL)
         ]).write(to: incoming, atomically: true, encoding: .utf8)
+        try appcastXML(items: [
+            appcastItem(title: "1.0.0-beta.4", version: "20260704131627", channel: "beta", url: betaURL)
+        ]).write(to: nonMonotonicIncoming, atomically: true, encoding: .utf8)
 
         let tool = packageRoot.appendingPathComponent("Scripts/appcast_item_tool.py")
+        let monotonicResult = try run("/usr/bin/python3", [
+            tool.path,
+            "assert-newer",
+            "--existing", existing.path,
+            "--incoming", incoming.path,
+            "--expected-url", betaURL
+        ], timeout: 5)
+        XCTAssertEqual(monotonicResult.status, 0, monotonicResult.combinedOutput)
+
+        let rejectedResult = try run("/usr/bin/python3", [
+            tool.path,
+            "assert-newer",
+            "--existing", existing.path,
+            "--incoming", nonMonotonicIncoming.path,
+            "--expected-url", betaURL
+        ], timeout: 5)
+        XCTAssertNotEqual(rejectedResult.status, 0, rejectedResult.combinedOutput)
+        XCTAssertTrue(rejectedResult.combinedOutput.contains("must be greater than the existing maximum"))
+
         let mergeResult = try run("/usr/bin/python3", [
             tool.path,
             "merge",
@@ -738,7 +1029,7 @@ final class PackageSmokeTests: XCTestCase {
         let mergedXML = try String(contentsOf: merged)
         XCTAssertTrue(mergedXML.contains(stableURL))
         XCTAssertTrue(mergedXML.contains(betaURL))
-        XCTAssertTrue(mergedXML.contains("<sparkle:version>20260704131627</sparkle:version>"))
+        XCTAssertTrue(mergedXML.contains("<sparkle:version>20260704131628</sparkle:version>"))
         XCTAssertTrue(mergedXML.contains("<sparkle:channel>beta</sparkle:channel>"))
 
         let stableVerify = try run("/usr/bin/python3", [
@@ -756,7 +1047,7 @@ final class PackageSmokeTests: XCTestCase {
             "--appcast", merged.path,
             "--expected-url", betaURL,
             "--expected-channel", "beta",
-            "--expected-version", "20260704131627"
+            "--expected-version", "20260704131628"
         ], timeout: 5)
         XCTAssertEqual(betaVerify.status, 0, betaVerify.combinedOutput)
     }
@@ -834,7 +1125,7 @@ final class PackageSmokeTests: XCTestCase {
         let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
         let modelInitSource = try extract(
             model,
-            from: "init(controller: SystemSwitchController = SystemSwitchController())",
+            from: "    init(\n        controller:",
             to: "controller.onExternalChange ="
         )
 
@@ -846,7 +1137,7 @@ final class PackageSmokeTests: XCTestCase {
         )
         XCTAssertTrue(model.contains("refreshStartAtLoginStatusAsync()"))
         XCTAssertTrue(
-            modelInitSource.contains("startAtLogin = LoginItemManager.initialIsEnabled"),
+            modelInitSource.contains("startAtLogin = enableRuntimeServices ? LoginItemManager.initialIsEnabled : false"),
             "SwitchStore initialization should use a non-blocking Start at Login estimate before async verification"
         )
         XCTAssertFalse(
@@ -1017,7 +1308,7 @@ final class PackageSmokeTests: XCTestCase {
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
         let initSource = try extract(
             model,
-            from: "init(controller: SystemSwitchController = SystemSwitchController())",
+            from: "    init(\n        controller:",
             to: "func setEnabled(_ kind: SwitchKind, _ enabled: Bool)"
         )
         let durationSource = try extract(
@@ -1037,8 +1328,8 @@ final class PackageSmokeTests: XCTestCase {
         )
         let controllerSource = try extract(
             switches,
-            from: "func set(_ kind: SwitchKind, enabled: Bool, keepAwakeDuration: KeepAwakeDuration)",
-            to: "func performXcodeClean"
+            from: "final class SystemSwitchController",
+            to: "private final class KeepAwakeManager"
         )
 
         XCTAssertTrue(model.contains("static let keepAwakeActive = \"switch.keepAwake.active\""))
@@ -1065,7 +1356,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(controllerSource.contains("snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration)"))
         XCTAssertFalse(views.contains("store.keepAwakeDuration ="))
         XCTAssertTrue(views.contains("store.setKeepAwakeDuration(.indefinitely)"))
-        XCTAssertTrue(views.contains("set: { store.setKeepAwakeDuration($0) }"))
+        XCTAssertTrue(views.contains("set: { value, _ in store.setKeepAwakeDuration(value) }"))
     }
 
     func testHiddenStatefulSwitchesAreRemovedOnlyAfterSuccessfulDeactivation() throws {
@@ -1152,7 +1443,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customizeRowSource.contains("let statusText: String"))
         XCTAssertTrue(customizeRowSource.contains(".disabled(isBusy)"))
         XCTAssertTrue(customizeRowSource.contains("Text(statusText)"))
-        XCTAssertFalse(customizeRowSource.contains("@ObservedObject var store"))
+        XCTAssertTrue(customizeRowSource.contains("@ObservedObject var store"))
+        XCTAssertTrue(customizeRowSource.contains("store.setEnabled(kind, value)"))
         XCTAssertFalse(customizeRowSource.contains(".onHover"))
         XCTAssertTrue(switchPanelSource.contains("store.isCustomizationBusy(kind)"))
         XCTAssertTrue(switchPanelSource.contains("? \"Updating\""))
@@ -1163,11 +1455,11 @@ final class PackageSmokeTests: XCTestCase {
         let visibleSource = try extract(
             model,
             from: "var visibleKinds: [SwitchKind]",
-            to: "init(controller:"
+            to: "    init(\n        controller:"
         )
         let initSource = try extract(
             model,
-            from: "init(controller:",
+            from: "    init(\n        controller:",
             to: "for kind in SwitchKind.allCases"
         )
         let moveSource = try extract(
@@ -1721,15 +2013,16 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(audioSource.contains("pendingDeviceRefresh"))
         XCTAssertTrue(audioSource.contains("DispatchQueue.global(qos: .utility).async"))
         XCTAssertTrue(audioSource.contains("let latestAddress = BluetoothAudioPreferences.selectedAddress"))
-        XCTAssertTrue(audioSource.contains("$0.address.caseInsensitiveCompare(normalized) == .orderedSame"))
-        XCTAssertTrue(audioSource.contains("$0.address.caseInsensitiveCompare(latestAddress) == .orderedSame"))
+        XCTAssertTrue(audioSource.contains("BluetoothAudioPreferences.addressesMatch($0.address, normalized)"))
+        XCTAssertTrue(audioSource.contains("BluetoothAudioPreferences.addressesMatch($0.address, latestAddress)"))
         XCTAssertTrue(audioSource.contains(".disabled(isRefreshingDevices || store.isActionBusy(.bluetoothAudio))"))
         XCTAssertFalse(audioSource.contains("let storedAddress = BluetoothAudioPreferences.selectedAddress"))
         XCTAssertTrue(audioSource.contains("store.refreshAsync(.bluetoothAudio)"))
         XCTAssertFalse(audioSource.contains("@State private var devices = BluetoothAudioPreferences.deviceOptions"))
         XCTAssertFalse(audioSource.contains("store.refresh(.bluetoothAudio)"))
         XCTAssertTrue(extendedSwitches.contains("private static func normalizedAddress"))
-        XCTAssertTrue(extendedSwitches.contains("$0.addressString.caseInsensitiveCompare(selected) == .orderedSame"))
+        XCTAssertTrue(extendedSwitches.contains("static func addressesMatch"))
+        XCTAssertTrue(extendedSwitches.contains("devices.first { addressesMatch($0.addressString, selected) }"))
 
         XCTAssertTrue(screenResolutionSource.contains("@State private var displays: [DisplayOption] = []"))
         XCTAssertTrue(screenResolutionSource.contains("@State private var currentResolutionText = \"Checking...\""))
@@ -1983,7 +2276,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(doNotDisturbSource.contains("Ready. Using \\(shortcutPair.on) and \\(shortcutPair.off)."))
         XCTAssertTrue(doNotDisturbSource.contains("DND On and DND Off must resolve to two different shortcuts."))
         XCTAssertTrue(preferencesSource.contains("invalidateInstalledShortcutsCache()"))
-        XCTAssertTrue(preferencesSource.contains("shortcutCache = nil"))
+        XCTAssertTrue(preferencesSource.contains("shortcutCache.invalidate()"))
+        XCTAssertTrue(preferencesSource.contains("private final class ShortcutCacheState: @unchecked Sendable"))
         XCTAssertTrue(preferencesSource.contains("static var shortcutConfigurationError: String?"))
         XCTAssertTrue(preferencesSource.contains("Use different shortcut names for DND On and DND Off."))
         XCTAssertTrue(preferencesSource.contains("static func installedShortcutPair(in installed: Set<String>)"))
@@ -2038,7 +2332,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(cleanerSource.contains("private let maximumSessionDuration: TimeInterval = 10 * 60"))
         XCTAssertTrue(cleanerSource.contains("scheduleFailSafeExit()"))
         XCTAssertTrue(cleanerSource.contains("cancelFailSafeExit()"))
-        XCTAssertTrue(cleanerSource.contains("windows.allSatisfy(\\.isVisible)"))
+        XCTAssertTrue(cleanerSource.contains("windows.allSatisfy({ $0.isVisible })"))
         XCTAssertTrue(cleanerSource.contains("Could not present screen cleaning mode on every display."))
         XCTAssertTrue(cleanerSource.contains("Could not exit screen cleaning mode."))
         XCTAssertTrue(cleanerSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + maximumSessionDuration"))
@@ -2079,6 +2373,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(xcodeSource.contains("removedCount += 1"))
         XCTAssertTrue(xcodeSource.contains("Partially cleaned DerivedData"))
         XCTAssertTrue(xcodeSource.contains("Removed \\(removedCount) of \\(items.count) items"))
+        XCTAssertTrue(xcodeSource.contains("private final class SizeCacheState: @unchecked Sendable"))
+        XCTAssertTrue(xcodeSource.contains("private var cacheGeneration: UInt64 = 0"))
+        XCTAssertTrue(xcodeSource.contains("guard generation == cacheGeneration else { return }"))
+        XCTAssertTrue(xcodeSource.components(separatedBy: "cacheGeneration &+= 1").count >= 3)
         XCTAssertTrue(trashSource.contains("let remaining = TrashPreferences.itemCount"))
         XCTAssertTrue(trashSource.contains("Finder finished, but \\(remaining) item"))
         XCTAssertTrue(trashSource.contains("playActionSound(named: \"Pop\")"))
@@ -2249,6 +2547,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(microphoneSource.contains("if values.allSatisfy({ !$0 }) { return false }"))
         XCTAssertTrue(microphoneSource.contains("for var address in settableInputAddresses(kAudioDevicePropertyMute"))
         XCTAssertTrue(microphoneSource.contains("for var address in settableInputAddresses(kAudioDevicePropertyVolumeScalar"))
+        XCTAssertTrue(microphoneSource.contains("kAudioDevicePropertyDeviceUID"))
+        XCTAssertTrue(extendedSwitches.contains("enum MicrophoneVolumeRestoreStore"))
+        XCTAssertTrue(extendedSwitches.contains("previousVolumesByDevice"))
         XCTAssertTrue(screenSaverSource.contains("let opened = openWorkspaceURL(url)"))
         XCTAssertTrue(screenSaverSource.contains("pgrep\", [\"-x\", \"ScreenSaverEngine\"]"))
         XCTAssertTrue(screenSaverSource.contains("the screen saver did not start"))
@@ -2271,6 +2572,94 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(powerModeSource.contains("guard mode == 0 || availableModes(current: currentMode).contains(mode)"))
         XCTAssertTrue(powerModeSource.contains("current == mode"))
         XCTAssertTrue(powerModeSource.contains("power mode did not change"))
+    }
+
+    func testBluetoothAudioUsesDeterministicTargetsAndVerifiesAudioReadiness() throws {
+        let package = try String(contentsOf: packageRoot.appendingPathComponent("Package.swift"))
+        let extendedSwitches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
+        let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
+        let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
+        let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
+        let diagnostics = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/RegressionDiagnostics.swift"))
+        let preferencesSource = try extract(
+            extendedSwitches,
+            from: "enum BluetoothAudioPreferences",
+            to: "private struct BluetoothAudioOutputEndpoint"
+        )
+        let outputMonitorSource = try extract(
+            extendedSwitches,
+            from: "private struct BluetoothAudioOutputEndpoint",
+            to: "struct DisplayModeOption"
+        )
+        let audioSwitchSource = try extract(
+            extendedSwitches,
+            from: "struct BluetoothAudioSwitch",
+            to: "struct DoNotDisturbSwitch"
+        )
+        let audioPanelSource = try extract(
+            views,
+            from: "private struct BluetoothAudioPreferencesPanel",
+            to: "private struct RecoveryNotice"
+        )
+        let snapshotThreadSource = try extract(
+            model,
+            from: "var snapshotRequiresMainThread: Bool",
+            to: "var requiresFreshAvailabilityBeforeAction: Bool"
+        )
+
+        XCTAssertTrue(package.contains(".linkedFramework(\"CoreBluetooth\")"))
+        XCTAssertTrue(extendedSwitches.contains("import CoreBluetooth"))
+        XCTAssertTrue(preferencesSource.contains("static let lastConnectedAddressKey"))
+        XCTAssertTrue(preferencesSource.contains("static var authorizationMessage: String?"))
+        XCTAssertTrue(preferencesSource.contains("CBManager.authorization"))
+        XCTAssertTrue(preferencesSource.contains("static func automaticTargetAddress("))
+        XCTAssertTrue(preferencesSource.contains("return options.count == 1 ? options[0].address : nil"))
+        XCTAssertTrue(preferencesSource.contains("static func isSupportedAudioOutput"))
+        XCTAssertTrue(preferencesSource.contains("guard !normalizedName.contains(\"find my\")"))
+        XCTAssertTrue(preferencesSource.contains("kBluetoothDeviceClassMinorAudioMicrophone"))
+        XCTAssertTrue(preferencesSource.contains("fileprivate static func deviceOptions(for devices: [IOBluetoothDevice])"))
+        XCTAssertTrue(preferencesSource.contains("fileprivate static func selectedDevice(in devices: [IOBluetoothDevice])"))
+        XCTAssertFalse(preferencesSource.contains("audioDevices.first(where: { !$0.isConnected() })"))
+        XCTAssertTrue(extendedSwitches.contains("private enum BluetoothAudioExecution"))
+        XCTAssertTrue(extendedSwitches.contains("DispatchSpecificKey<UInt8>()"))
+        XCTAssertTrue(extendedSwitches.contains("com.maxyu.macswitch.bluetooth-ipc"))
+        XCTAssertTrue(extendedSwitches.contains("autoreleasepool(invoking: operation)"))
+
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDeviceTransportTypeBluetooth"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDeviceTransportTypeBluetoothLE"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDevicePropertyDeviceIsAlive) == 1"))
+        XCTAssertTrue(outputMonitorSource.contains("kAudioDevicePropertyStreamConfiguration"))
+        XCTAssertTrue(outputMonitorSource.contains("static func waitForOutput"))
+        XCTAssertTrue(outputMonitorSource.contains("timeout: TimeInterval = 12"))
+        XCTAssertTrue(outputMonitorSource.contains("normalizedAddressKey($0.uid).contains(addressKey)"))
+        XCTAssertTrue(outputMonitorSource.contains("takeRetainedValue() as String"))
+        XCTAssertFalse(outputMonitorSource.contains("takeUnretainedValue() as String"))
+
+        XCTAssertTrue(audioSwitchSource.contains("let devices = BluetoothAudioPreferences.audioDevices"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioExecution.sync"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.deviceOptions(for: devices)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.selectedDevice(in: devices)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.targetDeviceForConnect(in: devices, options: options)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioPreferences.rememberConnectedAddress(target.addressString)"))
+        XCTAssertTrue(audioSwitchSource.contains("BluetoothAudioOutputMonitor.waitForOutput(for: target)"))
+        XCTAssertTrue(audioSwitchSource.contains("connected to Bluetooth, but its audio output is not ready"))
+        XCTAssertTrue(audioSwitchSource.contains("targetDeviceForConnect(in: devices, options: options).map { [$0] }"))
+        XCTAssertTrue(audioSwitchSource.contains("result != kIOReturnSuccess,"))
+        XCTAssertTrue(audioSwitchSource.contains("waitForDevice(device, connected: false, timeout: 2)"))
+
+        XCTAssertTrue(model.contains("private let bluetoothActionQueue = DispatchQueue"))
+        XCTAssertTrue(model.contains("let operationQueue = kind == .bluetoothAudio ? bluetoothActionQueue : actionQueue"))
+        XCTAssertTrue(model.contains("for delay in [1.2, 4.5]"))
+        XCTAssertFalse(snapshotThreadSource.contains(".bluetoothAudio"))
+
+        XCTAssertTrue(audioPanelSource.contains("@State private var bluetoothAuthorizationMessage: String?"))
+        XCTAssertTrue(audioPanelSource.contains("SystemSettingsLinks.openBluetoothPrivacy()"))
+        XCTAssertTrue(audioPanelSource.contains("Automatic (last connected)"))
+        XCTAssertTrue(audioPanelSource.contains("Automatic target:"))
+        XCTAssertTrue(audioPanelSource.contains("current output"))
+        XCTAssertTrue(switches.contains("static func openBluetoothPrivacy() -> Bool"))
+        XCTAssertTrue(diagnostics.contains("Bluetooth Automatic rejects an ambiguous uninitialized target"))
+        XCTAssertTrue(diagnostics.contains("Bluetooth device filtering rejects Find My companion records"))
     }
 
     func testMomentaryActionsExposeInProgressFeedback() throws {
@@ -2577,8 +2966,12 @@ final class PackageSmokeTests: XCTestCase {
 
     func testStatusItemOpensDashboardOnMouseDown() throws {
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
-        XCTAssertTrue(appDelegate.contains("NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)"))
+        XCTAssertTrue(appDelegate.contains("private let statusItemWidth: CGFloat = 20"))
+        XCTAssertTrue(appDelegate.contains("NSStatusBar.system.statusItem(withLength: statusItemWidth)"))
+        XCTAssertFalse(appDelegate.contains("NSStatusItem.squareLength"))
         XCTAssertFalse(appDelegate.contains("NSStatusBar.system.statusItem(withLength: 34)"))
+        XCTAssertTrue(appDelegate.contains("private func evaluateStatusItemSmokeTest() -> UISmokeResult"))
+        XCTAssertTrue(appDelegate.contains("status button matches the compact width"))
         XCTAssertTrue(appDelegate.contains("item.button?.sendAction(on: [.leftMouseDown])"))
     }
 
@@ -2598,6 +2991,11 @@ final class PackageSmokeTests: XCTestCase {
             source,
             from: "private struct CustomizePreferencesView",
             to: "private struct CustomizeRow"
+        )
+        let modesSource = try extract(
+            source,
+            from: "private struct ModesPreferencesView",
+            to: "private enum AppLinks"
         )
         let switchPanelSource = try extract(
             source,
@@ -2646,14 +3044,18 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customizeSource.contains("publishCustomizeLayout(detailVisible: true)"))
         XCTAssertTrue(customizeSource.contains("publishCustomizeLayout(detailVisible: false)"))
         XCTAssertTrue(customizeSource.contains("name: .setMacSwitchPreferencesLayout"))
-        XCTAssertTrue(source.contains("userInfo: [\"mode\": \"compact\"]"))
+        XCTAssertFalse(source.contains("userInfo: [\"mode\": tab == .modes ? \"detail\" : \"compact\"]"))
         XCTAssertTrue(source.contains("private func publishParentLayoutIfNeeded(for tab: PreferencesTab)"))
-        XCTAssertTrue(source.contains("guard tab != .customize else { return }"))
+        XCTAssertTrue(source.contains("guard tab != .customize, tab != .modes else { return }"))
+        XCTAssertTrue(source.contains("userInfo: [\"mode\": \"compact\"]"))
         XCTAssertFalse(source.contains("private func publishLayout(for tab: PreferencesTab)"))
         XCTAssertFalse(source.contains("? (store.preferredCustomizeKind == nil ? \"compact\" : \"detail\")"))
         XCTAssertTrue(customizeSource.contains(".onDisappear {\n            selectedKind = nil\n            publishCustomizeLayout(detailVisible: false)\n        }"))
         XCTAssertTrue(customizeSource.contains("userInfo: [\"mode\": detailVisible ? \"detail\" : \"compact\"]"))
         XCTAssertTrue(customizeSource.contains(".transition(.move(edge: .trailing).combined(with: .opacity))"))
+        XCTAssertTrue(modesSource.contains("userInfo: [\"mode\": detailVisible ? \"detail\" : \"compact\"]"))
+        XCTAssertTrue(modesSource.contains(".onDisappear {\n            selectedCustomModeID = nil\n            publishModesLayout(detailVisible: false)\n        }"))
+        XCTAssertTrue(modesSource.contains("CustomModeDetailPanel("))
         XCTAssertFalse(customizeSource.contains("@State private var selectedKind: SwitchKind = .keepAwake"))
         XCTAssertFalse(tabSource.contains("return false"), "Preferences tabs should not use disabled placeholder states")
         XCTAssertFalse(source.localizedCaseInsensitiveContains("coming soon"), "Preferences should not expose coming-soon placeholder copy")
@@ -2737,7 +3139,7 @@ final class PackageSmokeTests: XCTestCase {
         let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
         let registerSource = try extract(
             shortcuts,
-            from: "func register(shortcuts:",
+            from: "func register(",
             to: "private func unregisterAll()"
         )
         let loadSource = try extract(

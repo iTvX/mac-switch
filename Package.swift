@@ -26,6 +26,7 @@ let package = Package(
                 .linkedFramework("IOKit"),
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Carbon"),
+                .linkedFramework("CoreBluetooth"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreLocation"),
@@ -35,8 +36,9 @@ let package = Package(
         ),
         .testTarget(
             name: "MacSwitchTests",
+            dependencies: ["MacSwitch"],
             path: "Tests/MacSwitchTests"
         )
     ],
-    swiftLanguageModes: [.v5]
+    swiftLanguageModes: [.v6]
 )

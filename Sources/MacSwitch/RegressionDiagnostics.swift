@@ -3,6 +3,7 @@ import Carbon
 import CoreGraphics
 import CoreLocation
 import Foundation
+import IOBluetooth
 
 enum RegressionDiagnostics {
     static func runSafe() -> Int32 {
@@ -22,11 +23,14 @@ enum RegressionDiagnostics {
         checkLargeProcessOutput(&reporter)
         checkScreenCleanExitEvents(&reporter)
         checkSystemSettingsURLs(&reporter)
+        checkBluetoothAudioSelection(&reporter)
+        checkMicrophoneVolumeRestoreIsolation(&reporter)
         checkSunScheduleDateAlignment(&reporter)
         checkShortcutValidation(&reporter)
         checkDoNotDisturbShortcutStatus(&reporter)
         checkActionSafetyPreferences(&reporter)
         checkEjectDiskExclusions(&reporter)
+        checkModeSafety(&reporter)
 
         reporter.section("Default layout")
         checkDefaultVisibility(&reporter)
@@ -302,10 +306,47 @@ enum RegressionDiagnostics {
         )
     }
 
+    private static func checkModeSafety(_ reporter: inout SelfTestReporter) {
+        reporter.check(
+            !SwitchKind.screenClean.isModeEligible
+                && !SwitchKind.lockKeyboard.isModeEligible
+                && !SwitchKind.lowPowerMode.isModeEligible
+                && !SwitchKind.energyMode.isModeEligible,
+            "modes exclude blocking and lossy switches"
+        )
+
+        let now = Date()
+        let futureEndDate = now.addingTimeInterval(300)
+        let timedSession = ActiveSwitchModeSession(
+            modeID: SwitchModeID(rawValue: "custom.self-test"),
+            originalStates: [.keepAwake: true, .doNotDisturb: true],
+            originalKeepAwakeEndDate: futureEndDate,
+            originalDoNotDisturbEndDate: futureEndDate
+        )
+        reporter.check(
+            timedSession.restorationState(for: .keepAwake, at: now) == true
+                && timedSession.restorationState(for: .doNotDisturb, at: now) == true,
+            "mode restoration preserves unexpired timed states"
+        )
+        reporter.check(
+            timedSession.restorationState(for: .keepAwake, at: futureEndDate.addingTimeInterval(1)) == false
+                && timedSession.restorationState(for: .doNotDisturb, at: futureEndDate.addingTimeInterval(1)) == false,
+            "mode restoration does not revive expired timed states"
+        )
+
+        let retiredPresetIDs = ["presentation", "focus", "meeting", "cleanDesktop"]
+            .map(SwitchModeID.init(rawValue:))
+        reporter.check(
+            retiredPresetIDs.allSatisfy { !$0.isCustom },
+            "retired preset identifiers cannot enter the custom mode library"
+        )
+    }
+
     private static func checkSystemSettingsURLs(_ reporter: inout SelfTestReporter) {
         let urls = [
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
             "x-apple.systempreferences:com.apple.Bluetooth",
             "x-apple.systempreferences:com.apple.Displays-Settings.extension",
             "x-apple.systempreferences:com.apple.Sound-Settings.extension",
@@ -319,6 +360,110 @@ enum RegressionDiagnostics {
         for url in urls {
             reporter.check(URL(string: url) != nil, "system settings URL is valid: \(url)")
         }
+    }
+
+    private static func checkBluetoothAudioSelection(_ reporter: inout SelfTestReporter) {
+        let first = BluetoothAudioDeviceOption(
+            address: "00-11-22-33-44-55",
+            name: "Desk Headphones",
+            isConnected: false,
+            isAudioReady: false,
+            isDefaultOutput: false
+        )
+        let second = BluetoothAudioDeviceOption(
+            address: "AA-BB-CC-DD-EE-FF",
+            name: "Travel Headphones",
+            isConnected: false,
+            isAudioReady: false,
+            isDefaultOutput: false
+        )
+        let connected = BluetoothAudioDeviceOption(
+            address: first.address,
+            name: first.name,
+            isConnected: true,
+            isAudioReady: true,
+            isDefaultOutput: true
+        )
+
+        reporter.check(
+            BluetoothAudioPreferences.addressesMatch(first.address, "00:11:22:33:44:55"),
+            "Bluetooth addresses match across separator formats"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [first, second],
+                lastAddress: second.address
+            ) == second.address,
+            "Bluetooth Automatic reuses the last successful device"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [connected, second],
+                lastAddress: second.address
+            ) == connected.address,
+            "Bluetooth Automatic prioritizes a connected audio output"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(
+                in: [first, second],
+                lastAddress: ""
+            ) == nil,
+            "Bluetooth Automatic rejects an ambiguous uninitialized target"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.automaticTargetAddress(in: [first], lastAddress: "") == first.address,
+            "Bluetooth Automatic accepts a single paired output"
+        )
+        reporter.check(
+            BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioHeadphones),
+                name: "Headphones"
+            ),
+            "Bluetooth device filtering accepts headphones"
+        )
+        reporter.check(
+            !BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioMicrophone),
+                name: "Bluetooth Microphone"
+            ),
+            "Bluetooth device filtering rejects input-only devices"
+        )
+        reporter.check(
+            !BluetoothAudioPreferences.isSupportedAudioOutput(
+                major: Int(kBluetoothDeviceClassMajorAudio),
+                minor: Int(kBluetoothDeviceClassMinorAudioHeadphones),
+                name: "AirPods Pro - Find My"
+            ),
+            "Bluetooth device filtering rejects Find My companion records"
+        )
+    }
+
+    private static func checkMicrophoneVolumeRestoreIsolation(_ reporter: inout SelfTestReporter) {
+        let suiteName = "com.maxyu.macswitch.selftest.microphone.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            reporter.fail("microphone restore test defaults available")
+            return
+        }
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        MicrophoneVolumeRestoreStore.save(0.35, for: "uid:desk", defaults: defaults)
+        MicrophoneVolumeRestoreStore.save(0.8, for: "uid:travel", defaults: defaults)
+        reporter.check(
+            MicrophoneVolumeRestoreStore.volume(for: "uid:desk", defaults: defaults) == 0.35
+                && MicrophoneVolumeRestoreStore.volume(for: "uid:travel", defaults: defaults) == 0.8,
+            "microphone restore volumes stay isolated by input device"
+        )
+
+        MicrophoneVolumeRestoreStore.clear(for: "uid:desk", defaults: defaults)
+        reporter.check(
+            MicrophoneVolumeRestoreStore.volume(for: "uid:desk", defaults: defaults) == nil
+                && MicrophoneVolumeRestoreStore.volume(for: "uid:travel", defaults: defaults) == 0.8,
+            "clearing one microphone restore volume preserves other devices"
+        )
     }
 
     private static func checkSunScheduleDateAlignment(_ reporter: inout SelfTestReporter) {

@@ -4,6 +4,7 @@ on:
   pull_request:
     branches:
       - main
+      - beta-pr40-modes
   workflow_dispatch:
 
 permissions:

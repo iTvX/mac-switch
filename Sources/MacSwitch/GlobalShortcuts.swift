@@ -2,7 +2,7 @@ import AppKit
 import Carbon
 import Foundation
 
-struct HotKeyShortcut: Codable, Equatable, Hashable {
+struct HotKeyShortcut: Codable, Equatable, Hashable, Sendable {
     var keyCode: UInt32
     var modifiers: UInt32
     var display: String
@@ -132,7 +132,7 @@ final class GlobalShortcutManager {
     private var nextID: UInt32 = 1
     private var eventHandler: EventHandlerRef?
     private var eventHandlerInstallStatus: OSStatus = noErr
-    private var handler: ((SwitchKind) -> Void)?
+    private var handler: (@MainActor @Sendable (SwitchKind) -> Void)?
 
     init() {
         installEventHandler()
@@ -145,7 +145,10 @@ final class GlobalShortcutManager {
         }
     }
 
-    func register(shortcuts: [SwitchKind: HotKeyShortcut], handler: @escaping (SwitchKind) -> Void) -> String? {
+    func register(
+        shortcuts: [SwitchKind: HotKeyShortcut],
+        handler: @escaping @MainActor @Sendable (SwitchKind) -> Void
+    ) -> String? {
         unregisterAll()
         self.handler = shortcuts.isEmpty ? nil : handler
         guard !shortcuts.isEmpty else { return nil }
@@ -233,7 +236,7 @@ final class GlobalShortcutManager {
             return noErr
         }
 
-        DispatchQueue.main.async { [handler] in
+        Task { @MainActor [handler] in
             handler?(kind)
         }
         return noErr

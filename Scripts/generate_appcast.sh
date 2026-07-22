@@ -56,7 +56,9 @@ if [[ -n "$APPCAST_EXISTING_URL" ]]; then
         echo "Seeded appcast from: $APPCAST_EXISTING_URL"
     else
         rm -f "$EXISTING_APPCAST_PATH"
-        echo "No existing appcast was available at: $APPCAST_EXISTING_URL"
+        echo "Existing appcast could not be downloaded from: $APPCAST_EXISTING_URL" >&2
+        echo "Refusing to publish without validating version monotonicity and preserving update history." >&2
+        exit 1
     fi
 fi
 mkdir -p "$GENERATED_APPCAST_DIR"
@@ -85,6 +87,10 @@ run_sparkle_tool "$SPARKLE_BIN_DIR/generate_appcast" \
 
 expected_enclosure_url="${DOWNLOAD_URL_PREFIX}${UPDATE_ASSET_NAME}"
 if [[ -s "$EXISTING_APPCAST_PATH" ]]; then
+    "$ROOT_DIR/Scripts/appcast_item_tool.py" assert-newer \
+        --existing "$EXISTING_APPCAST_PATH" \
+        --incoming "$GENERATED_APPCAST_PATH" \
+        --expected-url "$expected_enclosure_url"
     "$ROOT_DIR/Scripts/appcast_item_tool.py" merge \
         --existing "$EXISTING_APPCAST_PATH" \
         --incoming "$GENERATED_APPCAST_PATH" \
