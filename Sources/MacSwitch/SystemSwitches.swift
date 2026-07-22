@@ -982,7 +982,6 @@ private final class ScreenCleaner {
     private let maximumSessionDuration: TimeInterval = 10 * 60
     private let eventTap = EventBlocker(mode: .screenClean)
     private var windows: [NSWindow] = []
-    private var exitMonitors: [Any] = []
     private var failSafeExitWorkItem: DispatchWorkItem?
 
     deinit {
@@ -1002,20 +1001,19 @@ private final class ScreenCleaner {
                 warning: "Open System Settings"
             )
         }
-        return SwitchSnapshot(isOn: isActive, isAvailable: true, subtitle: isActive ? "Click or press Esc to exit" : nil, warning: nil)
+        return SwitchSnapshot(isOn: isActive, isAvailable: true, subtitle: isActive ? "Use the on-screen Exit button" : nil, warning: nil)
     }
 
     func setEnabled(_ enabled: Bool) -> String? {
         if enabled {
             if isActive { return nil }
-            if let error = eventTap.start(onEscape: { [weak self] in self?.finish() }) {
+            if let error = eventTap.start(onInvalidated: { [weak self] in self?.finish() }) {
                 return error
             }
             guard startOverlay() else {
                 eventTap.stop()
                 return "No display is available for cleaning mode."
             }
-            installExitMonitors()
             scheduleFailSafeExit()
             guard windows.allSatisfy({ $0.isVisible }), eventTap.isActive else {
                 finish()
@@ -1039,13 +1037,16 @@ private final class ScreenCleaner {
                 backing: .buffered,
                 defer: false
             )
-            window.onExit = { [weak self] in self?.finish() }
             window.level = .screenSaver
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             window.isOpaque = true
             window.backgroundColor = .black
             window.acceptsMouseMovedEvents = true
-            window.contentView = NSHostingView(rootView: ScreenCleanOverlayView())
+            window.contentView = ScreenCleanHostingView(
+                rootView: ScreenCleanOverlayView { [weak self] in
+                    self?.finish()
+                }
+            )
             window.makeKeyAndOrderFront(nil)
             return window
         }
@@ -1060,40 +1061,12 @@ private final class ScreenCleaner {
     private func finish() {
         let wasActive = isActive
         cancelFailSafeExit()
-        removeExitMonitors()
         windows.forEach { $0.orderOut(nil) }
         windows.removeAll()
         eventTap.stop()
         if wasActive {
             onFinished?()
         }
-    }
-
-    private func installExitMonitors() {
-        guard exitMonitors.isEmpty else { return }
-
-        let local = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown]) { [weak self] event in
-            if event.type == .keyDown, event.keyCode != 53 {
-                return nil
-            }
-            DispatchQueue.main.async { self?.finish() }
-            return nil
-        }
-        if let local {
-            exitMonitors.append(local)
-        }
-
-        let global = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] _ in
-            DispatchQueue.main.async { self?.finish() }
-        }
-        if let global {
-            exitMonitors.append(global)
-        }
-    }
-
-    private func removeExitMonitors() {
-        exitMonitors.forEach { NSEvent.removeMonitor($0) }
-        exitMonitors.removeAll()
     }
 
     private func scheduleFailSafeExit() {
@@ -1112,22 +1085,13 @@ private final class ScreenCleaner {
 }
 
 private final class ScreenCleanWindow: NSWindow {
-    var onExit: (() -> Void)?
-
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
+}
 
-    override func sendEvent(_ event: NSEvent) {
-        switch event.type {
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown:
-            onExit?()
-        case .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            onExit?()
-        case .keyDown where event.keyCode == 53:
-            onExit?()
-        default:
-            super.sendEvent(event)
-        }
+private final class ScreenCleanHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 
@@ -1136,14 +1100,9 @@ private enum EventBlockMode {
     case screenClean
 }
 
-enum ScreenCleanExitEvent {
-    static func shouldExit(type: CGEventType, keyCode: Int64? = nil) -> Bool {
+enum ScreenCleanExitPolicy {
+    static func requiresFailSafeExit(type: CGEventType) -> Bool {
         switch type {
-        case .keyDown:
-            return keyCode == 53
-        case .leftMouseDown, .rightMouseDown, .otherMouseDown,
-             .leftMouseUp, .rightMouseUp, .otherMouseUp:
-            return true
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             return true
         default:
@@ -1157,7 +1116,7 @@ private final class EventBlocker: @unchecked Sendable {
     private let mode: EventBlockMode
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var onEscape: (() -> Void)?
+    private var onInvalidated: (() -> Void)?
 
     var isActive: Bool { eventTap != nil }
 
@@ -1169,9 +1128,9 @@ private final class EventBlocker: @unchecked Sendable {
         stop()
     }
 
-    func start(onEscape: (() -> Void)? = nil) -> String? {
+    func start(onInvalidated: (() -> Void)? = nil) -> String? {
         if isActive { return nil }
-        self.onEscape = onEscape
+        self.onInvalidated = onInvalidated
 
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
         guard AXIsProcessTrustedWithOptions(options) else {
@@ -1196,7 +1155,7 @@ private final class EventBlocker: @unchecked Sendable {
         guard let runLoopSource else {
             CFMachPortInvalidate(tap)
             eventTap = nil
-            self.onEscape = nil
+            self.onInvalidated = nil
             return "Could not attach the input event tap."
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
@@ -1218,26 +1177,18 @@ private final class EventBlocker: @unchecked Sendable {
         }
         runLoopSource = nil
         eventTap = nil
-        onEscape = nil
+        onInvalidated = nil
     }
 
     fileprivate func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if mode == .screenClean {
-                DispatchQueue.main.async { [weak self] in self?.onEscape?() }
+            if mode == .screenClean, ScreenCleanExitPolicy.requiresFailSafeExit(type: type) {
+                DispatchQueue.main.async { [weak self] in self?.onInvalidated?() }
             }
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
-        }
-
-        if mode == .screenClean {
-            let keyCode = type == .keyDown ? event.getIntegerValueField(.keyboardEventKeycode) : nil
-            if ScreenCleanExitEvent.shouldExit(type: type, keyCode: keyCode) {
-                DispatchQueue.main.async { [weak self] in self?.onEscape?() }
-                return nil
-            }
         }
 
         return nil
@@ -1250,18 +1201,7 @@ private final class EventBlocker: @unchecked Sendable {
     }
 
     private var cleaningMask: CGEventMask {
-        keyboardMask |
-        (1 << CGEventType.leftMouseDown.rawValue) |
-        (1 << CGEventType.leftMouseUp.rawValue) |
-        (1 << CGEventType.rightMouseDown.rawValue) |
-        (1 << CGEventType.rightMouseUp.rawValue) |
-        (1 << CGEventType.otherMouseDown.rawValue) |
-        (1 << CGEventType.otherMouseUp.rawValue) |
-        (1 << CGEventType.mouseMoved.rawValue) |
-        (1 << CGEventType.leftMouseDragged.rawValue) |
-        (1 << CGEventType.rightMouseDragged.rawValue) |
-        (1 << CGEventType.otherMouseDragged.rawValue) |
-        (1 << CGEventType.scrollWheel.rawValue)
+        keyboardMask
     }
 
 }

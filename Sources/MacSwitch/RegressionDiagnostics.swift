@@ -212,28 +212,32 @@ enum RegressionDiagnostics {
 
     private static func checkScreenCleanExitEvents(_ reporter: inout SelfTestReporter) {
         reporter.check(
-            ScreenCleanExitEvent.shouldExit(type: .leftMouseDown),
-            "Screen Cleaning exits on mouse down"
+            !ScreenCleanExitPolicy.requiresFailSafeExit(type: .leftMouseDown),
+            "Screen Cleaning does not exit on mouse down"
         )
         reporter.check(
-            ScreenCleanExitEvent.shouldExit(type: .leftMouseUp),
-            "Screen Cleaning exits on mouse up"
+            !ScreenCleanExitPolicy.requiresFailSafeExit(type: .leftMouseUp),
+            "Screen Cleaning does not exit on mouse up"
         )
         reporter.check(
-            ScreenCleanExitEvent.shouldExit(type: .keyDown, keyCode: 53),
-            "Screen Cleaning exits on Escape"
+            !ScreenCleanExitPolicy.requiresFailSafeExit(type: .keyDown),
+            "Screen Cleaning does not exit on Escape"
         )
         reporter.check(
-            ScreenCleanExitEvent.shouldExit(type: .tapDisabledByTimeout),
+            ScreenCleanExitPolicy.requiresFailSafeExit(type: .tapDisabledByTimeout),
             "Screen Cleaning exits if the event tap is disabled"
         )
         reporter.check(
-            !ScreenCleanExitEvent.shouldExit(type: .mouseMoved),
+            ScreenCleanExitPolicy.requiresFailSafeExit(type: .tapDisabledByUserInput),
+            "Screen Cleaning exits if input disables the event tap"
+        )
+        reporter.check(
+            !ScreenCleanExitPolicy.requiresFailSafeExit(type: .mouseMoved),
             "Screen Cleaning ignores pointer movement"
         )
         reporter.check(
-            !ScreenCleanExitEvent.shouldExit(type: .keyDown, keyCode: 0),
-            "Screen Cleaning blocks non-Escape keys without exiting"
+            !ScreenCleanExitPolicy.requiresFailSafeExit(type: .keyDown),
+            "Screen Cleaning blocks keys without exiting"
         )
     }
 
