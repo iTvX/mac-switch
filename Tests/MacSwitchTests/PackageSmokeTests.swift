@@ -13,7 +13,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Start at Login diagnostic includes registration status"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Start at Login diagnostic includes launch agent schema"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Start at Login diagnostic includes current app match"), result.combinedOutput)
-        XCTAssertTrue(result.output.contains("Screen Cleaning exits on mouse down"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Screen Cleaning does not exit on mouse down"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Screen Cleaning does not exit on Escape"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Screen Cleaning exits if the event tap is disabled"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("shortcut validation accepts Command-Option shortcuts"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("shortcut validation rejects Command-A"), result.combinedOutput)
@@ -2304,7 +2305,7 @@ final class PackageSmokeTests: XCTestCase {
         )
     }
 
-    func testScreenCleanHasExitFailSafes() throws {
+    func testScreenCleanRequiresExplicitExitAndRetainsFailSafes() throws {
         let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SystemSwitches.swift"))
         let diagnostics = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/RegressionDiagnostics.swift"))
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
@@ -2313,15 +2314,20 @@ final class PackageSmokeTests: XCTestCase {
             from: "private final class ScreenCleaner",
             to: "private final class ScreenCleanWindow"
         )
-        let exitEventSource = try extract(
+        let windowSource = try extract(
             switches,
-            from: "enum ScreenCleanExitEvent",
+            from: "private final class ScreenCleanWindow",
+            to: "enum ScreenCleanExitPolicy"
+        )
+        let exitPolicySource = try extract(
+            switches,
+            from: "enum ScreenCleanExitPolicy",
             to: "private final class EventBlocker"
         )
         let eventBlockerSource = try extract(
             switches,
             from: "fileprivate func handle",
-            to: "private var keyboardMask"
+            to: "private let eventTapCallback"
         )
         let overlaySource = try extract(
             views,
@@ -2336,19 +2342,39 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(cleanerSource.contains("Could not present screen cleaning mode on every display."))
         XCTAssertTrue(cleanerSource.contains("Could not exit screen cleaning mode."))
         XCTAssertTrue(cleanerSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + maximumSessionDuration"))
+        XCTAssertTrue(cleanerSource.contains("eventTap.start(onInvalidated:"))
+        XCTAssertTrue(cleanerSource.contains("ScreenCleanHostingView("))
+        XCTAssertTrue(cleanerSource.contains("ScreenCleanOverlayView { [weak self]"))
+        XCTAssertFalse(cleanerSource.contains("exitMonitors"))
+        XCTAssertFalse(cleanerSource.contains("addLocalMonitorForEvents"))
+        XCTAssertFalse(cleanerSource.contains("addGlobalMonitorForEvents"))
         XCTAssertFalse(
             cleanerSource.contains("AccessibilityPermission.openSettings()"),
             "screen cleaning should not open System Settings without an explicit user action"
         )
-        XCTAssertTrue(exitEventSource.contains(".tapDisabledByTimeout"))
-        XCTAssertTrue(exitEventSource.contains(".tapDisabledByUserInput"))
+        XCTAssertFalse(ScreenCleanExitPolicy.requiresFailSafeExit(type: .leftMouseDown))
+        XCTAssertFalse(ScreenCleanExitPolicy.requiresFailSafeExit(type: .leftMouseUp))
+        XCTAssertFalse(ScreenCleanExitPolicy.requiresFailSafeExit(type: .keyDown))
+        XCTAssertTrue(ScreenCleanExitPolicy.requiresFailSafeExit(type: .tapDisabledByTimeout))
+        XCTAssertTrue(ScreenCleanExitPolicy.requiresFailSafeExit(type: .tapDisabledByUserInput))
+        XCTAssertTrue(exitPolicySource.contains(".tapDisabledByTimeout"))
+        XCTAssertTrue(exitPolicySource.contains(".tapDisabledByUserInput"))
+        XCTAssertFalse(windowSource.contains("override func sendEvent"))
+        XCTAssertFalse(windowSource.contains("onExit"))
+        XCTAssertTrue(windowSource.contains("override func acceptsFirstMouse"))
         XCTAssertTrue(eventBlockerSource.contains("mode == .screenClean"))
-        XCTAssertTrue(eventBlockerSource.contains("self?.onEscape?()"))
+        XCTAssertTrue(eventBlockerSource.contains("self?.onInvalidated?()"))
+        XCTAssertTrue(eventBlockerSource.contains("private var cleaningMask: CGEventMask {\n        keyboardMask"))
+        XCTAssertFalse(eventBlockerSource.contains("onEscape"))
         XCTAssertTrue(switches.contains("CGEvent.tapIsEnabled(tap: tap)"))
         XCTAssertTrue(switches.contains("Could not attach the input event tap."))
         XCTAssertTrue(switches.contains("Could not enable the input event tap."))
         XCTAssertTrue(diagnostics.contains("Screen Cleaning exits if the event tap is disabled"))
         XCTAssertTrue(overlaySource.contains("Failsafe exits automatically after 10 minutes"))
+        XCTAssertTrue(overlaySource.contains("Button(action: onExit)"))
+        XCTAssertTrue(overlaySource.contains("Label(\"Exit Screen Cleaning\", systemImage: \"xmark.circle.fill\")"))
+        XCTAssertTrue(overlaySource.contains("screen-clean-exit-button"))
+        XCTAssertFalse(overlaySource.contains("Click Anywhere or Press Esc"))
     }
 
     func testCleanupActionsVerifyResultsAndReportPartialFailures() throws {

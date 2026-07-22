@@ -6518,9 +6518,11 @@ private extension SwitchKind {
 }
 
 struct ScreenCleanOverlayView: View {
+    let onExit: () -> Void
+
     var body: some View {
         ZStack {
-            Color.black
+            Color.black.ignoresSafeArea()
             VStack(spacing: 22) {
                 Image(systemName: "sparkles.rectangle.stack")
                     .font(.system(size: 58, weight: .regular))
@@ -6529,7 +6531,7 @@ struct ScreenCleanOverlayView: View {
                 VStack(spacing: 8) {
                     Text("Screen Cleaning Mode")
                         .font(.system(size: 38, weight: .semibold))
-                    Text("Your keyboard is also locked")
+                    Text("Keyboard input is locked while you clean")
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(.white.opacity(0.68))
                     Text("Failsafe exits automatically after 10 minutes")
@@ -6537,13 +6539,17 @@ struct ScreenCleanOverlayView: View {
                         .foregroundStyle(.white.opacity(0.44))
                 }
 
-                VStack(spacing: 8) {
-                    Text("Click Anywhere or Press Esc")
+                Button(action: onExit) {
+                    Label("Exit Screen Cleaning", systemImage: "xmark.circle.fill")
                         .font(.system(size: 17, weight: .semibold))
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
-                        .background(.white.opacity(0.12), in: Capsule())
+                        .foregroundStyle(.black.opacity(0.88))
+                        .frame(minWidth: 210, minHeight: 46)
+                        .padding(.horizontal, 8)
+                        .background(.white, in: Capsule())
+                        .shadow(color: .black.opacity(0.3), radius: 12, y: 5)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("screen-clean-exit-button")
             }
             .foregroundStyle(.white.opacity(0.9))
         }
