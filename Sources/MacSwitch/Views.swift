@@ -9,17 +9,18 @@ enum DashboardLayout {
     static let coordinateSpaceName = "MacSwitchDashboardCoordinateSpace"
     static let reorderHysteresis: CGFloat = 4
 
-    static func size(visibleCount: Int, showsError: Bool) -> NSSize {
-        NSSize(width: width, height: height(visibleCount: visibleCount, showsError: showsError))
+    static func size(visibleCount: Int, visibleModeCount: Int = 0, showsError: Bool) -> NSSize {
+        NSSize(width: width, height: height(visibleCount: visibleCount, visibleModeCount: visibleModeCount, showsError: showsError))
     }
 
-    static func height(visibleCount: Int, showsError: Bool) -> CGFloat {
+    static func height(visibleCount: Int, visibleModeCount: Int = 0, showsError: Bool) -> CGFloat {
         let clampedVisibleCount = max(visibleCount, 1)
         let headerHeight: CGFloat = 48
         let footerHeight: CGFloat = 44
         let rowHeight: CGFloat = 49
+        let modesHeight: CGFloat = visibleModeCount > 0 ? 43 : 0
         let errorHeight: CGFloat = showsError ? 50 : 0
-        let contentHeight = headerHeight + footerHeight + CGFloat(clampedVisibleCount) * rowHeight + errorHeight + 12
+        let contentHeight = headerHeight + footerHeight + modesHeight + CGFloat(clampedVisibleCount) * rowHeight + errorHeight + 12
         return min(maxHeight, max(minHeight, ceil(contentHeight)))
     }
 }
@@ -33,7 +34,11 @@ struct DashboardView: View {
     @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
 
     private var panelSize: NSSize {
-        DashboardLayout.size(visibleCount: store.visibleKinds.count, showsError: store.lastError != nil)
+        DashboardLayout.size(
+            visibleCount: store.visibleKinds.count,
+            visibleModeCount: store.visibleModes.count,
+            showsError: store.lastError != nil
+        )
     }
 
     private var activeCount: Int {
@@ -66,6 +71,11 @@ struct DashboardView: View {
                 } else {
                     ScrollView(.vertical, showsIndicators: false) {
                         VStack(spacing: 0) {
+                            if !store.visibleModes.isEmpty {
+                                DashboardModesStrip(store: store)
+                                    .padding(.bottom, 4)
+                            }
+
                             ForEach(Array(dashboardDisplayKinds.enumerated()), id: \.element.id) { index, kind in
                                 DashboardReorderRow(
                                     kind: kind,
@@ -421,7 +431,7 @@ private struct DashboardDragState: Equatable {
 }
 
 private struct DashboardRowFramePreferenceKey: PreferenceKey {
-    static var defaultValue: [SwitchKind: CGRect] = [:]
+    static let defaultValue: [SwitchKind: CGRect] = [:]
 
     static func reduce(value: inout [SwitchKind: CGRect], nextValue: () -> [SwitchKind: CGRect]) {
         value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
@@ -463,6 +473,145 @@ private struct EmptyDashboardView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(24)
+    }
+}
+
+private struct DashboardModesStrip: View {
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                ForEach(store.visibleModes) { mode in
+                    DashboardModeButton(
+                        mode: mode,
+                        isActive: store.isModeActive(mode.id),
+                        isBusy: store.isModeBusy(mode),
+                        isDisabled: store.isModeInteractionDisabled(mode),
+                        action: {
+                            store.toggleMode(mode)
+                        }
+                    )
+                }
+            }
+            .fixedSize(horizontal: true, vertical: false)
+
+            DashboardModesMenu(store: store)
+        }
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity)
+        .frame(height: 34)
+    }
+}
+
+private struct DashboardModesMenu: View {
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        Menu {
+            ForEach(store.visibleModes) { mode in
+                Button {
+                    store.toggleMode(mode)
+                } label: {
+                    Label(
+                        mode.title,
+                        systemImage: store.isModeActive(mode.id) ? "checkmark.circle.fill" : mode.symbolName
+                    )
+                }
+                .disabled(store.isModeInteractionDisabled(mode))
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: activeMode?.symbolName ?? "square.stack.3d.up")
+                    .font(.system(size: 10.5, weight: .bold))
+                    .frame(width: 14)
+                Text(activeMode?.compactTitle ?? store.text(.modes))
+                    .font(.system(size: 10.8, weight: .bold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                Text("\(store.visibleModes.count)")
+                    .font(.system(size: 9.8, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+            }
+            .foregroundStyle(activeMode == nil ? DashboardColors.subtleText : Color.accentColor)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: 27)
+            .background(DashboardColors.controlFill.opacity(0.88), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help("Choose a mode")
+    }
+
+    private var activeMode: SwitchModeDefinition? {
+        store.visibleModes.first { store.isModeActive($0.id) }
+    }
+}
+
+private struct DashboardModeButton: View {
+    let mode: SwitchModeDefinition
+    let isActive: Bool
+    let isBusy: Bool
+    let isDisabled: Bool
+    let action: () -> Void
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Group {
+                    if isBusy {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: mode.symbolName)
+                            .font(.system(size: 10.5, weight: .bold))
+                    }
+                }
+                .frame(width: 13, height: 13)
+                Text(mode.compactTitle)
+                    .font(.system(size: 10.6, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.78)
+            }
+            .foregroundStyle(isActive ? Color.accentColor : DashboardColors.subtleText)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 54, maxWidth: 72, minHeight: 27)
+            .background(
+                Capsule()
+                    .fill(backgroundFill)
+            )
+            .overlay(
+                Capsule()
+                    .stroke(borderFill, lineWidth: 1)
+            )
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .opacity(isBusy ? 0.62 : 1)
+        .help(mode.subtitle)
+        .onHover { isHovering = $0 }
+    }
+
+    private var backgroundFill: Color {
+        if isActive {
+            return Color.accentColor.opacity(0.17)
+        }
+        if isHovering {
+            return DashboardColors.controlHoverFill
+        }
+        return DashboardColors.controlFill.opacity(0.82)
+    }
+
+    private var borderFill: Color {
+        isActive ? Color.accentColor.opacity(0.28) : Color.white.opacity(isHovering ? 0.26 : 0.16)
     }
 }
 
@@ -1131,7 +1280,7 @@ private struct KeepAwakeDurationMenu: View {
 
             Toggle("Keep awake when the lid is closed", isOn: Binding(
                 get: { keepAwakeWhenLidClosed },
-                set: { value in
+                set: { value, _ in
                     keepAwakeWhenLidClosed = value
                     KeepAwakePreferences.keepAwakeWhenLidClosed = value
                     if store.snapshots[.keepAwake]?.isOn == true {
@@ -1318,6 +1467,7 @@ private struct ErrorRemediation {
     let symbol: String
 }
 
+@MainActor
 private enum ErrorFixRouter {
     static func remediation(for message: String) -> ErrorRemediation? {
         let lowercased = message.lowercased()
@@ -1337,6 +1487,12 @@ private enum ErrorFixRouter {
         }
         if lowercased.contains("headphones") || lowercased.contains("audio device") || lowercased.contains("device not found") {
             return ErrorRemediation(title: "Open Bluetooth Audio", symbol: "headphones")
+        }
+        if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
+            return ErrorRemediation(title: "Open Bluetooth Privacy", symbol: "hand.raised")
+        }
+        if lowercased.contains("audio output") || lowercased.contains("sound settings") {
+            return ErrorRemediation(title: "Open Sound", symbol: "speaker.wave.2")
         }
         if lowercased.contains("bluetooth") {
             return ErrorRemediation(title: "Open Bluetooth", symbol: "antenna.radiowaves.left.and.right")
@@ -1408,6 +1564,14 @@ private enum ErrorFixRouter {
             openCustomize(.bluetoothAudio, store: store)
             return
         }
+        if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
+            clearLastErrorIfOpened(SystemSettingsLinks.openBluetoothPrivacy(), store: store)
+            return
+        }
+        if lowercased.contains("audio output") || lowercased.contains("sound settings") {
+            clearLastErrorIfOpened(SystemSettingsLinks.openSound(), store: store)
+            return
+        }
         if lowercased.contains("bluetooth") {
             clearLastErrorIfOpened(SystemSettingsLinks.openBluetooth(), store: store)
             return
@@ -1474,6 +1638,7 @@ private enum ErrorFixRouter {
 }
 
 @discardableResult
+@MainActor
 private func reportOpenResult(_ opened: Bool, store: SwitchStore, failureMessage: String) -> Bool {
     if !opened {
         store.lastError = failureMessage
@@ -1484,16 +1649,18 @@ private func reportOpenResult(_ opened: Bool, store: SwitchStore, failureMessage
 }
 
 @discardableResult
+@MainActor
 private func openWorkspaceURLOrReport(_ url: URL, store: SwitchStore, failureMessage: String) -> Bool {
     reportOpenResult(openWorkspaceURL(url), store: store, failureMessage: failureMessage)
 }
 
+@MainActor
 private func scheduleAfterSwitchActionSettles(
     store: SwitchStore,
     kind: SwitchKind,
     delay: TimeInterval = 0.25,
     remainingAttempts: Int = 300,
-    action: @escaping () -> Void
+    action: @escaping @MainActor @Sendable () -> Void
 ) {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
         if store.isActionBusy(kind), remainingAttempts > 0 {
@@ -1741,6 +1908,8 @@ struct PreferencesView: View {
                         switch tab {
                         case .general:
                             GeneralPreferencesView(store: store)
+                        case .modes:
+                            ModesPreferencesView(store: store)
                         case .customize:
                             CustomizePreferencesView(store: store)
                         case .about:
@@ -1761,7 +1930,7 @@ struct PreferencesView: View {
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 540, minHeight: 390)
+        .frame(minWidth: 540, minHeight: 320)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.clear)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))
@@ -1786,7 +1955,7 @@ struct PreferencesView: View {
     }
 
     private func publishParentLayoutIfNeeded(for tab: PreferencesTab) {
-        guard tab != .customize else { return }
+        guard tab != .customize, tab != .modes else { return }
         NotificationCenter.default.post(
             name: .setMacSwitchPreferencesLayout,
             object: nil,
@@ -1797,6 +1966,7 @@ struct PreferencesView: View {
 
 private enum PreferencesTab: String, CaseIterable, Identifiable {
     case general
+    case modes
     case customize
     case about
 
@@ -1805,6 +1975,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
     func title(language: AppLanguage) -> String {
         switch self {
         case .general: return L10n.text(.general, language: language)
+        case .modes: return L10n.text(.modes, language: language)
         case .customize: return L10n.text(.customize, language: language)
         case .about: return L10n.text(.about, language: language)
         }
@@ -1813,6 +1984,7 @@ private enum PreferencesTab: String, CaseIterable, Identifiable {
     var symbolName: String {
         switch self {
         case .general: return "gearshape"
+        case .modes: return "square.stack.3d.up"
         case .customize: return "wand.and.stars"
         case .about: return "info.circle"
         }
@@ -2018,12 +2190,20 @@ private struct SettingsPage<Content: View>: View {
     let title: String
     let subtitle: String
     let scrolls: Bool
+    let contentMaxWidth: CGFloat
     let content: Content
 
-    init(title: String, subtitle: String, scrolls: Bool = true, @ViewBuilder content: () -> Content) {
+    init(
+        title: String,
+        subtitle: String,
+        scrolls: Bool = true,
+        contentMaxWidth: CGFloat = 560,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.subtitle = subtitle
         self.scrolls = scrolls
+        self.contentMaxWidth = contentMaxWidth
         self.content = content()
     }
 
@@ -2048,7 +2228,7 @@ private struct SettingsPage<Content: View>: View {
                     content
                         .padding(.horizontal, 16)
                         .padding(.bottom, 16)
-                        .frame(maxWidth: 560, alignment: .leading)
+                        .frame(maxWidth: contentMaxWidth, alignment: .leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -2127,12 +2307,19 @@ private struct SettingsDivider: View {
 private struct SettingsRow<Accessory: View>: View {
     let title: String
     let subtitle: String?
+    let systemImage: String?
     let accessory: Accessory
     @State private var isExpanded = false
 
-    init(title: String, subtitle: String? = nil, @ViewBuilder accessory: () -> Accessory) {
+    init(
+        title: String,
+        subtitle: String? = nil,
+        systemImage: String? = nil,
+        @ViewBuilder accessory: () -> Accessory
+    ) {
         self.title = title
         self.subtitle = subtitle
+        self.systemImage = systemImage
         self.accessory = accessory()
     }
 
@@ -2151,6 +2338,14 @@ private struct SettingsRow<Accessory: View>: View {
                             .foregroundStyle(subtitle == nil ? Color.clear : .secondary)
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                             .frame(width: 10)
+
+                        if let systemImage {
+                            Image(systemName: systemImage)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(Color.accentColor)
+                                .font(.system(size: 12.5, weight: .semibold))
+                                .frame(width: 18)
+                        }
 
                         Text(title)
                             .font(.system(size: 12.6, weight: .medium))
@@ -2512,6 +2707,581 @@ private struct GeneralPreferencesView: View {
     }
 }
 
+private struct ModesPreferencesView: View {
+    @ObservedObject var store: SwitchStore
+    @State private var selectedCustomModeID: SwitchModeID?
+
+    var body: some View {
+        SettingsPage(
+            title: store.text(.modes),
+            subtitle: store.text(.modesSubtitle),
+            scrolls: false
+        ) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    SettingsPill(text: store.modesInMenuText(store.visibleModes.count), color: Color.accentColor)
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        openDetailPanel(for: store.createCustomMode())
+                    } label: {
+                        Label(store.modeText(.addMode), systemImage: "plus")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
+                GeometryReader { proxy in
+                    HStack(alignment: .top, spacing: selectedCustomMode == nil ? 0 : 10) {
+                        ModesLibraryPanel(
+                            store: store,
+                            selectedCustomModeID: selectedCustomModeID,
+                            openCustomMode: toggleDetailPanel
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                        if let selectedCustomMode {
+                            CustomModeDetailPanel(
+                                modeID: selectedCustomMode.id,
+                                store: store,
+                                onClose: closeDetailPanel
+                            )
+                            .frame(width: min(360, max(330, proxy.size.width * 0.36)))
+                            .frame(maxHeight: .infinity)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .zIndex(2)
+                        }
+                    }
+                    .animation(.snappy(duration: 0.24), value: selectedCustomModeID)
+                }
+            }
+        }
+        .onAppear {
+            reconcileSelectionIfNeeded()
+            publishModesLayout(detailVisible: selectedCustomMode != nil)
+        }
+        .onChange(of: store.customModes.map(\.id)) { _, _ in
+            reconcileSelectionIfNeeded()
+        }
+        .onDisappear {
+            selectedCustomModeID = nil
+            publishModesLayout(detailVisible: false)
+        }
+    }
+
+    private var selectedCustomMode: SwitchModeDefinition? {
+        guard let selectedCustomModeID else { return nil }
+        return store.customModes.first { $0.id == selectedCustomModeID }
+    }
+
+    private func toggleDetailPanel(_ modeID: SwitchModeID) {
+        if selectedCustomModeID == modeID {
+            closeDetailPanel()
+        } else {
+            openDetailPanel(for: modeID)
+        }
+    }
+
+    private func openDetailPanel(for modeID: SwitchModeID) {
+        guard store.customModes.contains(where: { $0.id == modeID }) else { return }
+        publishModesLayout(detailVisible: true)
+        withAnimation(.snappy(duration: 0.24)) {
+            selectedCustomModeID = modeID
+        }
+    }
+
+    private func closeDetailPanel() {
+        withAnimation(.snappy(duration: 0.20)) {
+            selectedCustomModeID = nil
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            if selectedCustomModeID == nil {
+                publishModesLayout(detailVisible: false)
+            }
+        }
+    }
+
+    private func reconcileSelectionIfNeeded() {
+        guard let selectedCustomModeID,
+              !store.customModes.contains(where: { $0.id == selectedCustomModeID })
+        else { return }
+        closeDetailPanel()
+    }
+
+    private func publishModesLayout(detailVisible: Bool) {
+        NotificationCenter.default.post(
+            name: .setMacSwitchPreferencesLayout,
+            object: nil,
+            userInfo: ["mode": detailVisible ? "detail" : "compact"]
+        )
+    }
+}
+
+private struct ModesLibraryPanel: View {
+    @ObservedObject var store: SwitchStore
+    let selectedCustomModeID: SwitchModeID?
+    let openCustomMode: (SwitchModeID) -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(store.modeText(.modeLibrary))
+                    .font(.system(size: 11.5, weight: .bold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(store.modeCountText(store.customModes.count))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 36)
+            .background(PreferencesColors.surface)
+
+            Divider()
+
+            if store.customModes.isEmpty {
+                VStack(spacing: 9) {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.system(size: 26, weight: .medium))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+
+                    Text(store.modeText(.noModesYet))
+                        .font(.system(size: 13, weight: .semibold))
+
+                    Text(store.modeText(.createModePrompt))
+                        .font(.system(size: 11.2))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(Array(store.customModes.enumerated()), id: \.element.id) { index, mode in
+                            CustomModeSettingsRow(
+                                mode: mode,
+                                store: store,
+                                isSelected: selectedCustomModeID == mode.id,
+                                openEditor: { openCustomMode(mode.id) }
+                            )
+
+                            if index < store.customModes.count - 1 {
+                                SettingsDivider()
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .glassCard(cornerRadius: 11, fillOpacity: 0.10)
+    }
+}
+
+private struct CustomModeSettingsRow: View {
+    let mode: SwitchModeDefinition
+    @ObservedObject var store: SwitchStore
+    let isSelected: Bool
+    let openEditor: () -> Void
+    @State private var confirmsDeletion = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(
+                get: { store.enabledModeIDs.contains(mode.id) },
+                set: { value, _ in store.setModeVisible(mode.id, value) }
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .frame(width: 20)
+            .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id) || mode.items.isEmpty)
+            .help(store.isModeActive(mode.id) ? store.modeText(.turnOffBeforeHiding) : store.modeText(.showModeInMenu))
+
+            Button(action: openEditor) {
+                HStack(spacing: 10) {
+                    Image(systemName: mode.symbolName)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(Color.accentColor)
+                        .font(.system(size: 15, weight: .medium))
+                        .frame(width: 22, height: 22)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(mode.title.isEmpty ? store.modeText(.customMode) : mode.title)
+                            .font(.system(size: 12.7, weight: .medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Text(store.modeStatusText(for: mode))
+                            .font(.system(size: 10.8, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.accentColor.opacity(0.82) : Color.secondary.opacity(0.45))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button(role: .destructive) {
+                confirmsDeletion = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .disabled(store.isModeInteractionDisabled(mode))
+            .help(store.isModeActive(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode))
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 50)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isSelected ? PreferencesColors.selected : Color.clear)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 4)
+        )
+        .confirmationDialog(
+            store.modeText(.deleteModeTitle, mode.title),
+            isPresented: $confirmsDeletion,
+            titleVisibility: .visible
+        ) {
+            Button(store.isModeActive(mode.id) ? store.modeText(.turnOffAndDelete) : store.modeText(.deleteMode), role: .destructive) {
+                store.deleteCustomMode(mode.id)
+            }
+            Button(store.text(.cancel), role: .cancel) {}
+        } message: {
+            Text(
+                store.isModeActive(mode.id)
+                    ? store.modeText(.deleteActiveModeMessage)
+                    : store.modeText(.deleteModeIrreversible)
+            )
+        }
+    }
+}
+
+private struct CustomModeDetailPanel: View {
+    let modeID: SwitchModeID
+    @ObservedObject var store: SwitchStore
+    let onClose: () -> Void
+    @State private var draftTitle = ""
+    @State private var draftSubtitle = ""
+    @State private var draftSymbolName = "slider.horizontal.3"
+
+    private static let modeEligibleSwitches = SwitchKind.allCases.filter(\.isModeEligible)
+    private static let iconChoices: [ModeIconChoice] = [
+        ModeIconChoice(symbol: "slider.horizontal.3", titleKey: .modeIconControls),
+        ModeIconChoice(symbol: "rectangle.on.rectangle.angled", titleKey: .modeIconWindows),
+        ModeIconChoice(symbol: "target", titleKey: .modeIconTarget),
+        ModeIconChoice(symbol: "person.2.wave.2", titleKey: .modeIconPeople),
+        ModeIconChoice(symbol: "sparkles.rectangle.stack", titleKey: .modeIconStack),
+        ModeIconChoice(symbol: "moon.stars.fill", titleKey: .modeIconNight),
+        ModeIconChoice(symbol: "display", titleKey: .modeIconDisplay),
+        ModeIconChoice(symbol: "cup.and.saucer.fill", titleKey: .modeIconAwake),
+        ModeIconChoice(symbol: "briefcase.fill", titleKey: .modeIconWork)
+    ]
+
+    var body: some View {
+        Group {
+            if let mode {
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack(alignment: .center, spacing: 10) {
+                            Button(action: onClose) {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .frame(width: 22, height: 22)
+                                    .background(PreferencesColors.subduedFill, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help(store.modeText(.closeModeSettings))
+
+                            Image(systemName: mode.symbolName)
+                                .symbolRenderingMode(.hierarchical)
+                                .foregroundStyle(Color.accentColor)
+                                .font(.system(size: 19, weight: .medium))
+                                .frame(width: 26, height: 26)
+
+                            SettingsPill(text: store.modeStatusText(for: mode), color: statusColor(for: mode))
+
+                            Spacer(minLength: 0)
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(mode.title.isEmpty ? store.modeText(.customMode) : mode.title)
+                                .font(.system(size: 15.5, weight: .semibold))
+                                .lineLimit(2)
+                                .minimumScaleFactor(0.86)
+                            Text(store.modeText(.modeSettings))
+                                .font(.system(size: 11.5, weight: .regular))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Divider()
+
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if !isEditable {
+                                Label(store.modeText(.turnOffBeforeEditing), systemImage: "lock.fill")
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(store.modeText(.name))
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                TextField(store.modeText(.customMode), text: $draftTitle)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(!isEditable)
+                                    .onSubmit(commitMetadataChanges)
+                            }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(store.modeText(.descriptionLabel))
+                                    .font(.system(size: 10.5, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                TextField(store.modeText(.customWorkflow), text: $draftSubtitle)
+                                    .textFieldStyle(.roundedBorder)
+                                    .disabled(!isEditable)
+                                    .onSubmit(commitMetadataChanges)
+                            }
+
+                            HStack(alignment: .bottom, spacing: 10) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(store.modeText(.icon))
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                    Picker("", selection: $draftSymbolName) {
+                                        ForEach(Self.iconChoices) { choice in
+                                            Label(store.modeText(choice.titleKey), systemImage: choice.symbol)
+                                                .tag(choice.symbol)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .pickerStyle(.menu)
+                                    .frame(maxWidth: .infinity)
+                                    .disabled(!isEditable)
+                                }
+
+                                Button {
+                                    commitMetadataChanges()
+                                } label: {
+                                    Label(store.modeText(.save), systemImage: "checkmark")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .disabled(!hasMetadataChanges || !isEditable)
+                            }
+
+                            Divider()
+
+                            HStack {
+                                Text(store.modeText(.switchTargets))
+                                    .font(.system(size: 11.2, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                SettingsPill(text: store.selectedModeSwitchCountText(mode.items.count), color: mode.items.isEmpty ? .orange : .secondary)
+                            }
+
+                            VStack(spacing: 0) {
+                                ForEach(Array(Self.modeEligibleSwitches.enumerated()), id: \.element.id) { index, kind in
+                                    CustomModeSwitchTargetRow(kind: kind, modeID: mode.id, store: store)
+
+                                    if index < Self.modeEligibleSwitches.count - 1 {
+                                        Rectangle()
+                                            .fill(PreferencesColors.separator)
+                                            .frame(height: 1)
+                                            .padding(.leading, 44)
+                                    }
+                                }
+                            }
+                            .background(PreferencesColors.subduedFill, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
+                }
+                .controlSize(.small)
+                .padding(14)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .glassCard(cornerRadius: 11, fillOpacity: 0.10)
+            }
+        }
+        .onAppear {
+            syncDrafts()
+        }
+        .onChange(of: modeID) { _, _ in
+            syncDrafts()
+        }
+    }
+
+    private var mode: SwitchModeDefinition? {
+        store.customModes.first { $0.id == modeID }
+    }
+
+    private func statusColor(for mode: SwitchModeDefinition) -> Color {
+        if store.isModeActive(mode.id) {
+            return Color.accentColor
+        }
+        if mode.items.isEmpty {
+            return .orange
+        }
+        return store.enabledModeIDs.contains(mode.id) ? Color.secondary : Color.gray
+    }
+
+    private var isEditable: Bool {
+        guard let mode else { return false }
+        return !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
+    }
+
+    private var hasMetadataChanges: Bool {
+        guard let mode else { return false }
+        return draftTitle != mode.title ||
+            draftSubtitle != mode.subtitle ||
+            draftSymbolName != mode.symbolName
+    }
+
+    private func syncDrafts() {
+        guard let currentMode = mode else { return }
+        draftTitle = currentMode.title
+        draftSubtitle = currentMode.subtitle
+        draftSymbolName = currentMode.symbolName
+    }
+
+    private func commitMetadataChanges() {
+        guard isEditable else { return }
+        updateMode { updated in
+            updated.title = draftTitle
+            updated.subtitle = draftSubtitle
+            updated.symbolName = draftSymbolName
+        }
+        DispatchQueue.main.async {
+            syncDrafts()
+        }
+    }
+
+    private func updateMode(_ mutate: (inout SwitchModeDefinition) -> Void) {
+        guard var updated = mode else { return }
+        mutate(&updated)
+        store.updateCustomMode(updated)
+    }
+}
+
+private struct ModeIconChoice: Identifiable {
+    let symbol: String
+    let titleKey: ModeL10nKey
+    var id: String { symbol }
+}
+
+private struct CustomModeSwitchTargetRow: View {
+    let kind: SwitchKind
+    let modeID: SwitchModeID
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Toggle("", isOn: Binding(
+                get: { isIncluded },
+                set: { value, _ in setIncluded(value) }
+            ))
+            .toggleStyle(.checkbox)
+            .labelsHidden()
+            .frame(width: 20)
+            .disabled(!isEditable)
+
+            Image(systemName: kind.modernSymbol)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(kind.accentColor)
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 20, height: 20)
+
+            Text(store.switchTitle(kind))
+                .font(.system(size: 11.8, weight: .medium))
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            Picker("", selection: Binding(
+                get: { targetIsOn },
+                set: { value, _ in setTarget(value) }
+            )) {
+                Text(store.text(.on)).tag(true)
+                Text(store.text(.off)).tag(false)
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(width: 82)
+            .disabled(!isIncluded || !isEditable)
+            .opacity(isIncluded ? 1 : 0.30)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 34)
+        .opacity(isEditable || isIncluded ? 1 : 0.70)
+    }
+
+    private var mode: SwitchModeDefinition? {
+        store.customModes.first { $0.id == modeID }
+    }
+
+    private var currentItem: SwitchModeItem? {
+        mode?.items.first { $0.kind == kind }
+    }
+
+    private var isIncluded: Bool {
+        currentItem != nil
+    }
+
+    private var targetIsOn: Bool {
+        currentItem?.targetIsOn ?? true
+    }
+
+    private var isEditable: Bool {
+        guard let mode else { return false }
+        return !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
+    }
+
+    private func setIncluded(_ include: Bool) {
+        guard isEditable else { return }
+        updateMode { updated in
+            if include {
+                guard !updated.items.contains(where: { $0.kind == kind }) else { return }
+                updated.items.append(SwitchModeItem(kind: kind, targetIsOn: true))
+            } else {
+                updated.items.removeAll { $0.kind == kind }
+            }
+        }
+    }
+
+    private func setTarget(_ targetIsOn: Bool) {
+        guard isEditable else { return }
+        updateMode { updated in
+            if let index = updated.items.firstIndex(where: { $0.kind == kind }) {
+                updated.items[index].targetIsOn = targetIsOn
+            } else {
+                updated.items.append(SwitchModeItem(kind: kind, targetIsOn: targetIsOn))
+            }
+        }
+    }
+
+    private func updateMode(_ mutate: (inout SwitchModeDefinition) -> Void) {
+        guard var updated = mode else { return }
+        mutate(&updated)
+        store.updateCustomMode(updated)
+    }
+}
+
 private enum AppLinks {
     static var feedback: URL? {
         guard let rawValue = Bundle.main.object(forInfoDictionaryKey: "MacSwitchFeedbackURL") as? String,
@@ -2526,16 +3296,20 @@ private enum AppLinks {
     static let diskUtility = URL(fileURLWithPath: "/System/Applications/Utilities/Disk Utility.app")
 }
 
+@MainActor
 private enum AppDiagnostics {
     private static let refreshPollInterval: TimeInterval = 0.1
     private static let refreshPollLimit = 12
 
-    static func copyToPasteboard(store: SwitchStore, completion: @escaping () -> Void) {
+    static func copyToPasteboard(
+        store: SwitchStore,
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) {
         store.refreshAllAsync()
         DispatchQueue.global(qos: .utility).async {
             let loginSummary = LoginItemManager.diagnosticSummary
             let accessibilityTrusted = AccessibilityPermission.isTrusted
-            DispatchQueue.main.async {
+            Task { @MainActor in
                 writeWhenRefreshSettled(
                     store: store,
                     loginSummary: loginSummary,
@@ -2552,7 +3326,7 @@ private enum AppDiagnostics {
         loginSummary: String,
         accessibilityTrusted: Bool,
         remainingAttempts: Int,
-        completion: @escaping () -> Void
+        completion: @escaping @MainActor @Sendable () -> Void
     ) {
         guard store.isRefreshing && remainingAttempts > 0 else {
             NSPasteboard.general.clearContents()
@@ -2865,11 +3639,11 @@ private struct AboutPreferencesView: View {
 
                     SettingsRow(
                         title: "Update Channel",
-                        subtitle: softwareUpdates.updateChannel.subtitle
+                        subtitle: softwareUpdates.updateChannel.subtitle(language: store.effectiveLanguage)
                     ) {
                         Picker("", selection: $softwareUpdates.updateChannel) {
                             ForEach(SoftwareUpdateChannel.allCases) { channel in
-                                Text(channel.title).tag(channel)
+                                Text(channel.title(language: store.effectiveLanguage)).tag(channel)
                             }
                         }
                         .labelsHidden()
@@ -2998,10 +3772,7 @@ private struct AboutPreferencesView: View {
         guard softwareUpdates.isAvailable else {
             return "Available in the signed app bundle."
         }
-        if softwareUpdates.hasPendingChannelSwitch {
-            return "Check for updates to switch this install to the \(softwareUpdates.updateChannel.title) channel."
-        }
-        let channel = "\(softwareUpdates.updateChannel.title) channel"
+        let channel = "\(softwareUpdates.updateChannel.title(language: store.effectiveLanguage)) channel"
         if let lastUpdateCheckDate = softwareUpdates.lastUpdateCheckDate {
             return "\(channel). Last checked \(lastUpdateCheckDate.formatted(date: .abbreviated, time: .shortened))."
         }
@@ -3098,12 +3869,12 @@ private struct CustomizePreferencesView: View {
                                     ForEach(sortedKinds) { kind in
                                         CustomizeRow(
                                             kind: kind,
+                                            store: store,
                                             title: store.switchTitle(kind),
                                             isSelected: selectedKind == kind,
                                             isEnabled: store.enabledKinds.contains(kind),
                                             isBusy: store.isCustomizationBusy(kind),
                                             statusText: store.customizationStatusText(for: kind),
-                                            setEnabled: { store.setEnabled(kind, $0) },
                                             openOptions: {
                                                 toggleDetailPanel(for: kind)
                                             }
@@ -3214,19 +3985,19 @@ private struct CustomizePreferencesView: View {
 
 private struct CustomizeRow: View {
     let kind: SwitchKind
+    @ObservedObject var store: SwitchStore
     let title: String
     let isSelected: Bool
     let isEnabled: Bool
     let isBusy: Bool
     let statusText: String
-    let setEnabled: (Bool) -> Void
     let openOptions: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             Toggle("", isOn: Binding(
                 get: { isEnabled },
-                set: setEnabled
+                set: { value, _ in store.setEnabled(kind, value) }
             ))
             .toggleStyle(.checkbox)
             .labelsHidden()
@@ -3390,6 +4161,7 @@ private struct BluetoothAudioPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
     @State private var selectedAddress = BluetoothAudioPreferences.selectedAddress
     @State private var devices: [BluetoothAudioDeviceOption] = []
+    @State private var bluetoothAuthorizationMessage: String?
     @State private var bluetoothPoweredOn = true
     @State private var isRefreshingDevices = false
     @State private var pendingDeviceRefresh = false
@@ -3401,7 +4173,21 @@ private struct BluetoothAudioPreferencesPanel: View {
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
 
-            if isRefreshingDevices && devices.isEmpty {
+            if let bluetoothAuthorizationMessage {
+                Text(bluetoothAuthorizationMessage)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.red)
+                Button {
+                    reportOpenResult(
+                        SystemSettingsLinks.openBluetoothPrivacy(),
+                        store: store,
+                        failureMessage: "Could not open Bluetooth privacy settings."
+                    )
+                } label: {
+                    Label("Open Bluetooth Privacy", systemImage: "hand.raised")
+                }
+                .buttonStyle(.bordered)
+            } else if isRefreshingDevices && devices.isEmpty {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
@@ -3453,9 +4239,9 @@ private struct BluetoothAudioPreferencesPanel: View {
                 }
 
                 Picker("Device:", selection: $selectedAddress) {
-                    Text("Automatic").tag("")
+                    Text("Automatic (last connected)").tag("")
                     ForEach(devices) { device in
-                        Text(device.name + (device.isConnected ? " - connected" : ""))
+                        Text(device.name + deviceStatusSuffix(device))
                             .tag(device.address)
                     }
                 }
@@ -3464,6 +4250,18 @@ private struct BluetoothAudioPreferencesPanel: View {
                 .onChange(of: selectedAddress) { _, value in
                     BluetoothAudioPreferences.selectedAddress = value
                     store.refreshAsync(.bluetoothAudio)
+                }
+
+                if selectedAddress.isEmpty {
+                    if let automaticTargetDevice {
+                        Label("Automatic target: \(automaticTargetDevice.name)", systemImage: "clock.arrow.circlepath")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Label("Choose a device once so Automatic can reconnect it reliably.", systemImage: "info.circle")
+                            .font(.system(size: 12.5, weight: .medium))
+                            .foregroundStyle(.orange)
+                    }
                 }
             }
 
@@ -3501,8 +4299,20 @@ private struct BluetoothAudioPreferencesPanel: View {
     private var selectedDeviceMissing: Bool {
         let normalized = BluetoothAudioPreferences.selectedAddress
         return !normalized.isEmpty && !devices.contains {
-            $0.address.caseInsensitiveCompare(normalized) == .orderedSame
+            BluetoothAudioPreferences.addressesMatch($0.address, normalized)
         }
+    }
+
+    private var automaticTargetDevice: BluetoothAudioDeviceOption? {
+        guard let address = BluetoothAudioPreferences.automaticTargetAddress(in: devices) else { return nil }
+        return devices.first { BluetoothAudioPreferences.addressesMatch($0.address, address) }
+    }
+
+    private func deviceStatusSuffix(_ device: BluetoothAudioDeviceOption) -> String {
+        if device.isAudioReady {
+            return device.isDefaultOutput ? " - current output" : " - audio ready"
+        }
+        return device.isConnected ? " - connected" : ""
     }
 
     private func reloadDevices(resetMissingSelection: Bool) {
@@ -3515,17 +4325,19 @@ private struct BluetoothAudioPreferencesPanel: View {
         let shouldResetMissingSelection = resetMissingSelection
 
         DispatchQueue.global(qos: .utility).async {
-            let poweredOn = BluetoothAudioPreferences.bluetoothPoweredOn
+            let authorizationMessage = BluetoothAudioPreferences.authorizationMessage
+            let poweredOn = authorizationMessage == nil && BluetoothAudioPreferences.bluetoothPoweredOn
             let refreshedDevices = poweredOn ? BluetoothAudioPreferences.deviceOptions : []
 
             DispatchQueue.main.async {
                 let latestAddress = BluetoothAudioPreferences.selectedAddress
+                bluetoothAuthorizationMessage = authorizationMessage
                 bluetoothPoweredOn = poweredOn
                 devices = refreshedDevices
 
                 if shouldResetMissingSelection,
                    !latestAddress.isEmpty,
-                   !refreshedDevices.contains(where: { $0.address.caseInsensitiveCompare(latestAddress) == .orderedSame }) {
+                   !refreshedDevices.contains(where: { BluetoothAudioPreferences.addressesMatch($0.address, latestAddress) }) {
                     selectedAddress = ""
                     BluetoothAudioPreferences.selectedAddress = ""
                 } else if selectedAddress != latestAddress {
@@ -3626,7 +4438,7 @@ private struct ConfirmationToggle: View {
     var body: some View {
         Toggle(title, isOn: Binding(
             get: { required },
-            set: { value in
+            set: { value, _ in
                 required = value
                 ActionSafetyPreferences.setConfirmationRequired(value, for: kind)
             }
@@ -4055,7 +4867,7 @@ private struct KeepAwakePreferencesPanel: View {
                 .foregroundStyle(.secondary)
             Picker("", selection: Binding(
                 get: { store.keepAwakeDuration },
-                set: { store.setKeepAwakeDuration($0) }
+                set: { value, _ in store.setKeepAwakeDuration(value) }
             )) {
                 ForEach(KeepAwakeDuration.allCases) { duration in
                     Text(duration.menuTitle).tag(duration)
@@ -4069,7 +4881,7 @@ private struct KeepAwakePreferencesPanel: View {
 
             Toggle("Keep awake when the lid is closed", isOn: Binding(
                 get: { keepAwakeWhenLidClosed },
-                set: { value in
+                set: { value, _ in
                     keepAwakeWhenLidClosed = value
                     KeepAwakePreferences.keepAwakeWhenLidClosed = value
                     if store.snapshots[.keepAwake]?.isOn == true {
@@ -4256,7 +5068,7 @@ private struct NightShiftPreferencesPanel: View {
             } else {
                 Toggle("Auto change from sunrise to sunset", isOn: Binding(
                     get: { autoScheduleEnabled },
-                    set: { value in
+                    set: { value, _ in
                         updateNightShiftAutoSchedule(value)
                     }
                 ))
@@ -4363,7 +5175,7 @@ private struct TimeOfDayPickerRow: View {
                 .frame(width: 46, alignment: .trailing)
             Stepper(value: Binding(
                 get: { time.hour },
-                set: { time = TimeOfDay(hour: min(max($0, 0), 23), minute: time.minute) }
+                set: { value, _ in time = TimeOfDay(hour: min(max(value, 0), 23), minute: time.minute) }
             ), in: 0...23) {
                 Text(String(format: "%02d", time.hour))
                     .monospacedDigit()
@@ -4371,7 +5183,7 @@ private struct TimeOfDayPickerRow: View {
             }
             Stepper(value: Binding(
                 get: { time.minute },
-                set: { time = TimeOfDay(hour: time.hour, minute: min(max($0, 0), 59)) }
+                set: { value, _ in time = TimeOfDay(hour: time.hour, minute: min(max(value, 0), 59)) }
             ), in: 0...59, step: 5) {
                 Text(String(format: "%02d", time.minute))
                     .monospacedDigit()

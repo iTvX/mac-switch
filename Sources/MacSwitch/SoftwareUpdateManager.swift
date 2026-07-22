@@ -7,19 +7,53 @@ enum SoftwareUpdateChannel: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    var title: String {
-        switch self {
-        case .stable: return "Stable"
-        case .beta: return "Beta"
+    func title(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.stable, .simplifiedChinese): return "正式版"
+        case (.beta, .simplifiedChinese): return "测试版"
+        case (.stable, .traditionalChinese): return "正式版"
+        case (.beta, .traditionalChinese): return "測試版"
+        case (.stable, .spanish): return "Estable"
+        case (.beta, .spanish): return "Beta"
+        case (.stable, .japanese): return "安定版"
+        case (.beta, .japanese): return "ベータ版"
+        case (.stable, .korean): return "안정화"
+        case (.beta, .korean): return "베타"
+        case (.stable, .german): return "Stabil"
+        case (.beta, .german): return "Beta"
+        case (.stable, .french): return "Stable"
+        case (.beta, .french): return "Bêta"
+        case (.stable, .italian): return "Stabile"
+        case (.beta, .italian): return "Beta"
+        case (.stable, .portuguese): return "Estável"
+        case (.beta, .portuguese): return "Beta"
+        case (.stable, .english), (.stable, .system): return "Stable"
+        case (.beta, .english), (.beta, .system): return "Beta"
         }
     }
 
-    var subtitle: String {
-        switch self {
-        case .stable:
-            return "Use the latest notarized public release."
-        case .beta:
-            return "Try prerelease builds before they become stable."
+    func subtitle(language: AppLanguage) -> String {
+        switch (self, language) {
+        case (.stable, .simplifiedChinese): return "使用最新的已公证正式版本。"
+        case (.beta, .simplifiedChinese): return "在功能正式发布前体验测试版本。"
+        case (.stable, .traditionalChinese): return "使用最新的已公證正式版本。"
+        case (.beta, .traditionalChinese): return "在功能正式發布前體驗測試版本。"
+        case (.stable, .spanish): return "Usa la versión pública notarizada más reciente."
+        case (.beta, .spanish): return "Prueba versiones preliminares antes de su publicación."
+        case (.stable, .japanese): return "最新の公証済み正式版を使用します。"
+        case (.beta, .japanese): return "正式公開前のベータ版を試します。"
+        case (.stable, .korean): return "공증된 최신 정식 버전을 사용합니다."
+        case (.beta, .korean): return "정식 출시 전 베타 버전을 사용합니다."
+        case (.stable, .german): return "Verwendet die neueste notarisierte öffentliche Version."
+        case (.beta, .german): return "Testet Vorabversionen vor ihrer stabilen Veröffentlichung."
+        case (.stable, .french): return "Utilise la dernière version publique notariée."
+        case (.beta, .french): return "Teste les préversions avant leur publication stable."
+        case (.stable, .italian): return "Usa l’ultima versione pubblica autenticata da Apple."
+        case (.beta, .italian): return "Prova le versioni preliminari prima del rilascio stabile."
+        case (.stable, .portuguese): return "Usa a versão pública notarizada mais recente."
+        case (.beta, .portuguese): return "Testa versões preliminares antes do lançamento estável."
+        case (.stable, .english), (.stable, .system): return "Use the latest notarized public release."
+        case (.beta, .english), (.beta, .system): return "Try prerelease builds before they become stable."
         }
     }
 
@@ -45,8 +79,6 @@ enum SoftwareUpdateChannel: String, CaseIterable, Identifiable {
 
 final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegate {
     static let shared = SoftwareUpdateManager()
-
-    let currentBuildChannel: SoftwareUpdateChannel
 
     @Published private(set) var isAvailable: Bool
     @Published private(set) var canCheckForUpdates: Bool
@@ -74,30 +106,20 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
     }
 
     private let defaults = UserDefaults.standard
-    private let bundleVersion: String
-    private let channelSwitchLock = NSLock()
     private var updaterController: SPUStandardUpdaterController?
     private var updaterObservations: [NSKeyValueObservation] = []
-    private var channelSwitchTarget: SoftwareUpdateChannel?
-    private var channelSwitchUpdateVersion: String?
-    private lazy var versionComparator = ChannelSwitchVersionComparator(manager: self)
-
-    var hasPendingChannelSwitch: Bool {
-        updateChannel != currentBuildChannel
-    }
 
     private override init() {
         let bundleHasUpdateFeed = Bundle.main.object(forInfoDictionaryKey: "SUFeedURL") != nil
         let runningFromAppBundle = Bundle.main.bundleURL.pathExtension == "app"
-        currentBuildChannel = SoftwareUpdateChannel.currentBuild
-        bundleVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? ""
+        let detectedBuildChannel = SoftwareUpdateChannel.currentBuild
         isAvailable = bundleHasUpdateFeed && runningFromAppBundle
         canCheckForUpdates = false
         lastUpdateCheckDate = nil
         automaticallyChecksForUpdates = false
         automaticallyDownloadsUpdates = false
         let storedChannel = UserDefaults.standard.string(forKey: DefaultsKey.updateChannel)
-        updateChannel = storedChannel.flatMap(SoftwareUpdateChannel.init(rawValue:)) ?? .stable
+        updateChannel = storedChannel.flatMap(SoftwareUpdateChannel.init(rawValue:)) ?? detectedBuildChannel
 
         super.init()
 
@@ -121,7 +143,6 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
 
     func checkForUpdates() {
         guard let updaterController else { return }
-        prepareChannelSwitchForNextCheck()
         refresh()
         updaterController.checkForUpdates(nil)
         refresh()
@@ -144,36 +165,15 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
         updateChannel.allowedSparkleChannels
     }
 
-    func bestValidUpdate(in appcast: SUAppcast, for updater: SPUUpdater) -> SUAppcastItem? {
-        guard let target = currentChannelSwitchTarget() else { return nil }
-        guard let item = bestItem(in: appcast.items, for: target) else {
-            setChannelSwitchTarget(target, updateVersion: nil)
-            return SUAppcastItem.empty()
-        }
-        guard canInstall(item) else {
-            setChannelSwitchTarget(target, updateVersion: nil)
-            return SUAppcastItem.empty()
-        }
-
-        setChannelSwitchTarget(target, updateVersion: item.versionString)
-        return item
-    }
-
-    func versionComparator(for updater: SPUUpdater) -> SUVersionComparison? {
-        versionComparator
-    }
-
     func updater(
         _ updater: SPUUpdater,
         didFinishUpdateCycleFor updateCheck: SPUUpdateCheck,
         error: Error?
     ) {
-        clearChannelSwitch()
         refresh()
     }
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
-        clearChannelSwitch()
         refresh()
     }
 
@@ -193,71 +193,5 @@ final class SoftwareUpdateManager: NSObject, ObservableObject, SPUUpdaterDelegat
 
     private enum DefaultsKey {
         static let updateChannel = "softwareUpdate.channel"
-    }
-
-    private func prepareChannelSwitchForNextCheck() {
-        setChannelSwitchTarget(hasPendingChannelSwitch ? updateChannel : nil, updateVersion: nil)
-    }
-
-    private func currentChannelSwitchTarget() -> SoftwareUpdateChannel? {
-        channelSwitchLock.lock()
-        defer { channelSwitchLock.unlock() }
-        return channelSwitchTarget
-    }
-
-    private func setChannelSwitchTarget(_ target: SoftwareUpdateChannel?, updateVersion: String?) {
-        channelSwitchLock.lock()
-        channelSwitchTarget = target
-        channelSwitchUpdateVersion = updateVersion
-        channelSwitchLock.unlock()
-    }
-
-    private func clearChannelSwitch() {
-        setChannelSwitchTarget(nil, updateVersion: nil)
-    }
-
-    fileprivate func channelSwitchComparisonOverride(versionA: String, versionB: String) -> ComparisonResult? {
-        channelSwitchLock.lock()
-        let target = channelSwitchTarget
-        let updateVersion = channelSwitchUpdateVersion
-        channelSwitchLock.unlock()
-
-        guard target != nil, let updateVersion, !bundleVersion.isEmpty else { return nil }
-        if versionA == bundleVersion, versionB == updateVersion {
-            // Channel switching can install a different package with the same CFBundleVersion.
-            // Sparkle asks whether the selected item is newer by comparing host -> item.
-            return .orderedAscending
-        }
-        if updateVersion != bundleVersion, versionA == updateVersion, versionB == bundleVersion {
-            return .orderedDescending
-        }
-        return nil
-    }
-
-    private func bestItem(in items: [SUAppcastItem], for channel: SoftwareUpdateChannel) -> SUAppcastItem? {
-        let matchingItems = items.filter { $0.channel == channel.appcastChannel }
-        return matchingItems.max { lhs, rhs in
-            SUStandardVersionComparator.default.compareVersion(lhs.versionString, toVersion: rhs.versionString) == .orderedAscending
-        }
-    }
-
-    private func canInstall(_ item: SUAppcastItem) -> Bool {
-        guard !bundleVersion.isEmpty else { return true }
-        return SUStandardVersionComparator.default.compareVersion(bundleVersion, toVersion: item.versionString) != .orderedDescending
-    }
-}
-
-private final class ChannelSwitchVersionComparator: NSObject, SUVersionComparison {
-    private weak var manager: SoftwareUpdateManager?
-
-    init(manager: SoftwareUpdateManager) {
-        self.manager = manager
-    }
-
-    func compareVersion(_ versionA: String, toVersion versionB: String) -> ComparisonResult {
-        if let override = manager?.channelSwitchComparisonOverride(versionA: versionA, versionB: versionB) {
-            return override
-        }
-        return SUStandardVersionComparator.default.compareVersion(versionA, toVersion: versionB)
     }
 }

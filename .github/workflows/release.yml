@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - beta-pr40-modes
     paths-ignore:
       - "README.md"
       - "docs/**"
@@ -64,20 +65,54 @@ jobs:
             build_number="${{ inputs.build_number }}"
           else
             create_tag=true
-            prerelease=false
-            update_channel=stable
-            build_number=""
+            build_number="$(date -u +%Y%m%d%H%M%S)"
             short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)"
             if [[ ! "$short_version" =~ ^[0-9]+(\.[0-9]+){1,2}([.-][0-9A-Za-z.-]+)?$ ]]; then
               echo "::error::CFBundleShortVersionString must look like 1.0.0 or 1.0.0-beta.1"
               exit 1
             fi
 
-            tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
-            while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
-              sleep 1
-              tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
-            done
+            case "$GITHUB_REF_NAME" in
+              main)
+                if [[ ! "$short_version" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]]; then
+                  echo "::error::The main branch must use a stable version like 1.0.0"
+                  exit 1
+                fi
+                prerelease=false
+                update_channel=stable
+                tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
+                while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+                  sleep 1
+                  tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
+                done
+                ;;
+              beta-pr40-modes)
+                if [[ ! "$short_version" =~ ^[0-9]+(\.[0-9]+){1,2}-beta\.[0-9]+$ ]]; then
+                  echo "::error::The beta branch must use a version like 1.0.0-beta.14"
+                  exit 1
+                fi
+                prerelease=true
+                update_channel=beta
+                tag="v${short_version}"
+                ;;
+              *)
+                echo "::error::Automatic releases are not configured for $GITHUB_REF_NAME"
+                exit 1
+                ;;
+            esac
+
+            if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              echo "::error::Release tag $tag already exists; increment CFBundleShortVersionString before merging"
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "::error::Release tag $tag already exists on origin; increment CFBundleShortVersionString before merging"
+              exit 1
+            fi
+          fi
+
+          if [[ -z "$build_number" ]]; then
+            build_number="$(date -u +%Y%m%d%H%M%S)"
           fi
 
           if [[ "$update_channel" != "stable" && "$update_channel" != "beta" ]]; then
@@ -112,7 +147,7 @@ jobs:
           default_branch="${GITHUB_DEFAULT_BRANCH:-main}"
           git fetch --no-tags origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
           if ! git merge-base --is-ancestor "$tag_commit" "origin/$default_branch"; then
-            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" && "$prerelease" == "true" && "$update_channel" == "beta" && "$tag" == *beta* ]]; then
+            if [[ "$prerelease" == "true" && "$update_channel" == "beta" && "$tag" == *beta* ]]; then
               echo "Allowing beta prerelease tag $tag outside $default_branch"
             else
               echo "::error::Release tag $tag must point to a commit reachable from $default_branch"
@@ -148,6 +183,15 @@ jobs:
           NOTARY_PROFILE: mac-switch-notary
         run: ./Scripts/check_release_ready.sh
 
+      - name: Generate Sparkle appcast
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
+          APPCAST_EXISTING_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
+          APPCAST_CHANNEL: ${{ steps.release_tag.outputs.update_channel == 'beta' && 'beta' || '' }}
+          APPCAST_MAXIMUM_VERSIONS: "0"
+        run: ./Scripts/generate_appcast.sh
+
       - name: Publish generated release tag
         if: steps.release_tag.outputs.create_tag == 'true'
         env:
@@ -181,15 +225,6 @@ jobs:
           else
             gh release create "$RELEASE_TAG" "$asset" "${release_args[@]}"
           fi
-
-      - name: Generate Sparkle appcast
-        env:
-          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
-          SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
-          APPCAST_EXISTING_URL: https://github.com/${{ github.repository }}/releases/download/appcast/appcast.xml
-          APPCAST_CHANNEL: ${{ steps.release_tag.outputs.update_channel == 'beta' && 'beta' || '' }}
-          APPCAST_MAXIMUM_VERSIONS: "0"
-        run: ./Scripts/generate_appcast.sh
 
       - name: Publish Sparkle appcast
         env:

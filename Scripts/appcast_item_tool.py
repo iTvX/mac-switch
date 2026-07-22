@@ -108,6 +108,38 @@ def command_version(args):
     print(item_version(item))
 
 
+def numeric_version(value, label):
+    if not value.isdigit():
+        raise SystemExit(f"{label} sparkle:version must contain digits only, found {value or '<missing>'}.")
+    return int(value)
+
+
+def command_assert_newer(args):
+    existing_tree = parse_appcast(args.existing)
+    incoming_tree = parse_appcast(args.incoming)
+    incoming_item = find_item(channel_element(incoming_tree), args.expected_url)
+    incoming_version = item_version(incoming_item)
+    incoming_number = numeric_version(incoming_version, "Incoming")
+
+    existing_versions = [
+        item_version(item)
+        for item in channel_element(existing_tree).findall("item")
+    ]
+    if not existing_versions:
+        return
+
+    highest_existing = max(
+        numeric_version(version, "Existing")
+        for version in existing_versions
+    )
+    if incoming_number <= highest_existing:
+        raise SystemExit(
+            "Incoming sparkle:version "
+            f"{incoming_version} must be greater than the existing maximum {highest_existing}. "
+            "Sparkle refuses to install application downgrades."
+        )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Merge and verify Sparkle appcast items.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -132,6 +164,12 @@ def main():
     version.add_argument("--expected-url", required=True)
     version.add_argument("--expected-channel", default="")
     version.set_defaults(func=command_version)
+
+    assert_newer = subparsers.add_parser("assert-newer")
+    assert_newer.add_argument("--existing", required=True)
+    assert_newer.add_argument("--incoming", required=True)
+    assert_newer.add_argument("--expected-url", required=True)
+    assert_newer.set_defaults(func=command_assert_newer)
 
     args = parser.parse_args()
     try:
