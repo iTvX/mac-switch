@@ -22,6 +22,7 @@ enum RegressionDiagnostics {
         checkProcessTimeout(&reporter)
         checkLargeProcessOutput(&reporter)
         checkScreenCleanExitEvents(&reporter)
+        checkNightShiftStatePolicy(&reporter)
         checkSystemSettingsURLs(&reporter)
         checkBluetoothAudioSelection(&reporter)
         checkMicrophoneVolumeRestoreIsolation(&reporter)
@@ -238,6 +239,36 @@ enum RegressionDiagnostics {
         reporter.check(
             !ScreenCleanExitPolicy.requiresFailSafeExit(type: .keyDown),
             "Screen Cleaning blocks keys without exiting"
+        )
+    }
+
+    private static func checkNightShiftStatePolicy(_ reporter: inout SelfTestReporter) {
+        func state(active: Bool, enabled: Bool) -> NightShiftState {
+            NightShiftState(
+                active: active,
+                enabled: enabled,
+                sunSchedulePermitted: true,
+                scheduleMode: .off,
+                schedule: .defaultSchedule,
+                disableFlags: 0,
+                available: true,
+                supported: true,
+                strength: 0.5,
+                correlatedColorTemperature: 4_100
+            )
+        }
+
+        reporter.check(
+            NightShiftStatePolicy.mutations(toReach: true, from: state(active: true, enabled: false)) == [.setEnabled(true)],
+            "Night Shift enables the current effect instead of toggling the master state"
+        )
+        reporter.check(
+            NightShiftStatePolicy.mutations(toReach: true, from: state(active: false, enabled: false)) == [.setActive(true), .setEnabled(true)],
+            "Night Shift repairs legacy inactive state before enabling"
+        )
+        reporter.check(
+            NightShiftStatePolicy.mutations(toReach: false, from: state(active: true, enabled: true)) == [.setEnabled(false)],
+            "Night Shift disables the effect without disabling future schedules"
         )
     }
 

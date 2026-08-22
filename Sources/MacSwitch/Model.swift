@@ -6,6 +6,7 @@ extension Notification.Name {
     static let openMacSwitchPreferences = Notification.Name("openMacSwitchPreferences")
     static let setMacSwitchPreferencesLayout = Notification.Name("setMacSwitchPreferencesLayout")
     static let resetMacSwitchDashboardTransientState = Notification.Name("resetMacSwitchDashboardTransientState")
+    static let nightShiftStatusDidChange = Notification.Name("nightShiftStatusDidChange")
     static let quitMacSwitch = Notification.Name("quitMacSwitch")
 }
 
@@ -1654,6 +1655,10 @@ final class SwitchStore: ObservableObject {
     func toggle(_ kind: SwitchKind) {
         guard !pendingHideAfterDeactivation.contains(kind) else { return }
         guard !isActionBusy(kind) else { return }
+        if kind == .nightShift {
+            preflightToggle(kind)
+            return
+        }
         guard ensureSwitchAvailable(kind) else { return }
         let target = !(snapshots[kind]?.isOn ?? false)
         if kind == .bluetoothAudio {
@@ -1667,6 +1672,38 @@ final class SwitchStore: ObservableObject {
             return
         }
         set(kind, enabled: target)
+    }
+
+    private func preflightToggle(_ kind: SwitchKind) {
+        actionsPreparing.insert(kind)
+        let duration = keepAwakeDuration
+        let controller = self.controller
+
+        let finish: @MainActor @Sendable (SwitchSnapshot) -> Void = { [weak self] snapshot in
+            guard let self, self.actionsPreparing.contains(kind) else { return }
+            let decorated = self.decoratedSnapshot(snapshot, for: kind)
+            self.snapshots[kind] = decorated
+            guard self.ensurePreparedSnapshotAvailable(kind, snapshot: decorated) else {
+                self.actionsPreparing.remove(kind)
+                return
+            }
+            let target = !decorated.isOn
+            self.actionsPreparing.remove(kind)
+            self.set(kind, enabled: target)
+        }
+
+        if kind.snapshotRequiresMainThread {
+            DispatchQueue.main.async {
+                finish(controller.snapshot(for: kind, keepAwakeDuration: duration))
+            }
+        } else {
+            actionQueue.async {
+                let snapshot = controller.snapshot(for: kind, keepAwakeDuration: duration)
+                Task { @MainActor in
+                    finish(snapshot)
+                }
+            }
+        }
     }
 
     func trigger(_ kind: SwitchKind) {
