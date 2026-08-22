@@ -3,6 +3,7 @@ import ApplicationServices
 import Foundation
 import IOKit.pwr_mgt
 import ObjectiveC.runtime
+import OSLog
 import ServiceManagement
 import SwiftUI
 
@@ -264,7 +265,7 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
     private let screenSaver = ScreenSaverSwitch()
     private let bluetoothAudio = BluetoothAudioSwitch()
     private let doNotDisturb = DoNotDisturbSwitch()
-    private let nightShift = NightShiftSwitch()
+    private let nightShift = NightShiftSwitch.shared
     private let trueTone = TrueToneSwitch()
     private let playMusic = PlayMusicSwitch()
     private let showHiddenFiles = ShowHiddenFilesSwitch()
@@ -293,6 +294,10 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
     init() {
         keepAwake.onExpired = { [weak self] in
             self?.onExternalChange?(.keepAwake)
+        }
+        nightShift.observeStatusChanges { [weak self] in
+            self?.onExternalChange?(.nightShift)
+            NotificationCenter.default.post(name: .nightShiftStatusDidChange, object: nil)
         }
     }
 
@@ -755,6 +760,86 @@ private struct DarkModeSwitch {
     }
 }
 
+private let nightShiftLogger = Logger(subsystem: "com.maxyu.macswitch", category: "NightShift")
+
+enum NightShiftScheduleMode: Int32, CaseIterable, Identifiable, Sendable {
+    case off = 0
+    case sunsetToSunrise = 1
+    case custom = 2
+
+    var id: Int32 { rawValue }
+
+    var title: String {
+        switch self {
+        case .off: return "Off"
+        case .sunsetToSunrise: return "Sunset to Sunrise"
+        case .custom: return "Custom"
+        }
+    }
+}
+
+struct NightShiftScheduleState: Equatable, Sendable {
+    var start: TimeOfDay
+    var end: TimeOfDay
+
+    static let defaultSchedule = NightShiftScheduleState(
+        start: TimeOfDay(hour: 22, minute: 0),
+        end: TimeOfDay(hour: 7, minute: 0)
+    )
+}
+
+struct NightShiftState: Equatable, Sendable {
+    var active: Bool
+    var enabled: Bool
+    var sunSchedulePermitted: Bool
+    var scheduleMode: NightShiftScheduleMode?
+    var schedule: NightShiftScheduleState
+    var disableFlags: UInt64
+    var available: Bool
+    var supported: Bool
+    var strength: Float?
+    var correlatedColorTemperature: Float?
+
+    var isAvailable: Bool {
+        available && supported
+    }
+}
+
+enum NightShiftMutation: Equatable, Sendable {
+    case setActive(Bool)
+    case setEnabled(Bool)
+}
+
+enum NightShiftStatePolicy {
+    static func mutations(toReach target: Bool, from state: NightShiftState) -> [NightShiftMutation] {
+        if target {
+            var mutations: [NightShiftMutation] = []
+            if !state.active {
+                mutations.append(.setActive(true))
+            }
+            if !state.enabled || !state.active {
+                mutations.append(.setEnabled(true))
+            }
+            return mutations
+        }
+
+        return state.enabled ? [.setEnabled(false)] : []
+    }
+
+    static func reached(_ target: Bool, state: NightShiftState) -> Bool {
+        state.isAvailable && state.enabled == target && (!target || state.active)
+    }
+}
+
+protocol NightShiftClientProtocol: AnyObject, Sendable {
+    var onStatusChange: (@Sendable () -> Void)? { get set }
+    func readState() -> NightShiftState?
+    func setActive(_ active: Bool) -> Bool
+    func setEnabled(_ enabled: Bool) -> Bool
+    func setScheduleMode(_ mode: NightShiftScheduleMode) -> Bool
+    func setSchedule(_ schedule: NightShiftScheduleState) -> Bool
+}
+
 private struct BlueLightTimePair {
     var hour: Int32 = 0
     var minute: Int32 = 0
@@ -763,16 +848,6 @@ private struct BlueLightTimePair {
 private struct BlueLightSchedule {
     var start = BlueLightTimePair()
     var end = BlueLightTimePair()
-}
-
-private struct BlueLightStatus {
-    var active = ObjCBool(false)
-    var enabled = ObjCBool(false)
-    var sunSchedulePermitted = ObjCBool(false)
-    var mode: Int32 = 0
-    var schedule = BlueLightSchedule()
-    var disableFlags: UInt64 = 0
-    var available = ObjCBool(false)
 }
 
 private final class CoreBrightnessClient: @unchecked Sendable {
@@ -792,105 +867,349 @@ private final class CoreBrightnessClient: @unchecked Sendable {
     }
 }
 
-private struct NightShiftSwitch {
-    func snapshot() -> SwitchSnapshot {
-        guard let status = status else {
-            return SwitchSnapshot(isOn: false, isAvailable: false, subtitle: nil, warning: unsupportedDeviceMessage)
+private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @unchecked Sendable {
+    static let shared = NightShiftCoreBrightnessClient()
+
+    private typealias StatusNotificationBlock = @convention(block) (UnsafeMutableRawPointer?) -> Void
+    private typealias GetStatusFunction = @convention(c) (AnyObject, Selector, UnsafeMutableRawPointer) -> ObjCBool
+    private typealias GetFloatFunction = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<Float>) -> ObjCBool
+    private typealias GetBoolFunction = @convention(c) (AnyObject, Selector) -> ObjCBool
+    private typealias SetBoolFunction = @convention(c) (AnyObject, Selector, ObjCBool) -> ObjCBool
+    private typealias SetModeFunction = @convention(c) (AnyObject, Selector, Int32) -> ObjCBool
+    private typealias SetScheduleFunction = @convention(c) (AnyObject, Selector, UnsafeRawPointer) -> ObjCBool
+    private typealias SetStatusBlockFunction = @convention(c) (AnyObject, Selector, StatusNotificationBlock?) -> Void
+    private typealias VoidFunction = @convention(c) (AnyObject, Selector) -> Void
+
+    // CoreBrightness writes a 40-byte private C struct. A larger raw buffer avoids
+    // depending on Swift's trailing-padding rules while keeping field offsets explicit.
+    private enum StatusOffset {
+        static let active = 0
+        static let enabled = 1
+        static let sunSchedulePermitted = 2
+        static let mode = 4
+        static let startHour = 8
+        static let startMinute = 12
+        static let endHour = 16
+        static let endMinute = 20
+        static let disableFlags = 24
+        static let available = 32
+    }
+
+    private let statusBufferSize = 64
+    private let callLock = NSLock()
+    private let callbackLock = NSLock()
+    private let client: NSObject?
+    private var statusNotificationBlock: StatusNotificationBlock?
+    private var statusChangeHandler: (@Sendable () -> Void)?
+    private var statusNotificationPending = false
+
+    var onStatusChange: (@Sendable () -> Void)? {
+        get {
+            callbackLock.lock()
+            defer { callbackLock.unlock() }
+            return statusChangeHandler
         }
-        let available = status.available.boolValue
-        let autoScheduleEnabled = status.mode == 1
-        return SwitchSnapshot(
-            isOn: available && status.active.boolValue,
-            isAvailable: available,
-            subtitle: available && autoScheduleEnabled ? "Auto change from sunrise to sunset" : nil,
-            warning: available ? nil : unsupportedDeviceMessage
+        set {
+            callbackLock.lock()
+            statusChangeHandler = newValue
+            callbackLock.unlock()
+        }
+    }
+
+    private init() {
+        client = CoreBrightnessClient.shared.makeClient(named: "CBBlueLightClient")
+        installStatusNotifications()
+    }
+
+    deinit {
+        removeStatusNotifications()
+    }
+
+    func readState() -> NightShiftState? {
+        callLock.lock()
+        defer { callLock.unlock() }
+        guard let client,
+              let function = method(client, "getBlueLightStatus:", as: GetStatusFunction.self)
+        else { return nil }
+
+        let buffer = UnsafeMutableRawPointer.allocate(byteCount: statusBufferSize, alignment: 8)
+        defer { buffer.deallocate() }
+        buffer.initializeMemory(as: UInt8.self, repeating: 0, count: statusBufferSize)
+        guard function(client, NSSelectorFromString("getBlueLightStatus:"), buffer).boolValue else {
+            return nil
+        }
+
+        let rawMode = buffer.load(fromByteOffset: StatusOffset.mode, as: Int32.self)
+        let schedule = NightShiftScheduleState(
+            start: readTime(
+                from: buffer,
+                hourOffset: StatusOffset.startHour,
+                minuteOffset: StatusOffset.startMinute
+            ) ?? NightShiftScheduleState.defaultSchedule.start,
+            end: readTime(
+                from: buffer,
+                hourOffset: StatusOffset.endHour,
+                minuteOffset: StatusOffset.endMinute
+            ) ?? NightShiftScheduleState.defaultSchedule.end
+        )
+
+        return NightShiftState(
+            active: readBoolean(from: buffer, offset: StatusOffset.active),
+            enabled: readBoolean(from: buffer, offset: StatusOffset.enabled),
+            sunSchedulePermitted: readBoolean(from: buffer, offset: StatusOffset.sunSchedulePermitted),
+            scheduleMode: NightShiftScheduleMode(rawValue: rawMode),
+            schedule: schedule,
+            disableFlags: buffer.load(fromByteOffset: StatusOffset.disableFlags, as: UInt64.self),
+            available: readBoolean(from: buffer, offset: StatusOffset.available),
+            supported: readSupported(client),
+            strength: readFloat(client, selectorName: "getStrength:"),
+            correlatedColorTemperature: readFloat(client, selectorName: "getCCT:")
         )
     }
 
-    var autoScheduleEnabled: Bool? {
-        guard let status, status.available.boolValue else { return nil }
-        return status.mode == 1
+    func setActive(_ active: Bool) -> Bool {
+        callBooleanMethod("setActive:", value: active)
     }
 
-    private var client: NSObject? {
-        CoreBrightnessClient.shared.makeClient(named: "CBBlueLightClient")
+    func setEnabled(_ enabled: Bool) -> Bool {
+        callBooleanMethod("setEnabled:", value: enabled)
     }
 
-    private var status: BlueLightStatus? {
-        guard let client else { return nil }
-        let selector = NSSelectorFromString("getBlueLightStatus:")
-        guard client.responds(to: selector), let method = client.method(for: selector) else { return nil }
-        typealias Function = @convention(c) (AnyObject, Selector, UnsafeMutableRawPointer) -> Bool
-        let function = unsafeBitCast(method, to: Function.self)
-        var value = BlueLightStatus()
-        let ok = withUnsafeMutablePointer(to: &value) { pointer in
-            function(client, selector, UnsafeMutableRawPointer(pointer))
+    func setScheduleMode(_ mode: NightShiftScheduleMode) -> Bool {
+        callLock.lock()
+        defer { callLock.unlock() }
+        guard let client,
+              let function = method(client, "setMode:", as: SetModeFunction.self)
+        else { return false }
+        return function(client, NSSelectorFromString("setMode:"), mode.rawValue).boolValue
+    }
+
+    func setSchedule(_ schedule: NightShiftScheduleState) -> Bool {
+        callLock.lock()
+        defer { callLock.unlock() }
+        guard let client,
+              let function = method(client, "setSchedule:", as: SetScheduleFunction.self)
+        else { return false }
+        var rawSchedule = BlueLightSchedule(
+            start: BlueLightTimePair(hour: Int32(schedule.start.hour), minute: Int32(schedule.start.minute)),
+            end: BlueLightTimePair(hour: Int32(schedule.end.hour), minute: Int32(schedule.end.minute))
+        )
+        return withUnsafePointer(to: &rawSchedule) { pointer in
+            function(client, NSSelectorFromString("setSchedule:"), UnsafeRawPointer(pointer)).boolValue
         }
-        return ok ? value : nil
+    }
+
+    private func callBooleanMethod(_ selectorName: String, value: Bool) -> Bool {
+        callLock.lock()
+        defer { callLock.unlock() }
+        guard let client,
+              let function = method(client, selectorName, as: SetBoolFunction.self)
+        else { return false }
+        return function(client, NSSelectorFromString(selectorName), ObjCBool(value)).boolValue
+    }
+
+    private func readSupported(_ client: NSObject) -> Bool {
+        guard let function = method(client, "supported", as: GetBoolFunction.self) else {
+            return false
+        }
+        return function(client, NSSelectorFromString("supported")).boolValue
+    }
+
+    private func readFloat(_ client: NSObject, selectorName: String) -> Float? {
+        guard let function = method(client, selectorName, as: GetFloatFunction.self) else {
+            return nil
+        }
+        var value: Float = 0
+        return function(client, NSSelectorFromString(selectorName), &value).boolValue ? value : nil
+    }
+
+    private func method<T>(_ client: NSObject, _ selectorName: String, as type: T.Type) -> T? {
+        let selector = NSSelectorFromString(selectorName)
+        guard client.responds(to: selector), let implementation = client.method(for: selector) else {
+            return nil
+        }
+        return unsafeBitCast(implementation, to: type)
+    }
+
+    private func readBoolean(from buffer: UnsafeMutableRawPointer, offset: Int) -> Bool {
+        buffer.load(fromByteOffset: offset, as: UInt8.self) != 0
+    }
+
+    private func readTime(
+        from buffer: UnsafeMutableRawPointer,
+        hourOffset: Int,
+        minuteOffset: Int
+    ) -> TimeOfDay? {
+        let hour = Int(buffer.load(fromByteOffset: hourOffset, as: Int32.self))
+        let minute = Int(buffer.load(fromByteOffset: minuteOffset, as: Int32.self))
+        guard (0...23).contains(hour), (0...59).contains(minute) else { return nil }
+        return TimeOfDay(hour: hour, minute: minute)
+    }
+
+    private func installStatusNotifications() {
+        guard let client else { return }
+        let block: StatusNotificationBlock = { [weak self] _ in
+            self?.publishStatusChange()
+        }
+        statusNotificationBlock = block
+
+        if let setBlock = method(client, "setStatusNotificationBlock:", as: SetStatusBlockFunction.self) {
+            setBlock(client, NSSelectorFromString("setStatusNotificationBlock:"), block)
+        }
+        if let enable = method(client, "enableNotifications", as: VoidFunction.self) {
+            enable(client, NSSelectorFromString("enableNotifications"))
+        }
+    }
+
+    private func removeStatusNotifications() {
+        guard let client else { return }
+        if let setBlock = method(client, "setStatusNotificationBlock:", as: SetStatusBlockFunction.self) {
+            setBlock(client, NSSelectorFromString("setStatusNotificationBlock:"), nil)
+        }
+        statusNotificationBlock = nil
+    }
+
+    private func publishStatusChange() {
+        callbackLock.lock()
+        guard !statusNotificationPending else {
+            callbackLock.unlock()
+            return
+        }
+        statusNotificationPending = true
+        callbackLock.unlock()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            guard let self else { return }
+            self.callbackLock.lock()
+            self.statusNotificationPending = false
+            let handler = self.statusChangeHandler
+            self.callbackLock.unlock()
+            handler?()
+        }
+    }
+}
+
+final class NightShiftSwitch: @unchecked Sendable {
+    static let shared = NightShiftSwitch(client: NightShiftCoreBrightnessClient.shared)
+
+    private let client: any NightShiftClientProtocol
+
+    init(client: any NightShiftClientProtocol) {
+        self.client = client
+    }
+
+    func observeStatusChanges(_ handler: @escaping @Sendable () -> Void) {
+        client.onStatusChange = handler
+    }
+
+    var currentState: NightShiftState? {
+        client.readState()
+    }
+
+    func snapshot() -> SwitchSnapshot {
+        guard let state = currentState else {
+            return SwitchSnapshot(isOn: false, isAvailable: false, subtitle: nil, warning: unsupportedDeviceMessage)
+        }
+        let warning: String?
+        if !state.isAvailable {
+            warning = unsupportedDeviceMessage
+        } else if state.enabled && !state.active {
+            warning = "Enabled, but macOS is not applying Night Shift"
+        } else {
+            warning = nil
+        }
+        return SwitchSnapshot(
+            isOn: state.isAvailable && state.enabled,
+            isAvailable: state.isAvailable,
+            subtitle: state.isAvailable ? subtitle(for: state) : nil,
+            warning: warning
+        )
     }
 
     func setEnabled(_ enabled: Bool) -> String? {
-        guard let client else { return "Night Shift is not available on this device." }
-        guard snapshot().isAvailable else { return "Night Shift is not supported by the current display." }
+        guard let initial = currentState else { return "Night Shift is not available on this device." }
+        guard initial.isAvailable else { return "Night Shift is not supported by the current Mac or display." }
 
-        let activeSelector = NSSelectorFromString("setActive:")
-        if client.responds(to: activeSelector), let method = client.method(for: activeSelector) {
-            typealias Function = @convention(c) (AnyObject, Selector, Bool) -> Bool
-            let function = unsafeBitCast(method, to: Function.self)
-            if function(client, activeSelector, enabled),
-               waitForNightShiftActive(enabled) {
-                return nil
+        nightShiftLogger.info(
+            "Request enabled=\(enabled, privacy: .public), active=\(initial.active, privacy: .public), currentEnabled=\(initial.enabled, privacy: .public), mode=\(initial.scheduleMode?.rawValue ?? -1, privacy: .public)"
+        )
+
+        for mutation in NightShiftStatePolicy.mutations(toReach: enabled, from: initial) {
+            switch mutation {
+            case .setActive(let active):
+                // Versions through 1.1.1 used setActive(false) as the off switch.
+                // Repair that master state only when the user explicitly turns Night Shift on.
+                guard client.setActive(active) else {
+                    nightShiftLogger.error("Could not restore Night Shift active state")
+                    return "Could not restore Night Shift after an earlier Mac Switch version disabled it."
+                }
+                guard waitForState({ $0.active == active }) else {
+                    return "macOS accepted the repair request, but Night Shift did not become available."
+                }
+            case .setEnabled(let target):
+                guard client.setEnabled(target) else {
+                    nightShiftLogger.error("setEnabled returned false for target=\(target, privacy: .public)")
+                    return "Could not toggle Night Shift."
+                }
             }
         }
 
-        let enabledSelector = NSSelectorFromString("setEnabled:")
-        if client.responds(to: enabledSelector), let method = client.method(for: enabledSelector) {
-            typealias Function = @convention(c) (AnyObject, Selector, Bool) -> Bool
-            let function = unsafeBitCast(method, to: Function.self)
-            guard function(client, enabledSelector, enabled) else {
-                return "Could not toggle Night Shift."
-            }
-            return waitForNightShiftActive(enabled)
-                ? nil
-                : "macOS accepted the request, but Night Shift did not change."
+        guard waitForState({ NightShiftStatePolicy.reached(enabled, state: $0) }) else {
+            nightShiftLogger.error("Night Shift did not reach enabled=\(enabled, privacy: .public)")
+            return "macOS accepted the request, but Night Shift did not change."
         }
-
-        return "Could not toggle Night Shift."
+        if let final = currentState {
+            nightShiftLogger.info(
+                "Reached enabled=\(final.enabled, privacy: .public), active=\(final.active, privacy: .public), flags=\(final.disableFlags, privacy: .public)"
+            )
+        }
+        return nil
     }
 
-    func setAutoScheduleEnabled(_ enabled: Bool) -> String? {
-        guard let client else { return "Night Shift is not available on this device." }
-        guard snapshot().isAvailable else { return "Night Shift is not supported by the current display." }
-        let selector = NSSelectorFromString("setMode:")
-        guard client.responds(to: selector), let method = client.method(for: selector) else {
+    func setScheduleMode(_ mode: NightShiftScheduleMode, customSchedule: NightShiftScheduleState) -> String? {
+        guard let state = currentState, state.isAvailable else {
+            return "Night Shift is not available on this device."
+        }
+        nightShiftLogger.info("Request schedule mode=\(mode.rawValue, privacy: .public)")
+        if mode == .custom, !client.setSchedule(customSchedule) {
             return "Could not update Night Shift schedule."
         }
-        typealias Function = @convention(c) (AnyObject, Selector, Int32) -> Bool
-        let function = unsafeBitCast(method, to: Function.self)
-        guard function(client, selector, enabled ? 1 : 0) else {
+        guard client.setScheduleMode(mode) else {
             return "Could not update Night Shift schedule."
         }
-        return waitForSystemSwitchCondition { autoScheduleEnabled == enabled }
-            ? nil
-            : "macOS accepted the request, but the Night Shift schedule did not change."
+        return waitForState {
+            $0.scheduleMode == mode && (mode != .custom || $0.schedule == customSchedule)
+        } ? nil : "macOS accepted the request, but the Night Shift schedule did not change."
     }
 
-    private func waitForNightShiftActive(_ enabled: Bool) -> Bool {
-        waitForSystemSwitchCondition {
-            guard let status else { return false }
-            return status.available.boolValue && status.active.boolValue == enabled
+    private func waitForState(_ condition: (NightShiftState) -> Bool) -> Bool {
+        waitForSystemSwitchCondition(timeout: 2.0) {
+            guard let state = currentState else { return false }
+            return condition(state)
+        }
+    }
+
+    private func subtitle(for state: NightShiftState) -> String? {
+        switch state.scheduleMode {
+        case .sunsetToSunrise:
+            return "Sunset to sunrise"
+        case .custom:
+            return "Custom \(state.schedule.start.display)-\(state.schedule.end.display)"
+        case .off, .none:
+            return nil
         }
     }
 }
 
 enum NightShiftPreferences {
-    static var autoScheduleEnabled: Bool? {
-        NightShiftSwitch().autoScheduleEnabled
+    static var state: NightShiftState? {
+        NightShiftSwitch.shared.currentState
     }
 
-    static func setAutoScheduleEnabled(_ enabled: Bool) -> String? {
-        NightShiftSwitch().setAutoScheduleEnabled(enabled)
+    static func setScheduleMode(_ mode: NightShiftScheduleMode, customSchedule: NightShiftScheduleState) -> String? {
+        NightShiftSwitch.shared.setScheduleMode(mode, customSchedule: customSchedule)
     }
+
 }
 
 private struct TrueToneSwitch {

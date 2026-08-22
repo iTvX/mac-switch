@@ -5034,7 +5034,9 @@ private struct DarkModePreferencesPanel: View {
 
 private struct NightShiftPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
-    @State private var autoScheduleEnabled = false
+    @State private var scheduleMode: NightShiftScheduleMode = .off
+    @State private var customSchedule = NightShiftScheduleState.defaultSchedule
+    @State private var customScheduleHasChanges = false
     @State private var nightShiftSupported: Bool?
     @State private var isRefreshingNightShift = false
     @State private var pendingNightShiftRefresh = false
@@ -5066,18 +5068,44 @@ private struct NightShiftPreferencesPanel: View {
                     )
                 }
             } else {
-                Toggle("Auto change from sunrise to sunset", isOn: Binding(
-                    get: { autoScheduleEnabled },
-                    set: { value, _ in
-                        updateNightShiftAutoSchedule(value)
+                Picker("Schedule", selection: Binding(
+                    get: { scheduleMode },
+                    set: { value, _ in updateNightShiftScheduleMode(value) }
+                )) {
+                    ForEach(NightShiftScheduleMode.allCases) { mode in
+                        Text(mode.title).tag(mode)
                     }
-                ))
+                }
+                .pickerStyle(.menu)
                 .disabled(isRefreshingNightShift || isUpdatingNightShiftSchedule || store.isActionBusy(.nightShift))
 
-                Text("This changes the same macOS Night Shift schedule mode used by System Settings.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if scheduleMode == .custom {
+                    VStack(alignment: .leading, spacing: 10) {
+                        TimeOfDayPickerRow(label: "From", time: customStartBinding)
+                        TimeOfDayPickerRow(label: "To", time: customEndBinding)
+
+                        Button {
+                            applyNightShiftCustomSchedule()
+                        } label: {
+                            Label("Apply Custom Schedule", systemImage: "checkmark.circle")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            !customScheduleHasChanges
+                                || isRefreshingNightShift
+                                || isUpdatingNightShiftSchedule
+                                || store.isActionBusy(.nightShift)
+                        )
+                    }
+                }
+
+                Label(
+                    "External-display results vary by hardware.",
+                    systemImage: "display"
+                )
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if let statusText {
@@ -5111,19 +5139,21 @@ private struct NightShiftPreferencesPanel: View {
         .onAppear {
             refreshNightShift()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .nightShiftStatusDidChange)) { _ in
+            refreshNightShift()
+        }
     }
 
     private func refreshNightShift() {
-        guard !isRefreshingNightShift else {
+        guard !isRefreshingNightShift, !isUpdatingNightShiftSchedule else {
             pendingNightShiftRefresh = true
             return
         }
         isRefreshingNightShift = true
         DispatchQueue.global(qos: .utility).async {
-            let latest = NightShiftPreferences.autoScheduleEnabled
+            let latest = NightShiftPreferences.state
             DispatchQueue.main.async {
-                autoScheduleEnabled = latest ?? false
-                nightShiftSupported = latest != nil
+                applyNightShiftState(latest)
                 let shouldRefreshAgain = pendingNightShiftRefresh
                 pendingNightShiftRefresh = false
                 isRefreshingNightShift = false
@@ -5135,25 +5165,23 @@ private struct NightShiftPreferencesPanel: View {
         }
     }
 
-    private func updateNightShiftAutoSchedule(_ value: Bool) {
+    private func updateNightShiftScheduleMode(_ value: NightShiftScheduleMode) {
         guard !isUpdatingNightShiftSchedule, !store.isActionBusy(.nightShift) else { return }
         isUpdatingNightShiftSchedule = true
-        autoScheduleEnabled = value
+        scheduleMode = value
         statusText = "Updating Night Shift schedule..."
+        let requestedSchedule = customSchedule
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let error = NightShiftPreferences.setAutoScheduleEnabled(value)
-            let latest = NightShiftPreferences.autoScheduleEnabled
+            let error = NightShiftPreferences.setScheduleMode(value, customSchedule: requestedSchedule)
+            let latest = NightShiftPreferences.state
             DispatchQueue.main.async {
                 isUpdatingNightShiftSchedule = false
-                autoScheduleEnabled = latest ?? value
-                nightShiftSupported = latest != nil
+                applyNightShiftState(latest, fallbackMode: value, fallbackSchedule: requestedSchedule)
                 if let error {
                     statusText = error
                 } else {
-                    statusText = value
-                        ? "Night Shift will follow sunrise and sunset."
-                        : "Night Shift schedule is manual."
+                    statusText = scheduleStatusText(for: value, schedule: requestedSchedule)
                 }
                 store.refreshAsync(.nightShift)
                 if pendingNightShiftRefresh {
@@ -5162,6 +5190,77 @@ private struct NightShiftPreferencesPanel: View {
                 }
             }
         }
+    }
+
+    private func applyNightShiftCustomSchedule() {
+        guard !isUpdatingNightShiftSchedule, !store.isActionBusy(.nightShift) else { return }
+        isUpdatingNightShiftSchedule = true
+        statusText = "Updating Night Shift custom schedule..."
+        let requestedSchedule = customSchedule
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let error = NightShiftPreferences.setScheduleMode(.custom, customSchedule: requestedSchedule)
+            let latest = NightShiftPreferences.state
+            DispatchQueue.main.async {
+                isUpdatingNightShiftSchedule = false
+                applyNightShiftState(latest, fallbackMode: .custom, fallbackSchedule: requestedSchedule)
+                if let error {
+                    statusText = error
+                } else {
+                    statusText = scheduleStatusText(for: .custom, schedule: requestedSchedule)
+                }
+                store.refreshAsync(.nightShift)
+                if pendingNightShiftRefresh {
+                    pendingNightShiftRefresh = false
+                    refreshNightShift()
+                }
+            }
+        }
+    }
+
+    private func applyNightShiftState(
+        _ state: NightShiftState?,
+        fallbackMode: NightShiftScheduleMode? = nil,
+        fallbackSchedule: NightShiftScheduleState? = nil
+    ) {
+        nightShiftSupported = state?.isAvailable ?? false
+        scheduleMode = state?.scheduleMode ?? fallbackMode ?? .off
+        customSchedule = state?.schedule ?? fallbackSchedule ?? .defaultSchedule
+        customScheduleHasChanges = false
+    }
+
+    private func scheduleStatusText(
+        for mode: NightShiftScheduleMode,
+        schedule: NightShiftScheduleState
+    ) -> String {
+        switch mode {
+        case .off:
+            return "Night Shift scheduling is off. You can still use the dashboard switch manually."
+        case .sunsetToSunrise:
+            return "Night Shift will follow sunset and sunrise."
+        case .custom:
+            return "Night Shift will run from \(schedule.start.display) to \(schedule.end.display)."
+        }
+    }
+
+    private var customStartBinding: Binding<TimeOfDay> {
+        Binding(
+            get: { customSchedule.start },
+            set: { value, _ in
+                customSchedule.start = value
+                customScheduleHasChanges = true
+            }
+        )
+    }
+
+    private var customEndBinding: Binding<TimeOfDay> {
+        Binding(
+            get: { customSchedule.end },
+            set: { value, _ in
+                customSchedule.end = value
+                customScheduleHasChanges = true
+            }
+        )
     }
 }
 
