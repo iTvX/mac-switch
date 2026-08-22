@@ -32,6 +32,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(result.output.contains("Bluetooth device filtering rejects Find My companion records"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("microphone restore volumes stay isolated by input device"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("clearing one microphone restore volume preserves other devices"), result.combinedOutput)
+        XCTAssertTrue(result.output.contains("Bluetooth Audio: skipped in safe self-test to avoid blocking system IPC"), result.combinedOutput)
         XCTAssertTrue(result.output.contains("Play Music: skipped in safe self-test to avoid Automation prompts"), result.combinedOutput)
         XCTAssertFalse(result.combinedOutput.contains(NSHomeDirectory()), "safe self-test output should redact the current user's home path")
     }

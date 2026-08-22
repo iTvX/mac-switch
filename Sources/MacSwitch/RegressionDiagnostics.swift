@@ -541,6 +541,10 @@ enum RegressionDiagnostics {
     private static func checkSnapshots(_ reporter: inout SelfTestReporter) {
         let controller = SystemSwitchController()
         for kind in SwitchKind.allCases {
+            if kind == .bluetoothAudio {
+                reporter.pass("Bluetooth Audio: skipped in safe self-test to avoid blocking system IPC")
+                continue
+            }
             if kind == .playMusic {
                 reporter.pass("Play Music: skipped in safe self-test to avoid Automation prompts")
                 continue
