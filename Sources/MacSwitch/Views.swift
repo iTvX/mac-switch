@@ -1488,6 +1488,9 @@ private enum ErrorFixRouter {
         if lowercased.contains("headphones") || lowercased.contains("audio device") || lowercased.contains("device not found") {
             return ErrorRemediation(title: "Open Bluetooth Audio", symbol: "headphones")
         }
+        if lowercased.contains("handoff") {
+            return ErrorRemediation(title: "Open Handoff", symbol: "arrow.left.arrow.right.circle")
+        }
         if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
             return ErrorRemediation(title: "Open Bluetooth Privacy", symbol: "hand.raised")
         }
@@ -1562,6 +1565,10 @@ private enum ErrorFixRouter {
         }
         if lowercased.contains("headphones") || lowercased.contains("audio device") || lowercased.contains("device not found") {
             openCustomize(.bluetoothAudio, store: store)
+            return
+        }
+        if lowercased.contains("handoff") {
+            openCustomize(.handoff, store: store)
             return
         }
         if lowercased.contains("bluetooth access") || lowercased.contains("bluetooth privacy") {
@@ -1829,6 +1836,7 @@ private extension SwitchKind {
         case .keepAwake: return "cup.and.saucer.fill"
         case .screenSaver: return "display"
         case .bluetoothAudio: return "headphones"
+        case .handoff: return "arrow.left.arrow.right.circle.fill"
         case .doNotDisturb: return "moon.fill"
         case .nightShift: return "lightbulb.fill"
         case .trueTone: return "sun.max.fill"
@@ -1860,6 +1868,7 @@ private extension SwitchKind {
         case .keepAwake: return Color(red: 0.95, green: 0.50, blue: 0.12)
         case .screenSaver: return Color(red: 0.58, green: 0.28, blue: 0.84)
         case .bluetoothAudio: return Color(red: 0.15, green: 0.49, blue: 0.95)
+        case .handoff: return Color(red: 0.10, green: 0.62, blue: 0.58)
         case .doNotDisturb: return Color(red: 0.47, green: 0.39, blue: 0.88)
         case .nightShift: return Color(red: 0.98, green: 0.70, blue: 0.15)
         case .trueTone: return Color(red: 0.98, green: 0.54, blue: 0.12)
@@ -4104,6 +4113,8 @@ private struct SwitchPreferencePanel: View {
                         switch kind {
                         case .bluetoothAudio:
                             BluetoothAudioPreferencesPanel(store: store)
+                        case .handoff:
+                            HandoffPreferencesPanel(store: store)
                         case .screenResolution:
                             ScreenResolutionPreferencesPanel(store: store)
                         case .doNotDisturb:
@@ -4154,6 +4165,67 @@ private struct SwitchPreferencePanel: View {
         .padding(14)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .glassCard(cornerRadius: 11, fillOpacity: 0.10)
+    }
+}
+
+private struct HandoffPreferencesPanel: View {
+    @ObservedObject var store: SwitchStore
+
+    private var snapshot: SwitchSnapshot {
+        store.snapshots[.handoff] ?? .off
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            StatusSummaryRow(
+                symbol: "arrow.left.arrow.right.circle.fill",
+                title: handoffStatusTitle,
+                message: snapshot.warning
+                    ?? "Continue supported tasks and use Universal Clipboard across nearby Apple devices."
+            )
+
+            Text("Handoff requires Wi-Fi, Bluetooth, and the same Apple Account on each device.")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 10) {
+                Button {
+                    store.toggle(.handoff)
+                } label: {
+                    Label(snapshot.isOn ? "Turn Off" : "Turn On", systemImage: "switch.2")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!snapshot.isAvailable || store.isActionBusy(.handoff))
+
+                Button {
+                    store.refreshAsync(.handoff)
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(store.isActionBusy(.handoff))
+            }
+
+            Button {
+                reportOpenResult(
+                    SystemSettingsLinks.openAirDropHandoff(),
+                    store: store,
+                    failureMessage: "Could not open AirDrop & Handoff settings."
+                )
+            } label: {
+                Label("AirDrop & Handoff", systemImage: "gearshape")
+            }
+            .buttonStyle(.bordered)
+        }
+        .onAppear {
+            store.refreshAsync(.handoff)
+        }
+    }
+
+    private var handoffStatusTitle: String {
+        if !snapshot.isAvailable { return "Handoff unavailable" }
+        return snapshot.isOn ? "Handoff enabled" : "Handoff disabled"
     }
 }
 
@@ -6576,6 +6648,8 @@ private extension SwitchKind {
             return "Starts the system screen saver immediately from the dashboard action button."
         case .bluetoothAudio:
             return "Use the Bluetooth Audio options panel to choose a paired Bluetooth audio device."
+        case .handoff:
+            return "Allows supported tasks and Universal Clipboard to continue between this Mac and nearby iCloud devices."
         case .doNotDisturb:
             return "Use the Do Not Disturb options panel to configure the required Focus shortcuts."
         case .nightShift:

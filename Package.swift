@@ -14,9 +14,15 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.3")
     ],
     targets: [
+        .target(
+            name: "CSystemNotify",
+            path: "Sources/CSystemNotify",
+            publicHeadersPath: "include"
+        ),
         .executableTarget(
             name: "MacSwitch",
             dependencies: [
+                "CSystemNotify",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Sources/MacSwitch",
