@@ -22,6 +22,7 @@ enum RegressionDiagnostics {
         checkProcessTimeout(&reporter)
         checkLargeProcessOutput(&reporter)
         checkScreenCleanExitEvents(&reporter)
+        checkDashboardReorderGeometry(&reporter)
         checkNightShiftStatePolicy(&reporter)
         checkHandoffStatePolicy(&reporter)
         checkSystemSettingsURLs(&reporter)
@@ -240,6 +241,41 @@ enum RegressionDiagnostics {
         reporter.check(
             !ScreenCleanExitPolicy.requiresFailSafeExit(type: .keyDown),
             "Screen Cleaning blocks keys without exiting"
+        )
+    }
+
+    private static func checkDashboardReorderGeometry(_ reporter: inout SelfTestReporter) {
+        let order: [SwitchKind] = [.keepAwake, .nightShift, .stageManager]
+        let anchorFrame = CGRect(x: 7, y: 49, width: 312, height: 49)
+        let completedFrames = DashboardReorderGeometry.completedFrames(
+            orderedKinds: order,
+            measuredFrames: [.nightShift: anchorFrame],
+            rowHeights: [.keepAwake: 49, .nightShift: 49, .stageManager: 43],
+            anchorKind: .nightShift
+        )
+        reporter.check(
+            completedFrames.count == order.count,
+            "dashboard reorder fills temporarily missing row geometry"
+        )
+
+        let dragState = DashboardDragState(
+            kind: .keepAwake,
+            initialOrder: order,
+            frozenFrames: completedFrames,
+            initialFrame: completedFrames[.keepAwake] ?? .zero,
+            translationY: 100,
+            targetIndex: 0
+        )
+        let targetIndex = DashboardReorderGeometry.insertionIndex(
+            using: dragState,
+            hysteresis: DashboardLayout.reorderHysteresis
+        )
+        let reordered = DashboardReorderGeometry.reorderedKinds(
+            using: dragState.withTargetIndex(targetIndex)
+        )
+        reporter.check(
+            reordered.count == order.count && Set(reordered) == Set(order) && reordered.last == .keepAwake,
+            "dashboard reorder preserves every visible item"
         )
     }
 

@@ -96,12 +96,17 @@ final class PackageSmokeTests: XCTestCase {
         let reorderRowSource = try extract(
             views,
             from: "private struct DashboardReorderRow",
-            to: "private struct DashboardDragState"
+            to: "struct DashboardDragState"
         )
         let dragModifierSource = try extract(
             views,
             from: "private struct DashboardRowDragModifier",
             to: "private struct SwitchGlyph"
+        )
+        let rowIdentitySource = try extract(
+            views,
+            from: "private struct RowIdentityContent",
+            to: "private struct DashboardRowDragModifier"
         )
 
         XCTAssertTrue(views.contains("enum DashboardLayout"))
@@ -134,7 +139,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains("ForEach(Array(dashboardDisplayKinds.enumerated())"))
         XCTAssertTrue(dashboardSource.contains("updateDashboardDrag(kind: kind, value: value)"))
         XCTAssertTrue(dashboardSource.contains("finishDashboardDrag(kind: kind, value: value)"))
-        XCTAssertTrue(dashboardSource.contains("private func dashboardReorderedKinds("))
+        XCTAssertTrue(dashboardSource.contains("DashboardReorderGeometry.reorderedKinds(using:"))
         XCTAssertTrue(dashboardSource.contains("store.setVisibleOrder(finalOrder)"))
         XCTAssertTrue(dashboardSource.contains("NSHapticFeedbackManager.defaultPerformer.perform(.alignment"))
         XCTAssertFalse(dashboardSource.contains("@State private var dashboardDropPlacement"))
@@ -144,7 +149,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(views.contains("DropDelegate"))
         XCTAssertFalse(views.contains("DashboardDropSlot"))
         XCTAssertTrue(views.contains("private struct RowIdentityContent: View"))
-        XCTAssertTrue(views.contains("private struct DashboardDragState: Equatable"))
+        XCTAssertTrue(views.contains("struct DashboardDragState: Equatable"))
+        XCTAssertTrue(views.contains("enum DashboardReorderGeometry"))
         XCTAssertTrue(views.contains("private struct DashboardFloatingDragRow: View"))
         XCTAssertTrue(views.contains("private struct DashboardRowDragModifier: ViewModifier"))
         XCTAssertTrue(reorderRowSource.contains("let dragChanged: (DragGesture.Value) -> Void"))
@@ -156,6 +162,12 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dragModifierSource.contains(".onChanged(onChanged)"))
         XCTAssertTrue(dragModifierSource.contains(".onEnded(onEnded)"))
         XCTAssertTrue(controlRowSource.contains("RowIdentityContent("))
+        XCTAssertTrue(controlRowSource.contains(".frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)"))
+        XCTAssertTrue(controlRowSource.contains(".padding(.trailing, 9)"))
+        XCTAssertTrue(controlRowSource.contains(".contentShape(.interaction, Rectangle())"))
+        XCTAssertTrue(controlRowSource.contains(".modifier(DashboardRowDragModifier(onChanged: dragChanged, onEnded: dragEnded))"))
+        XCTAssertFalse(rowIdentitySource.contains("dragChanged"))
+        XCTAssertFalse(rowIdentitySource.contains("DashboardRowDragModifier"))
         XCTAssertTrue(controlRowSource.contains("DashboardSwitchButton("))
         XCTAssertTrue(controlRowSource.contains("private struct DashboardSwitchButton"))
         XCTAssertTrue(controlRowSource.contains(".frame(width: 44, height: 24)"))
@@ -206,7 +218,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(controlRowSource.contains("static let width: CGFloat = 178"))
         XCTAssertTrue(controlRowSource.contains("private struct DashboardQuickMenuButton"))
         XCTAssertTrue(controlRowSource.contains(".frame(maxWidth: .infinity, alignment: .leading)"))
-        XCTAssertFalse(controlRowSource.contains("Spacer(minLength: 0)"))
+        XCTAssertTrue(controlRowSource.contains("Spacer(minLength: 0)"))
         XCTAssertTrue(controlRowSource.contains("private struct DashboardQuickMenuDismissLayer"))
         XCTAssertTrue(controlRowSource.contains("private final class DashboardQuickMenuDismissLayerView"))
         XCTAssertTrue(controlRowSource.contains("var ignoredEventNumber: Int? = nil"))
@@ -1554,13 +1566,14 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains(".position(x: initialFrame.midX, y: initialFrame.midY + translationY)"))
         XCTAssertTrue(dashboardSource.contains("private func updateDashboardDrag(kind: SwitchKind, value: DragGesture.Value)"))
         XCTAssertTrue(dashboardSource.contains("private func finishDashboardDrag(kind: SwitchKind, value: DragGesture.Value)"))
-        XCTAssertTrue(dashboardSource.contains("visibleKinds.allSatisfy({ rowFrames[$0] != nil })"))
-        XCTAssertTrue(dashboardSource.contains("frozenFrames: rowFrames"))
-        XCTAssertTrue(dashboardSource.contains("private func dashboardReorderedKinds(using dragState: DashboardDragState)"))
-        XCTAssertTrue(dashboardSource.contains("private func dashboardInsertionIndex(using dragState: DashboardDragState) -> Int"))
+        XCTAssertFalse(dashboardSource.contains("visibleKinds.allSatisfy({ rowFrames[$0] != nil })"))
+        XCTAssertTrue(dashboardSource.contains("DashboardReorderGeometry.completedFrames("))
+        XCTAssertTrue(dashboardSource.contains("frozenFrames: frozenFrames"))
+        XCTAssertTrue(dashboardSource.contains("DashboardReorderGeometry.reorderedKinds(using:"))
+        XCTAssertTrue(dashboardSource.contains("DashboardReorderGeometry.insertionIndex("))
         XCTAssertTrue(views.contains("static let reorderHysteresis: CGFloat = 4"))
         XCTAssertTrue(views.contains("let targetIndex: Int"))
-        XCTAssertTrue(dashboardSource.contains("guard let frame = dragState.frozenFrames[candidate] else { continue }"))
+        XCTAssertTrue(views.contains("guard let frame = dragState.frozenFrames[candidate] else { continue }"))
         XCTAssertTrue(dashboardSource.contains("DispatchQueue.main.async"))
         XCTAssertTrue(dashboardSource.contains("store.setVisibleOrder(finalOrder)"))
         XCTAssertTrue(dashboardSource.contains("withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06))"))
