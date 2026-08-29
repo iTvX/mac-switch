@@ -238,23 +238,38 @@ struct DashboardView: View {
             dashboardVisualKinds = visibleKinds
         }
 
-        let rowFrames = dashboardRowFrames
-        guard dashboardDragState != nil || visibleKinds.allSatisfy({ rowFrames[$0] != nil }),
-              let initialFrame = dashboardDragState?.initialFrame ?? rowFrames[kind]
-        else { return }
-
-        let initialOrder = dashboardDisplayKinds
-        let dragState = dashboardDragState ?? DashboardDragState(
-            kind: kind,
-            initialOrder: initialOrder,
-            frozenFrames: rowFrames,
-            initialFrame: initialFrame,
-            translationY: 0,
-            targetIndex: initialOrder.firstIndex(of: kind) ?? 0
-        )
+        let dragState: DashboardDragState
+        if let activeDragState = dashboardDragState {
+            guard activeDragState.kind == kind else { return }
+            dragState = activeDragState
+        } else {
+            let initialOrder = dashboardDisplayKinds
+            let measuredFrames = dashboardRowFrames
+            guard let initialFrame = measuredFrames[kind] else { return }
+            let rowHeights = Dictionary(uniqueKeysWithValues: initialOrder.map { candidate in
+                (candidate, ControlRow.rowHeight(for: store.snapshots[candidate] ?? .off))
+            })
+            let frozenFrames = DashboardReorderGeometry.completedFrames(
+                orderedKinds: initialOrder,
+                measuredFrames: measuredFrames,
+                rowHeights: rowHeights,
+                anchorKind: kind
+            )
+            dragState = DashboardDragState(
+                kind: kind,
+                initialOrder: initialOrder,
+                frozenFrames: frozenFrames,
+                initialFrame: initialFrame,
+                translationY: 0,
+                targetIndex: initialOrder.firstIndex(of: kind) ?? 0
+            )
+        }
         let translatedDragState = dragState.withTranslation(value.translation.height)
         let updatedDragState = translatedDragState.withTargetIndex(
-            dashboardInsertionIndex(using: translatedDragState)
+            DashboardReorderGeometry.insertionIndex(
+                using: translatedDragState,
+                hysteresis: DashboardLayout.reorderHysteresis
+            )
         )
         dashboardDragState = updatedDragState
 
@@ -262,7 +277,7 @@ struct DashboardView: View {
         dashboardQuickMenuOpeningEventNumber = nil
 
         let currentOrder = dashboardVisualKinds
-        let reordered = dashboardReorderedKinds(using: updatedDragState)
+        let reordered = DashboardReorderGeometry.reorderedKinds(using: updatedDragState)
         guard reordered != currentOrder else { return }
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
         withAnimation(.interactiveSpring(response: 0.22, dampingFraction: 0.88, blendDuration: 0.06)) {
@@ -287,53 +302,6 @@ struct DashboardView: View {
             store.setVisibleOrder(finalOrder)
             syncDashboardVisualKinds(with: store.visibleKinds)
         }
-    }
-
-    private func dashboardReorderedKinds(using dragState: DashboardDragState) -> [SwitchKind] {
-        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
-        var reordered = otherKinds
-        reordered.insert(dragState.kind, at: min(dragState.targetIndex, reordered.count))
-        return reordered
-    }
-
-    private func dashboardInsertionIndex(using dragState: DashboardDragState) -> Int {
-        let rawIndex = dashboardRawInsertionIndex(using: dragState)
-        let currentIndex = min(dragState.targetIndex, dragState.initialOrder.count - 1)
-        guard rawIndex != currentIndex else { return rawIndex }
-
-        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
-        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
-        guard !otherKinds.isEmpty else { return rawIndex }
-
-        if rawIndex > currentIndex {
-            let boundaryIndex = min(max(rawIndex - 1, 0), otherKinds.count - 1)
-            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
-               draggedCenterY < frame.midY + DashboardLayout.reorderHysteresis {
-                return currentIndex
-            }
-        } else {
-            let boundaryIndex = min(max(rawIndex, 0), otherKinds.count - 1)
-            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
-               draggedCenterY > frame.midY - DashboardLayout.reorderHysteresis {
-                return currentIndex
-            }
-        }
-
-        return rawIndex
-    }
-
-    private func dashboardRawInsertionIndex(using dragState: DashboardDragState) -> Int {
-        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
-        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
-        var insertionIndex = otherKinds.count
-        for (index, candidate) in otherKinds.enumerated() {
-            guard let frame = dragState.frozenFrames[candidate] else { continue }
-            if draggedCenterY < frame.midY {
-                insertionIndex = index
-                break
-            }
-        }
-        return insertionIndex
     }
 
     private func resetTransientState() {
@@ -399,7 +367,7 @@ private struct DashboardFloatingDragRow: View {
     }
 }
 
-private struct DashboardDragState: Equatable {
+struct DashboardDragState: Equatable {
     let kind: SwitchKind
     let initialOrder: [SwitchKind]
     let frozenFrames: [SwitchKind: CGRect]
@@ -427,6 +395,105 @@ private struct DashboardDragState: Equatable {
             translationY: translationY,
             targetIndex: targetIndex
         )
+    }
+}
+
+enum DashboardReorderGeometry {
+    static func completedFrames(
+        orderedKinds: [SwitchKind],
+        measuredFrames: [SwitchKind: CGRect],
+        rowHeights: [SwitchKind: CGFloat],
+        anchorKind: SwitchKind
+    ) -> [SwitchKind: CGRect] {
+        guard let anchorIndex = orderedKinds.firstIndex(of: anchorKind),
+              let anchorFrame = measuredFrames[anchorKind]
+        else { return [:] }
+
+        var completed: [SwitchKind: CGRect] = [anchorKind: anchorFrame]
+
+        if anchorIndex > 0 {
+            for index in stride(from: anchorIndex - 1, through: 0, by: -1) {
+                let kind = orderedKinds[index]
+                if let measured = measuredFrames[kind] {
+                    completed[kind] = measured
+                    continue
+                }
+                guard let nextFrame = completed[orderedKinds[index + 1]] else { continue }
+                let height = max(rowHeights[kind] ?? nextFrame.height, 1)
+                completed[kind] = CGRect(
+                    x: nextFrame.minX,
+                    y: nextFrame.minY - height,
+                    width: nextFrame.width,
+                    height: height
+                )
+            }
+        }
+
+        if anchorIndex + 1 < orderedKinds.count {
+            for index in (anchorIndex + 1)..<orderedKinds.count {
+                let kind = orderedKinds[index]
+                if let measured = measuredFrames[kind] {
+                    completed[kind] = measured
+                    continue
+                }
+                guard let previousFrame = completed[orderedKinds[index - 1]] else { continue }
+                let height = max(rowHeights[kind] ?? previousFrame.height, 1)
+                completed[kind] = CGRect(
+                    x: previousFrame.minX,
+                    y: previousFrame.maxY,
+                    width: previousFrame.width,
+                    height: height
+                )
+            }
+        }
+
+        return completed
+    }
+
+    static func reorderedKinds(using dragState: DashboardDragState) -> [SwitchKind] {
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
+        var reordered = otherKinds
+        reordered.insert(dragState.kind, at: min(max(dragState.targetIndex, 0), reordered.count))
+        return reordered
+    }
+
+    static func insertionIndex(using dragState: DashboardDragState, hysteresis: CGFloat) -> Int {
+        let rawIndex = rawInsertionIndex(using: dragState)
+        guard !dragState.initialOrder.isEmpty else { return rawIndex }
+        let currentIndex = min(max(dragState.targetIndex, 0), dragState.initialOrder.count - 1)
+        guard rawIndex != currentIndex else { return rawIndex }
+
+        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
+        guard !otherKinds.isEmpty else { return rawIndex }
+
+        if rawIndex > currentIndex {
+            let boundaryIndex = min(max(rawIndex - 1, 0), otherKinds.count - 1)
+            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
+               draggedCenterY < frame.midY + hysteresis {
+                return currentIndex
+            }
+        } else {
+            let boundaryIndex = min(max(rawIndex, 0), otherKinds.count - 1)
+            if let frame = dragState.frozenFrames[otherKinds[boundaryIndex]],
+               draggedCenterY > frame.midY - hysteresis {
+                return currentIndex
+            }
+        }
+
+        return rawIndex
+    }
+
+    private static func rawInsertionIndex(using dragState: DashboardDragState) -> Int {
+        let draggedCenterY = dragState.initialFrame.midY + dragState.translationY
+        let otherKinds = dragState.initialOrder.filter { $0 != dragState.kind }
+        for (index, candidate) in otherKinds.enumerated() {
+            guard let frame = dragState.frozenFrames[candidate] else { continue }
+            if draggedCenterY < frame.midY {
+                return index
+            }
+        }
+        return otherKinds.count
     }
 }
 
@@ -789,41 +856,47 @@ private struct ControlRow: View {
     }
 
     var body: some View {
-        HStack(spacing: 9) {
-            RowIdentityContent(
-                kind: kind,
-                title: store.switchTitle(kind),
-                snapshot: snapshot,
-                dragChanged: dragChanged,
-                dragEnded: dragEnded
-            )
+        HStack(spacing: 0) {
+            HStack(spacing: 0) {
+                RowIdentityContent(
+                    kind: kind,
+                    title: store.switchTitle(kind),
+                    snapshot: snapshot
+                )
+
+                Spacer(minLength: 0)
+            }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .padding(.trailing, 9)
+                .contentShape(.interaction, Rectangle())
+                .modifier(DashboardRowDragModifier(onChanged: dragChanged, onEnded: dragEnded))
                 .layoutPriority(1)
 
-            Spacer(minLength: 6)
-
-            if kind == .keepAwake {
-                KeepAwakeDurationMenu(store: store)
-            } else if kind == .doNotDisturb {
-                DoNotDisturbDurationMenu(store: store)
-            }
-
-            if let rowFixMessage {
-                RowFixButton(remediation: ErrorFixRouter.remediation(for: rowFixMessage)) {
-                    ErrorFixRouter.route(message: rowFixMessage, store: store)
+            HStack(spacing: 9) {
+                if kind == .keepAwake {
+                    KeepAwakeDurationMenu(store: store)
+                } else if kind == .doNotDisturb {
+                    DoNotDisturbDurationMenu(store: store)
                 }
-            } else if kind.isMomentaryAction {
-                RowActionButton(kind: kind, isEnabled: snapshot.isAvailable, isRunning: isRunning) {
-                    store.trigger(kind)
-                }
-            } else {
-                DashboardSwitchButton(
-                    title: store.switchTitle(kind),
-                    isOn: snapshot.isOn,
-                    isEnabled: snapshot.isAvailable && !isRunning,
-                    action: {
-                        store.toggle(kind)
+
+                if let rowFixMessage {
+                    RowFixButton(remediation: ErrorFixRouter.remediation(for: rowFixMessage)) {
+                        ErrorFixRouter.route(message: rowFixMessage, store: store)
                     }
-                )
+                } else if kind.isMomentaryAction {
+                    RowActionButton(kind: kind, isEnabled: snapshot.isAvailable, isRunning: isRunning) {
+                        store.trigger(kind)
+                    }
+                } else {
+                    DashboardSwitchButton(
+                        title: store.switchTitle(kind),
+                        isOn: snapshot.isOn,
+                        isEnabled: snapshot.isAvailable && !isRunning,
+                        action: {
+                            store.toggle(kind)
+                        }
+                    )
+                }
             }
         }
         .padding(.horizontal, 9)
@@ -1196,8 +1269,6 @@ private struct RowIdentityContent: View {
     let kind: SwitchKind
     let title: String
     let snapshot: SwitchSnapshot
-    let dragChanged: (DragGesture.Value) -> Void
-    let dragEnded: (DragGesture.Value) -> Void
 
     var body: some View {
         HStack(spacing: 9) {
@@ -1225,8 +1296,6 @@ private struct RowIdentityContent: View {
                 }
             }
         }
-        .contentShape(Rectangle())
-        .modifier(DashboardRowDragModifier(onChanged: dragChanged, onEnded: dragEnded))
     }
 }
 
