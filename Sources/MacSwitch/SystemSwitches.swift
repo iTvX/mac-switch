@@ -132,6 +132,14 @@ enum SystemSettingsLinks {
     }
 
     @discardableResult
+    static func openAirDropHandoff() -> Bool {
+        openSystemSettings(
+            primary: "x-apple.systempreferences:com.apple.AirDrop-Handoff-Settings.extension",
+            fallback: "x-apple.systempreferences:com.apple.preference.general"
+        )
+    }
+
+    @discardableResult
     static func openDisplays() -> Bool {
         openSystemSettings(
             primary: "x-apple.systempreferences:com.apple.Displays-Settings.extension",
@@ -264,6 +272,7 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
     private let darkMode = DarkModeSwitch()
     private let screenSaver = ScreenSaverSwitch()
     private let bluetoothAudio = BluetoothAudioSwitch()
+    private let handoff = HandoffSwitch()
     private let doNotDisturb = DoNotDisturbSwitch()
     private let nightShift = NightShiftSwitch.shared
     private let trueTone = TrueToneSwitch()
@@ -299,6 +308,9 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
             self?.onExternalChange?(.nightShift)
             NotificationCenter.default.post(name: .nightShiftStatusDidChange, object: nil)
         }
+        handoff.observeStatusChanges { [weak self] in
+            self?.onExternalChange?(.handoff)
+        }
     }
 
     func snapshot(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot {
@@ -324,6 +336,8 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
             return screenSaver.snapshot()
         case .bluetoothAudio:
             return bluetoothAudio.snapshot()
+        case .handoff:
+            return handoff.snapshot()
         case .doNotDisturb:
             return doNotDisturb.snapshot()
         case .nightShift:
@@ -387,6 +401,9 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
             return screenSaver.perform()
         case .bluetoothAudio:
             let error = bluetoothAudio.setEnabled(enabled)
+            return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
+        case .handoff:
+            let error = handoff.setEnabled(enabled)
             return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
         case .doNotDisturb:
             let error = doNotDisturb.setEnabled(enabled)

@@ -29,12 +29,15 @@ Mac Switch currently includes:
 | Hide Desktop Icons | Lock Keyboard |
 | Dark Mode | Lock Screen |
 | Bluetooth Audio | Xcode Cache Clean |
-| Do Not Disturb | Empty Trash |
-| Night Shift | Eject Disk |
-| True Tone, when available | Empty Pasteboard |
-| Play Music | Hide Windows |
-| Show Hidden Files | Hide Dock |
-| Low Power Mode | Energy Mode |
+| Handoff | Empty Trash |
+| Do Not Disturb | Eject Disk |
+| Night Shift | Empty Pasteboard |
+| True Tone, when available | Hide Windows |
+| Play Music | |
+| Show Hidden Files | |
+| Hide Dock | |
+| Low Power Mode | |
+| Energy Mode | |
 
 Software Update checks are included for official builds distributed through the app's update feed.
 

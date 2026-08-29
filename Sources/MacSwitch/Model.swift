@@ -19,6 +19,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
     case keepAwake
     case screenSaver
     case bluetoothAudio
+    case handoff
     case doNotDisturb
     case nightShift
     case trueTone
@@ -50,6 +51,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .keepAwake: return "Keep Awake"
         case .screenSaver: return "Screen Saver"
         case .bluetoothAudio: return "Bluetooth Audio"
+        case .handoff: return "Handoff"
         case .doNotDisturb: return "Do Not Disturb"
         case .nightShift: return "Night Shift"
         case .trueTone: return "True Tone"
@@ -81,6 +83,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
         case .keepAwake: return "cup.and.saucer.fill"
         case .screenSaver: return "display"
         case .bluetoothAudio: return "headphones"
+        case .handoff: return "arrow.left.arrow.right.circle.fill"
         case .doNotDisturb: return "moon.fill"
         case .nightShift: return "sun.max.fill"
         case .trueTone: return "sun.max.circle.fill"
@@ -114,7 +117,7 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
     var isModeEligible: Bool {
         switch self {
         case .stageManager, .hideWidgets, .muteMicrophone, .hideDesktopIcons,
-             .darkMode, .keepAwake, .doNotDisturb, .nightShift, .trueTone,
+             .darkMode, .keepAwake, .handoff, .doNotDisturb, .nightShift, .trueTone,
              .showHiddenFiles, .screenResolution, .hideDock:
             return true
         default:
@@ -1655,7 +1658,7 @@ final class SwitchStore: ObservableObject {
     func toggle(_ kind: SwitchKind) {
         guard !pendingHideAfterDeactivation.contains(kind) else { return }
         guard !isActionBusy(kind) else { return }
-        if kind == .nightShift {
+        if kind.requiresFreshStateBeforeToggle {
             preflightToggle(kind)
             return
         }
@@ -2746,6 +2749,15 @@ private enum DefaultsKey {
 }
 
 private extension SwitchKind {
+    var requiresFreshStateBeforeToggle: Bool {
+        switch self {
+        case .handoff, .nightShift:
+            return true
+        default:
+            return false
+        }
+    }
+
     var operationRequiresMainThread: Bool {
         switch self {
         case .screenSaver, .nightShift, .trueTone,

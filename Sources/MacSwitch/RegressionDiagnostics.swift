@@ -23,6 +23,7 @@ enum RegressionDiagnostics {
         checkLargeProcessOutput(&reporter)
         checkScreenCleanExitEvents(&reporter)
         checkNightShiftStatePolicy(&reporter)
+        checkHandoffStatePolicy(&reporter)
         checkSystemSettingsURLs(&reporter)
         checkBluetoothAudioSelection(&reporter)
         checkMicrophoneVolumeRestoreIsolation(&reporter)
@@ -272,6 +273,21 @@ enum RegressionDiagnostics {
         )
     }
 
+    private static func checkHandoffStatePolicy(_ reporter: inout SelfTestReporter) {
+        reporter.check(
+            HandoffStatePolicy.isEnabled(advertising: nil, receiving: nil),
+            "Handoff treats missing preferences as the macOS default"
+        )
+        reporter.check(
+            HandoffStatePolicy.isEnabled(advertising: true, receiving: true),
+            "Handoff requires both advertising and receiving"
+        )
+        reporter.check(
+            !HandoffStatePolicy.isEnabled(advertising: true, receiving: false),
+            "Handoff reports a partial preference state as off"
+        )
+    }
+
     private static func checkShortcutValidation(_ reporter: inout SelfTestReporter) {
         reporter.check(
             HotKeyShortcut.isValidGlobalShortcut(keyCode: 40, modifiers: UInt32(cmdKey | optionKey)),
@@ -383,6 +399,7 @@ enum RegressionDiagnostics {
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth",
             "x-apple.systempreferences:com.apple.Bluetooth",
+            "x-apple.systempreferences:com.apple.AirDrop-Handoff-Settings.extension",
             "x-apple.systempreferences:com.apple.Displays-Settings.extension",
             "x-apple.systempreferences:com.apple.Sound-Settings.extension",
             "x-apple.systempreferences:com.apple.Battery-Settings.extension",
@@ -536,6 +553,7 @@ enum RegressionDiagnostics {
         reporter.check(!defaults.contains(.bluetoothAudio), "default layout hides Bluetooth Audio until configured")
         reporter.check(!defaults.contains(.doNotDisturb), "default layout hides Do Not Disturb until shortcuts are configured")
         reporter.check(!defaults.contains(.trueTone), "default layout hides device-dependent True Tone")
+        reporter.check(!defaults.contains(.handoff), "default layout hides Handoff until selected")
     }
 
     private static func checkSnapshots(_ reporter: inout SelfTestReporter) {
