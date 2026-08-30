@@ -8,6 +8,8 @@ on:
     paths-ignore:
       - "README.md"
       - "docs/**"
+      - ".github/workflows/**"
+      - "Tests/**"
   workflow_dispatch:
     inputs:
       tag:
