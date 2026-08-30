@@ -1509,6 +1509,11 @@ private struct RowFixButton: View {
 private struct DashboardErrorBanner: View {
     let message: String
     @ObservedObject var store: SwitchStore
+    @Environment(\.locale) private var locale
+
+    private var localizedMessage: String {
+        L10n.localizedRuntimeMessage(message, locale: locale)
+    }
 
     var body: some View {
         HStack(spacing: 8) {
@@ -1516,7 +1521,7 @@ private struct DashboardErrorBanner: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .foregroundStyle(Color(red: 0.92, green: 0.16, blue: 0.20))
 
-            Text(message)
+            Text(verbatim: localizedMessage)
                 .font(.system(size: 11.2, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(2)
@@ -1550,7 +1555,7 @@ private struct DashboardErrorBanner: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.red.opacity(0.16), lineWidth: 1)
         )
-        .help(message)
+        .help(localizedMessage)
     }
 
     private func routeFix() {
@@ -2201,13 +2206,18 @@ private struct PreferencesSidebar: View {
 private struct PreferencesErrorBanner: View {
     let message: String
     @ObservedObject var store: SwitchStore
+    @Environment(\.locale) private var locale
+
+    private var localizedMessage: String {
+        L10n.localizedRuntimeMessage(message, locale: locale)
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
 
-            Text(message)
+            Text(verbatim: localizedMessage)
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(3)
@@ -2219,7 +2229,11 @@ private struct PreferencesErrorBanner: View {
                 Button {
                     ErrorFixRouter.route(message: message, store: store)
                 } label: {
-                    Label(remediation.title, systemImage: remediation.symbol)
+                    Label {
+                        Text(verbatim: L10n.localizedResource(remediation.title, locale: locale))
+                    } icon: {
+                        Image(systemName: remediation.symbol)
+                    }
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.bordered)
@@ -2245,7 +2259,7 @@ private struct PreferencesErrorBanner: View {
                 .stroke(Color.red.opacity(0.22), lineWidth: 1)
         )
         .shadow(color: .black.opacity(0.10), radius: 12, y: 5)
-        .help(message)
+        .help(localizedMessage)
     }
 
     private var remediation: ErrorRemediation? {
@@ -3529,6 +3543,7 @@ private enum AppDiagnostics {
 private struct SwitchShortcutSection: View {
     let kind: SwitchKind
     @ObservedObject var store: SwitchStore
+    @Environment(\.locale) private var locale
 
     private var snapshot: SwitchSnapshot {
         store.snapshots[kind] ?? .off
@@ -3566,7 +3581,11 @@ private struct SwitchShortcutSection: View {
             }
 
             HStack(spacing: 8) {
-                ShortcutRecorderButton(shortcut: store.shortcuts[kind]) { shortcut in
+                ShortcutRecorderButton(
+                    shortcut: store.shortcuts[kind],
+                    recordTitle: L10n.localizedResource("Record Shortcut", locale: locale),
+                    recordingTitle: L10n.localizedResource("Type shortcut...", locale: locale)
+                ) { shortcut in
                     store.setShortcut(kind, shortcut: shortcut)
                 }
                 .frame(maxWidth: .infinity, minHeight: 26, maxHeight: 26)
@@ -3607,12 +3626,16 @@ private struct SwitchShortcutSection: View {
 
 private struct ShortcutRecorderButton: NSViewRepresentable {
     let shortcut: HotKeyShortcut?
+    let recordTitle: String
+    let recordingTitle: String
     let onRecord: (HotKeyShortcut?) -> Void
 
     func makeNSView(context: Context) -> ShortcutRecorderButtonView {
         let view = ShortcutRecorderButtonView(frame: .zero)
         view.onRecord = onRecord
         view.shortcut = shortcut
+        view.recordTitle = recordTitle
+        view.recordingTitle = recordingTitle
         view.updateTitle()
         return view
     }
@@ -3620,6 +3643,8 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
     func updateNSView(_ nsView: ShortcutRecorderButtonView, context: Context) {
         nsView.onRecord = onRecord
         nsView.shortcut = shortcut
+        nsView.recordTitle = recordTitle
+        nsView.recordingTitle = recordingTitle
         nsView.updateTitle()
     }
 }
@@ -3627,6 +3652,8 @@ private struct ShortcutRecorderButton: NSViewRepresentable {
 private final class ShortcutRecorderButtonView: NSButton {
     var shortcut: HotKeyShortcut?
     var onRecord: ((HotKeyShortcut?) -> Void)?
+    var recordTitle = "Record Shortcut"
+    var recordingTitle = "Type shortcut..."
     private var recording = false
 
     override init(frame frameRect: NSRect) {
@@ -3698,9 +3725,9 @@ private final class ShortcutRecorderButtonView: NSButton {
 
     func updateTitle() {
         if recording {
-            title = "Type shortcut..."
+            title = recordingTitle
         } else {
-            title = shortcut?.display ?? "Record Shortcut"
+            title = shortcut?.display ?? recordTitle
         }
     }
 }
@@ -3963,7 +3990,10 @@ private struct CustomizePreferencesView: View {
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 10) {
-                    SettingsPill(text: "\(enabledCount) visible", color: Color.accentColor)
+                    SettingsPill(
+                        text: L10n.visibleCount(enabledCount, language: store.effectiveLanguage),
+                        color: Color.accentColor
+                    )
                     Text("Drag items in the menu bar menu to change order.")
                         .font(.system(size: 11.8, weight: .medium))
                         .foregroundStyle(PreferencesColors.subtleText)
@@ -3989,7 +4019,7 @@ private struct CustomizePreferencesView: View {
                                     .font(.system(size: 11.5, weight: .bold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text("\(store.orderedKinds.count) total")
+                                Text(L10n.totalCount(store.orderedKinds.count, language: store.effectiveLanguage))
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.tertiary)
                             }
@@ -4296,6 +4326,7 @@ private struct SwitchPreferencePanel: View {
 
 private struct HandoffPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
+    @Environment(\.locale) private var locale
 
     private var snapshot: SwitchSnapshot {
         store.snapshots[.handoff] ?? .off
@@ -4307,7 +4338,7 @@ private struct HandoffPreferencesPanel: View {
                 symbol: "arrow.left.arrow.right.circle.fill",
                 title: handoffStatusTitle,
                 message: snapshot.warning
-                    ?? "Continue supported tasks and use Universal Clipboard across nearby Apple devices."
+                    ?? "Continue supported tasks across nearby Apple devices."
             )
 
             Text("Handoff requires Wi-Fi, Bluetooth, and the same Apple Account on each device.")
@@ -4315,11 +4346,20 @@ private struct HandoffPreferencesPanel: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
+            Text("Turning off Handoff also affects Universal Clipboard, Universal Control, and Sidecar.")
+                .font(.system(size: 12.5))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             HStack(spacing: 10) {
                 Button {
                     store.toggle(.handoff)
                 } label: {
-                    Label(snapshot.isOn ? "Turn Off" : "Turn On", systemImage: "switch.2")
+                    Label {
+                        Text(verbatim: L10n.localizedResource(snapshot.isOn ? "Turn Off" : "Turn On", locale: locale))
+                    } icon: {
+                        Image(systemName: "switch.2")
+                    }
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(!snapshot.isAvailable || store.isActionBusy(.handoff))

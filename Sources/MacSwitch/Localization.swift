@@ -178,6 +178,29 @@ enum L10n {
         return key
     }
 
+    static func localizedRuntimeMessage(_ message: String, locale: Locale) -> String {
+        localizedRuntimeMessage(message) { key in
+            localizedResource(key, locale: locale)
+        }
+    }
+
+    static func localizedRuntimeMessage(
+        _ message: String,
+        localize: (String) -> String
+    ) -> String {
+        let direct = localize(message)
+        guard direct == message,
+              let separator = message.range(of: ": ")
+        else { return direct }
+
+        let title = String(message[..<separator.lowerBound])
+        let detail = String(message[separator.upperBound...])
+        let localizedTitle = localize(title)
+        let localizedDetail = localize(detail)
+        guard localizedTitle != title || localizedDetail != detail else { return message }
+        return "\(localizedTitle): \(localizedDetail)"
+    }
+
     static func text(_ key: L10nKey, language: AppLanguage) -> String {
         values[language]?[key] ?? values[.english]?[key] ?? key.rawValue
     }
@@ -237,6 +260,36 @@ enum L10n {
             return "\(active) ativos de \(total)"
         case .english, .system:
             return "\(active) active of \(total)"
+        }
+    }
+
+    static func visibleCount(_ count: Int, language: AppLanguage) -> String {
+        switch language {
+        case .simplifiedChinese: return "\(count) 个可见"
+        case .traditionalChinese: return "\(count) 個可見"
+        case .spanish: return "\(count) visibles"
+        case .japanese: return "\(count) 件表示"
+        case .korean: return "\(count)개 표시"
+        case .german: return "\(count) sichtbar"
+        case .french: return "\(count) visibles"
+        case .italian: return "\(count) visibili"
+        case .portuguese: return "\(count) visíveis"
+        case .english, .system: return "\(count) visible"
+        }
+    }
+
+    static func totalCount(_ count: Int, language: AppLanguage) -> String {
+        switch language {
+        case .simplifiedChinese: return "共 \(count) 个"
+        case .traditionalChinese: return "共 \(count) 個"
+        case .spanish: return "\(count) en total"
+        case .japanese: return "合計 \(count) 件"
+        case .korean: return "총 \(count)개"
+        case .german: return "\(count) insgesamt"
+        case .french: return "\(count) au total"
+        case .italian: return "\(count) totali"
+        case .portuguese: return "\(count) no total"
+        case .english, .system: return "\(count) total"
         }
     }
 

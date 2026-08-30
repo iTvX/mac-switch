@@ -796,6 +796,8 @@ final class SwitchStore: ObservableObject {
     private var pendingHideAfterDeactivation: Set<SwitchKind> = []
     private var keepAwakeRestoreEndDate: Date?
     private var modeReservedKinds: Set<SwitchKind> = []
+    private var lastHandoffRefreshDate: Date?
+
     private var modeErrorMessage: String?
 
     private struct ModeStep: Sendable {
@@ -955,7 +957,7 @@ final class SwitchStore: ObservableObject {
                     }
                     self?.enforceDarkModeScheduleAsync()
                     self?.enforceDoNotDisturbExpirationAsync()
-                    self?.refreshVisibleAsync()
+                    self?.refreshVisiblePeriodically()
                 }
             }
             focusStatusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -1133,13 +1135,16 @@ final class SwitchStore: ObservableObject {
     }
 
     func customizationStatusText(for kind: SwitchKind) -> String {
+        let locale = Locale(identifier: effectiveLanguage.localeIdentifier)
+        let key: String
         if pendingHideAfterDeactivation.contains(kind) {
-            return "Turning off before hiding"
+            key = "Turning off before hiding"
+        } else if isActionBusy(kind) {
+            key = "Updating..."
+        } else {
+            key = enabledKinds.contains(kind) ? "Shown in menu" : "Hidden"
         }
-        if isActionBusy(kind) {
-            return "Updating..."
-        }
-        return enabledKinds.contains(kind) ? "Shown in menu" : "Hidden"
+        return L10n.localizedResource(key, locale: locale)
     }
 
     func isModeActive(_ modeID: SwitchModeID) -> Bool {
@@ -1938,6 +1943,17 @@ final class SwitchStore: ObservableObject {
         refreshAsync(kinds: visibleKinds)
     }
 
+    private func refreshVisiblePeriodically(now: Date = Date()) {
+        var kinds = visibleKinds
+        if !HandoffRefreshPolicy.shouldPerformPeriodicRefresh(
+            lastRefresh: lastHandoffRefreshDate,
+            now: now
+        ) {
+            kinds.removeAll { $0 == .handoff }
+        }
+        refreshAsync(kinds: kinds)
+    }
+
     func refreshAllAsync() {
         refreshAsync(kinds: SwitchKind.allCases)
     }
@@ -1949,6 +1965,9 @@ final class SwitchStore: ObservableObject {
     private func refreshAsync(kinds: [SwitchKind]) {
         let requestedKinds = Set(kinds.filter { !isActionBusy($0) })
         guard !requestedKinds.isEmpty else { return }
+        if requestedKinds.contains(.handoff) {
+            lastHandoffRefreshDate = Date()
+        }
 
         if refreshInFlight {
             pendingRefreshKinds.formUnion(requestedKinds)
@@ -2167,6 +2186,14 @@ final class SwitchStore: ObservableObject {
             for delay in [1.2, 4.5] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                     self?.refreshAsync(.bluetoothAudio)
+                }
+            }
+            return
+        }
+        if kind == .handoff {
+            for delay in [0.5, 2.0] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                    self?.refreshAsync(.handoff)
                 }
             }
             return
@@ -2738,6 +2765,15 @@ final class SwitchStore: ObservableObject {
               (0...59).contains(value.minute)
         else { return defaultValue }
         return value
+    }
+}
+
+enum HandoffRefreshPolicy {
+    static let periodicInterval: TimeInterval = 5 * 60
+
+    static func shouldPerformPeriodicRefresh(lastRefresh: Date?, now: Date) -> Bool {
+        guard let lastRefresh else { return true }
+        return now.timeIntervalSince(lastRefresh) >= periodicInterval
     }
 }
 

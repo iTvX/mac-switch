@@ -753,6 +753,11 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertTrue(releaseWorkflow.contains("branches:\n      - main\n      - beta-pr40-modes"), "release workflow should run automatically after PR merges to stable or beta")
         XCTAssertTrue(prCheckWorkflow.contains("      - beta-pr40-modes"), "beta pull requests should run the same Swift checks as main")
+        XCTAssertTrue(prCheckWorkflow.contains("handoff-compatibility:"), "pull requests should verify Handoff on older supported macOS versions")
+        XCTAssertTrue(prCheckWorkflow.contains("          - macos-14"))
+        XCTAssertTrue(prCheckWorkflow.contains("          - macos-15"))
+        XCTAssertTrue(prCheckWorkflow.contains("swift test --filter HandoffBehaviorTests"))
+        XCTAssertTrue(prCheckWorkflow.contains("swift test --filter LocalizationResourceTests"))
         XCTAssertTrue(releaseWorkflow.contains("paths-ignore:"), "release workflow should not run for documentation-only changes")
         XCTAssertTrue(releaseWorkflow.contains("\"README.md\""), "README-only changes should not trigger notarized app releases")
         XCTAssertTrue(releaseWorkflow.contains("\"docs/**\""), "documentation image changes should not trigger notarized app releases")
@@ -3048,8 +3053,11 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("reportOpenResult(\n                            PlayMusicPreferences.open(target)"))
         XCTAssertTrue(views.contains("XcodeCleanPreferences.refreshSizeEstimate()"))
         XCTAssertTrue(views.contains("store: store,\n                isDisabled: store.isActionBusy(.doNotDisturb)"))
-        XCTAssertTrue(dashboardBanner.contains(".help(message)"))
-        XCTAssertTrue(preferencesBanner.contains(".help(message)"))
+        XCTAssertTrue(dashboardBanner.contains("L10n.localizedRuntimeMessage(message, locale: locale)"))
+        XCTAssertTrue(preferencesBanner.contains("L10n.localizedRuntimeMessage(message, locale: locale)"))
+        XCTAssertTrue(dashboardBanner.contains(".help(localizedMessage)"))
+        XCTAssertTrue(preferencesBanner.contains(".help(localizedMessage)"))
+        XCTAssertTrue(preferencesBanner.contains("ErrorFixRouter.route(message: message, store: store)"))
     }
 
     func testStatusItemOpensDashboardOnMouseDown() throws {
@@ -3100,7 +3108,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(tabSource.contains("case shortcuts"))
         XCTAssertTrue(source.contains("AboutPreferencesView"), "About preferences should be implemented")
         XCTAssertTrue(tabSource.contains("var isImplemented: Bool"))
-        XCTAssertTrue(shortcutSectionSource.contains("ShortcutRecorderButton(shortcut: store.shortcuts[kind])"))
+        XCTAssertTrue(shortcutSectionSource.contains("ShortcutRecorderButton("))
+        XCTAssertTrue(shortcutSectionSource.contains("shortcut: store.shortcuts[kind]"))
+        XCTAssertTrue(shortcutSectionSource.contains("recordTitle: L10n.localizedResource(\"Record Shortcut\", locale: locale)"))
+        XCTAssertTrue(shortcutSectionSource.contains("recordingTitle: L10n.localizedResource(\"Type shortcut...\", locale: locale)"))
         XCTAssertTrue(shortcutSectionSource.contains("store.setShortcut(kind, shortcut: shortcut)"))
         XCTAssertTrue(shortcutSectionSource.contains("store.setShortcut(kind, shortcut: nil)"))
         XCTAssertTrue(shortcutSectionSource.contains("Hidden from dashboard; shortcut still works"))
