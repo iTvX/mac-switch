@@ -186,6 +186,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(dashboardSource.contains(".position(quickMenuPosition(for: rowFrame))"))
         XCTAssertTrue(dashboardSource.contains(".coordinateSpace(name: DashboardLayout.coordinateSpaceName)"))
         XCTAssertTrue(dashboardSource.contains(".onPreferenceChange(DashboardRowFramePreferenceKey.self)"))
+        XCTAssertTrue(dashboardSource.contains("MainActor.assumeIsolated"), "SwiftUI preference callbacks should update dashboard state synchronously on the main actor")
         XCTAssertTrue(dashboardSource.contains("private func quickMenuPosition(for rowFrame: CGRect)"))
         XCTAssertTrue(dashboardSource.contains("private func hideFromMenuDisabledReason(for kind: SwitchKind) -> String?"))
         XCTAssertTrue(dashboardSource.contains("private func openSettingsDetail(for kind: SwitchKind)"))
