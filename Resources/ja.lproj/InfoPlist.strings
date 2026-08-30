@@ -1,0 +1,6 @@
+"NSAppleEventsUsageDescription" = "Mac SwitchはAppleイベントを使用して、対応するシステムアプリの外観、メディア、ゴミ箱、ロック画面操作を制御します。";
+"NSBluetoothAlwaysUsageDescription" = "Mac SwitchはBluetoothを使用して、ペアリング済みのオーディオデバイスを検索・接続します。";
+"NSFocusStatusUsageDescription" = "Mac Switchは集中モードの状態を読み取り、macOSの実際の状態を常に反映します。";
+"NSInputMonitoringUsageDescription" = "Mac Switchはキーボードロックと画面クリーニングのため、一時的にキーボード入力を遮断できます。";
+"NSLocationUsageDescription" = "Mac Switchは位置情報を使用して、日の出と日の入りにダークモードを切り替えます。";
+"NSLocationWhenInUseUsageDescription" = "Mac Switchは位置情報を使用して、日の出と日の入りにダークモードを切り替えます。";

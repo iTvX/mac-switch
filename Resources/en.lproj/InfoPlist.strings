@@ -1,0 +1,6 @@
+"NSAppleEventsUsageDescription" = "Mac Switch uses Apple Events to control supported system apps for appearance, media, trash, and lock-screen actions.";
+"NSBluetoothAlwaysUsageDescription" = "Mac Switch uses Bluetooth to find and connect paired Bluetooth audio devices.";
+"NSFocusStatusUsageDescription" = "Mac Switch reads Focus status so Do Not Disturb always reflects the current macOS state.";
+"NSInputMonitoringUsageDescription" = "Mac Switch can temporarily block keyboard input for Lock Keyboard and Screen Cleaning.";
+"NSLocationUsageDescription" = "Mac Switch uses your location to switch Dark Mode at sunrise and sunset.";
+"NSLocationWhenInUseUsageDescription" = "Mac Switch uses your location to switch Dark Mode at sunrise and sunset.";

@@ -1,0 +1,6 @@
+"NSAppleEventsUsageDescription" = "Mac Switch 使用 Apple 事件控制支援的系統 App，以執行外觀、媒體、垃圾桶和鎖定畫面操作。";
+"NSBluetoothAlwaysUsageDescription" = "Mac Switch 使用藍牙尋找並連接已配對的藍牙音訊裝置。";
+"NSFocusStatusUsageDescription" = "Mac Switch 讀取專注模式狀態，以持續顯示 macOS 的真實狀態。";
+"NSInputMonitoringUsageDescription" = "Mac Switch 可為「鎖定鍵盤」和「螢幕清潔」暫時阻擋鍵盤輸入。";
+"NSLocationUsageDescription" = "Mac Switch 使用您的位置，在日出和日落時切換深色模式。";
+"NSLocationWhenInUseUsageDescription" = "Mac Switch 使用您的位置，在日出和日落時切換深色模式。";

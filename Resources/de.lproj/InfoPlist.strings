@@ -1,0 +1,6 @@
+"NSAppleEventsUsageDescription" = "Mac Switch verwendet Apple Events, um unterstützte System-Apps für Darstellung, Medien, Papierkorb und Sperrbildschirm zu steuern.";
+"NSBluetoothAlwaysUsageDescription" = "Mac Switch verwendet Bluetooth, um gekoppelte Audiogeräte zu finden und zu verbinden.";
+"NSFocusStatusUsageDescription" = "Mac Switch liest den Fokusstatus, damit immer der tatsächliche macOS-Status angezeigt wird.";
+"NSInputMonitoringUsageDescription" = "Mac Switch kann die Tastatureingabe für Tastatur sperren und Bildschirmreinigung vorübergehend blockieren.";
+"NSLocationUsageDescription" = "Mac Switch verwendet deinen Standort, um den Dunkelmodus bei Sonnenauf- und -untergang umzuschalten.";
+"NSLocationWhenInUseUsageDescription" = "Mac Switch verwendet deinen Standort, um den Dunkelmodus bei Sonnenauf- und -untergang umzuschalten.";

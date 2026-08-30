@@ -338,6 +338,21 @@ private struct DashboardReorderRow: View {
         .contentShape(Rectangle())
         .opacity(isPlaceholder ? 0 : 1)
         .zIndex(quickMenuKind == kind ? 20 : isDragging ? 10 : 0)
+        .accessibilityAction(named: Text("Move Up")) {
+            move(by: -1)
+        }
+        .accessibilityAction(named: Text("Move Down")) {
+            move(by: 1)
+        }
+    }
+
+    private func move(by offset: Int) {
+        var order = store.visibleKinds
+        guard let index = order.firstIndex(of: kind) else { return }
+        let destination = index + offset
+        guard order.indices.contains(destination) else { return }
+        order.swapAt(index, destination)
+        store.setVisibleOrder(order)
     }
 }
 
@@ -797,7 +812,7 @@ private struct DashboardHeader: View {
                     .overlay(Capsule().stroke(Color.white.opacity(0.18), lineWidth: 1))
             }
 
-            CompactIconButton(symbol: "gearshape") {
+            CompactIconButton(symbol: "gearshape", accessibilityLabel: store.text(.preferences)) {
                 store.preferredPreferencesTab = "general"
                 NotificationCenter.default.post(name: .openMacSwitchPreferences, object: nil)
             }
@@ -892,6 +907,7 @@ private struct ControlRow: View {
                         title: store.switchTitle(kind),
                         isOn: snapshot.isOn,
                         isEnabled: snapshot.isAvailable && !isRunning,
+                        accessibilityValue: store.text(snapshot.isOn ? .on : .off),
                         action: {
                             store.toggle(kind)
                         }
@@ -980,6 +996,7 @@ private struct DashboardSwitchButton: View {
     let title: String
     let isOn: Bool
     let isEnabled: Bool
+    let accessibilityValue: String
     let action: () -> Void
     @State private var isHovering = false
 
@@ -1012,7 +1029,7 @@ private struct DashboardSwitchButton: View {
         .animation(.snappy(duration: 0.16), value: isOn)
         .animation(.easeOut(duration: 0.12), value: isHovering)
         .accessibilityLabel(Text(title))
-        .accessibilityValue(Text(isOn ? "On" : "Off"))
+        .accessibilityValue(Text(accessibilityValue))
     }
 
     private var trackFill: Color {
@@ -1085,6 +1102,7 @@ private struct DashboardQuickMenuButton: View {
     let isDisabled: Bool
     let action: () -> Void
     @State private var isHovering = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         Button {
@@ -1098,13 +1116,13 @@ private struct DashboardQuickMenuButton: View {
                     .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.55) : Color.accentColor)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
+                    Text(verbatim: L10n.localizedResource(title, locale: locale))
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.62) : .primary)
                         .lineLimit(1)
 
                     if let subtitle {
-                        Text(subtitle)
+                        Text(verbatim: L10n.localizedResource(subtitle, locale: locale))
                             .font(.system(size: 10.2, weight: .medium))
                             .foregroundStyle(DashboardColors.subtleText.opacity(isDisabled ? 0.62 : 0.86))
                             .lineLimit(1)
@@ -1269,26 +1287,27 @@ private struct RowIdentityContent: View {
     let kind: SwitchKind
     let title: String
     let snapshot: SwitchSnapshot
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(spacing: 9) {
             SwitchGlyph(kind: kind, snapshot: snapshot)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(LocalizedStringKey(title))
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
 
                 if let warning = snapshot.warning {
-                    Text(warning)
+                    Text(verbatim: L10n.localizedResource(warning, locale: locale))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(Color(red: 0.94, green: 0.04, blue: 0.16))
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 } else if let subtitle = snapshot.subtitle {
-                    Text(subtitle)
+                    Text(verbatim: L10n.localizedResource(subtitle, locale: locale))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(DashboardColors.subtleText)
                         .lineLimit(1)
@@ -1341,8 +1360,10 @@ private struct KeepAwakeDurationMenu: View {
 
     var body: some View {
         Menu {
-            Button(KeepAwakeDuration.indefinitely.menuTitle) {
+            Button {
                 store.setKeepAwakeDuration(.indefinitely)
+            } label: {
+                Text(LocalizedStringKey(KeepAwakeDuration.indefinitely.menuTitle))
             }
 
             Divider()
@@ -1363,8 +1384,10 @@ private struct KeepAwakeDurationMenu: View {
             Divider()
 
             ForEach(KeepAwakeDuration.allCases.filter { $0 != .indefinitely }) { duration in
-                Button(duration.menuTitle) {
+                Button {
                     store.setKeepAwakeDuration(duration)
+                } label: {
+                    Text(LocalizedStringKey(duration.menuTitle))
                 }
             }
         } label: {
@@ -1386,8 +1409,10 @@ private struct DoNotDisturbDurationMenu: View {
     var body: some View {
         Menu {
             ForEach(DoNotDisturbDuration.allCases) { duration in
-                Button(duration.menuTitle) {
+                Button {
                     store.doNotDisturbDuration = duration
+                } label: {
+                    Text(LocalizedStringKey(duration.menuTitle))
                 }
             }
         } label: {
@@ -1403,10 +1428,11 @@ private struct DoNotDisturbDurationMenu: View {
 private struct DurationMenuLabel: View {
     let title: String
     @State private var isHovering = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(title)
+            Text(verbatim: L10n.localizedResource(title, locale: locale))
                 .font(.system(size: 10.5, weight: .bold))
                 .lineLimit(1)
             Image(systemName: "chevron.down")
@@ -1459,6 +1485,7 @@ private struct RowFixButton: View {
     let remediation: ErrorRemediation?
     let action: () -> Void
     @State private var isHovering = false
+    @Environment(\.locale) private var locale
 
     var body: some View {
         Button(action: action) {
@@ -1474,7 +1501,7 @@ private struct RowFixButton: View {
             .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.primary.opacity(0.055), lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .help(remediation?.title ?? "Open Settings")
+        .help(Text(verbatim: L10n.localizedResource("Fix", locale: locale)))
         .onHover { isHovering = $0 }
     }
 }
@@ -1786,7 +1813,7 @@ private struct FooterBar: View {
 
                 HStack {
                     Spacer()
-                    CompactIconButton(symbol: "power") {
+                    CompactIconButton(symbol: "power", accessibilityLabel: store.text(.quitMacSwitch)) {
                         store.quit()
                     }
                 }
@@ -1825,6 +1852,7 @@ private struct DashboardFooterButton: View {
 
 private struct CompactIconButton: View {
     let symbol: String
+    let accessibilityLabel: String
     var isBusy = false
     var isDisabled = false
     let action: () -> Void
@@ -1858,6 +1886,7 @@ private struct CompactIconButton: View {
         .disabled(isDisabled)
         .opacity(isDisabled ? 0.70 : 1)
         .onHover { isHovering = $0 }
+        .accessibilityLabel(Text(accessibilityLabel))
     }
 }
 
@@ -2270,6 +2299,7 @@ private struct SettingsPage<Content: View>: View {
     let scrolls: Bool
     let contentMaxWidth: CGFloat
     let content: Content
+    @Environment(\.locale) private var locale
 
     init(
         title: String,
@@ -2288,10 +2318,10 @@ private struct SettingsPage<Content: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(verbatim: L10n.localizedResource(title, locale: locale))
                     .font(.system(size: 16.5, weight: .semibold))
                     .foregroundStyle(.primary)
-                Text(subtitle)
+                Text(verbatim: L10n.localizedResource(subtitle, locale: locale))
                     .font(.system(size: 11.2, weight: .regular))
                     .foregroundStyle(PreferencesColors.subtleText)
                     .lineLimit(2)
@@ -2324,6 +2354,7 @@ private struct SettingsGroup<Content: View>: View {
     let title: String
     let content: Content
     @State private var isExpanded = true
+    @Environment(\.locale) private var locale
 
     init(_ title: String, defaultExpanded: Bool = true, @ViewBuilder content: () -> Content) {
         self.title = title
@@ -2345,7 +2376,8 @@ private struct SettingsGroup<Content: View>: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .frame(width: 12)
 
-                    Text(title.uppercased())
+                    Text(verbatim: L10n.localizedResource(title, locale: locale))
+                        .textCase(.uppercase)
                         .font(.system(size: 10.2, weight: .semibold))
                         .foregroundStyle(.secondary)
 
@@ -2356,6 +2388,9 @@ private struct SettingsGroup<Content: View>: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(verbatim: L10n.localizedResource(title, locale: locale)))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text("Shows or hides this settings section"))
 
             if isExpanded {
                 Rectangle()
@@ -2388,6 +2423,7 @@ private struct SettingsRow<Accessory: View>: View {
     let systemImage: String?
     let accessory: Accessory
     @State private var isExpanded = false
+    @Environment(\.locale) private var locale
 
     init(
         title: String,
@@ -2404,38 +2440,24 @@ private struct SettingsRow<Accessory: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
-                Button {
-                    guard subtitle != nil else { return }
-                    withAnimation(.snappy(duration: 0.18)) {
-                        isExpanded.toggle()
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(subtitle == nil ? Color.clear : .secondary)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                            .frame(width: 10)
-
-                        if let systemImage {
-                            Image(systemName: systemImage)
-                                .symbolRenderingMode(.hierarchical)
-                                .foregroundStyle(Color.accentColor)
-                                .font(.system(size: 12.5, weight: .semibold))
-                                .frame(width: 18)
+                Group {
+                    if subtitle != nil {
+                        Button {
+                            withAnimation(.snappy(duration: 0.18)) {
+                                isExpanded.toggle()
+                            }
+                        } label: {
+                            rowTitle
                         }
-
-                        Text(title)
-                            .font(.system(size: 12.6, weight: .medium))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        Spacer(minLength: 0)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text(verbatim: L10n.localizedResource(title, locale: locale)))
+                        .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+                        .accessibilityHint(Text("Shows or hides details for this setting"))
+                    } else {
+                        rowTitle
                     }
-                    .contentShape(Rectangle())
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .buttonStyle(.plain)
 
                 Spacer(minLength: 8)
 
@@ -2447,7 +2469,7 @@ private struct SettingsRow<Accessory: View>: View {
             .frame(minHeight: 38)
 
             if isExpanded, let subtitle {
-                Text(subtitle)
+                Text(verbatim: L10n.localizedResource(subtitle, locale: locale))
                     .font(.system(size: 11.3, weight: .regular))
                     .foregroundStyle(PreferencesColors.subtleText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -2458,14 +2480,47 @@ private struct SettingsRow<Accessory: View>: View {
             }
         }
     }
+
+    private var rowTitle: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(subtitle == nil ? Color.clear : .secondary)
+                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                .frame(width: 10)
+                .accessibilityHidden(true)
+
+            if let systemImage {
+                Image(systemName: systemImage)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(Color.accentColor)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+            }
+
+            Text(verbatim: L10n.localizedResource(title, locale: locale))
+                .font(.system(size: 12.6, weight: .medium))
+                .foregroundStyle(.primary)
+                .lineLimit(title.contains(where: \.isWhitespace) ? 2 : 1)
+                .minimumScaleFactor(0.78)
+                .allowsTightening(true)
+                .fixedSize(horizontal: false, vertical: true)
+                .layoutPriority(1)
+
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
 }
 
 private struct SettingsPill: View {
     let text: String
     var color: Color = .secondary
+    @Environment(\.locale) private var locale
 
     var body: some View {
-        Text(text)
+        Text(verbatim: L10n.localizedResource(text, locale: locale))
             .font(.system(size: 10.5, weight: .medium))
             .foregroundStyle(color)
             .padding(.horizontal, 8)
@@ -2546,7 +2601,7 @@ private struct GeneralPreferencesView: View {
                                 .disabled(store.isUpdatingStartAtLogin)
                             }
 
-                            Toggle("", isOn: $store.startAtLogin)
+                            Toggle(store.text(.startAtLogin), isOn: $store.startAtLogin)
                                 .labelsHidden()
                                 .toggleStyle(.switch)
                                 .disabled(store.isUpdatingStartAtLogin || store.startAtLoginNeedsApproval)
@@ -2561,7 +2616,7 @@ private struct GeneralPreferencesView: View {
                         title: store.text(.language),
                         subtitle: store.text(.languageSubtitle)
                     ) {
-                        Picker("", selection: $store.appLanguage) {
+                        Picker(store.text(.language), selection: $store.appLanguage) {
                             ForEach(AppLanguage.allCases) { language in
                                 Text(language.pickerTitle(in: store.effectiveLanguage)).tag(language)
                             }
@@ -2576,7 +2631,7 @@ private struct GeneralPreferencesView: View {
                     SettingsRow(
                         title: store.text(.menuBarIcon)
                     ) {
-                        Picker("", selection: $store.menuBarIcon) {
+                        Picker(store.text(.menuBarIcon), selection: $store.menuBarIcon) {
                             ForEach(MenuBarIcon.allCases) { icon in
                                 HStack(spacing: 8) {
                                     Image(nsImage: icon.templateImage(size: NSSize(width: 17, height: 17)))
@@ -2970,7 +3025,7 @@ private struct CustomModeSettingsRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
+            Toggle(store.modeText(.showModeInMenu), isOn: Binding(
                 get: { store.enabledModeIDs.contains(mode.id) },
                 set: { value, _ in store.setModeVisible(mode.id, value) }
             ))
@@ -3020,6 +3075,7 @@ private struct CustomModeSettingsRow: View {
             .foregroundStyle(.secondary)
             .disabled(store.isModeInteractionDisabled(mode))
             .help(store.isModeActive(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode))
+            .accessibilityLabel(Text(store.isModeActive(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode)))
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
@@ -3142,7 +3198,7 @@ private struct CustomModeDetailPanel: View {
                                     Text(store.modeText(.icon))
                                         .font(.system(size: 10.5, weight: .semibold))
                                         .foregroundStyle(.secondary)
-                                    Picker("", selection: $draftSymbolName) {
+                                    Picker(store.modeText(.icon), selection: $draftSymbolName) {
                                         ForEach(Self.iconChoices) { choice in
                                             Label(store.modeText(choice.titleKey), systemImage: choice.symbol)
                                                 .tag(choice.symbol)
@@ -3270,7 +3326,7 @@ private struct CustomModeSwitchTargetRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
+            Toggle(store.switchTitle(kind), isOn: Binding(
                 get: { isIncluded },
                 set: { value, _ in setIncluded(value) }
             ))
@@ -3291,7 +3347,7 @@ private struct CustomModeSwitchTargetRow: View {
 
             Spacer(minLength: 0)
 
-            Picker("", selection: Binding(
+            Picker(store.switchTitle(kind), selection: Binding(
                 get: { targetIsOn },
                 set: { value, _ in setTarget(value) }
             )) {
@@ -3652,6 +3708,7 @@ private final class ShortcutRecorderButtonView: NSButton {
 private struct AboutPreferencesView: View {
     @ObservedObject var store: SwitchStore
     @ObservedObject private var softwareUpdates = SoftwareUpdateManager.shared
+    @Environment(\.locale) private var locale
     @State private var diagnosticsCopied = false
     @State private var diagnosticsCopyInProgress = false
     @State private var confirmsClearingShortcuts = false
@@ -3680,7 +3737,7 @@ private struct AboutPreferencesView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Mac Switch")
                             .font(.system(size: 18, weight: .semibold))
-                        Text("Version \(version) (\(build))")
+                        Text("\(L10n.localizedResource("Version", locale: locale)) \(version) (\(build))")
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.secondary)
                         Text("A menu bar utility designed for fast, low-friction control over display, focus, power, input, and cleanup workflows.")
@@ -3719,7 +3776,7 @@ private struct AboutPreferencesView: View {
                         title: "Update Channel",
                         subtitle: softwareUpdates.updateChannel.subtitle(language: store.effectiveLanguage)
                     ) {
-                        Picker("", selection: $softwareUpdates.updateChannel) {
+                        Picker("Update Channel", selection: $softwareUpdates.updateChannel) {
                             ForEach(SoftwareUpdateChannel.allCases) { channel in
                                 Text(channel.title(language: store.effectiveLanguage)).tag(channel)
                             }
@@ -3735,7 +3792,7 @@ private struct AboutPreferencesView: View {
                     SettingsRow(
                         title: "Automatically Check"
                     ) {
-                        Toggle("", isOn: $softwareUpdates.automaticallyChecksForUpdates)
+                        Toggle("Automatically Check", isOn: $softwareUpdates.automaticallyChecksForUpdates)
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .disabled(!softwareUpdates.isAvailable)
@@ -3746,7 +3803,7 @@ private struct AboutPreferencesView: View {
                     SettingsRow(
                         title: "Download Updates in Background"
                     ) {
-                        Toggle("", isOn: $softwareUpdates.automaticallyDownloadsUpdates)
+                        Toggle("Download Updates in Background", isOn: $softwareUpdates.automaticallyDownloadsUpdates)
                             .labelsHidden()
                             .toggleStyle(.switch)
                             .disabled(!softwareUpdates.isAvailable || !softwareUpdates.automaticallyChecksForUpdates)
@@ -3793,7 +3850,7 @@ private struct AboutPreferencesView: View {
                             copyDiagnostics()
                         } label: {
                             Label(
-                                diagnosticsButtonTitle,
+                                L10n.localizedResource(diagnosticsButtonTitle, locale: locale),
                                 systemImage: diagnosticsCopied ? "checkmark" : "doc.on.doc"
                             )
                         }
@@ -4073,7 +4130,7 @@ private struct CustomizeRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Toggle("", isOn: Binding(
+            Toggle(title, isOn: Binding(
                 get: { isEnabled },
                 set: { value, _ in store.setEnabled(kind, value) }
             ))
@@ -4505,6 +4562,7 @@ private struct RecoveryNotice: View {
     let title: String
     let message: String
     let action: () -> Void
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -4514,9 +4572,9 @@ private struct RecoveryNotice: View {
                 .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(title)
+                Text(verbatim: L10n.localizedResource(title, locale: locale))
                     .font(.system(size: 13.5, weight: .bold))
-                Text(message)
+                Text(verbatim: L10n.localizedResource(message, locale: locale))
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -4543,6 +4601,7 @@ private struct StatusSummaryRow: View {
     let symbol: String
     let title: String
     let message: String
+    @Environment(\.locale) private var locale
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -4553,10 +4612,10 @@ private struct StatusSummaryRow: View {
                 .frame(width: 24, height: 24)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(title)
+                Text(verbatim: L10n.localizedResource(title, locale: locale))
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.primary)
-                Text(message)
+                Text(verbatim: L10n.localizedResource(message, locale: locale))
                     .font(.system(size: 12.5, weight: .medium))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -4766,6 +4825,8 @@ private struct DoNotDisturbPreferencesPanel: View {
     @State private var statusText = "Checking shortcut installation..."
     @State private var statusIsError = false
     @State private var hasDistinctShortcutPair = false
+    @State private var focusStatus = DoNotDisturbPreferences.focusStatus
+    @State private var isRequestingFocusStatus = false
     @State private var onShortcutName = DoNotDisturbPreferences.customOnShortcutName
     @State private var offShortcutName = DoNotDisturbPreferences.customOffShortcutName
     @State private var shortcutNameRefreshWorkItem: DispatchWorkItem?
@@ -4774,20 +4835,69 @@ private struct DoNotDisturbPreferencesPanel: View {
         onInstalled && offInstalled && hasDistinctShortcutPair
     }
 
+    private var focusStatusReady: Bool {
+        focusStatus.authorization == .authorized && focusStatus.isFocused != nil
+    }
+
+    private var setupReady: Bool {
+        allInstalled && focusStatusReady
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Default activation duration:")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
 
-            Picker("", selection: $store.doNotDisturbDuration) {
+            Picker("Default activation duration", selection: $store.doNotDisturbDuration) {
                 ForEach(DoNotDisturbDuration.allCases) { duration in
-                    Text(duration.menuTitle).tag(duration)
+                    Text(LocalizedStringKey(duration.menuTitle)).tag(duration)
                 }
             }
             .labelsHidden()
             .pickerStyle(.menu)
             .disabled(store.isActionBusy(.doNotDisturb))
+
+            Divider()
+
+            StatusSummaryRow(
+                symbol: focusStatusReady ? "checkmark.shield.fill" : "shield.lefthalf.filled",
+                title: "Focus Status Access",
+                message: focusStatusMessage
+            )
+
+            HStack(spacing: 10) {
+                if focusStatus.authorization == .notDetermined {
+                    Button {
+                        requestFocusStatusAccess()
+                    } label: {
+                        Label(isRequestingFocusStatus ? "Requesting..." : "Allow Access", systemImage: "checkmark.shield")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isRequestingFocusStatus)
+                } else if !focusStatusReady {
+                    Button {
+                        reportOpenResult(
+                            SystemSettingsLinks.openFocus(),
+                            store: store,
+                            failureMessage: "Could not open Focus settings."
+                        )
+                    } label: {
+                        Label("Review Focus", systemImage: "gearshape")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Button {
+                    refreshStatus(force: true)
+                } label: {
+                    Label("Refresh Focus Status", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(isRefreshing || isRequestingFocusStatus)
+
+                Spacer()
+            }
 
             Divider()
 
@@ -4841,12 +4951,12 @@ private struct DoNotDisturbPreferencesPanel: View {
 
                 Spacer()
 
-                Button(allInstalled ? "Ready" : "Continue") {
+                Button(setupReady ? "Ready" : "Continue") {
                     refreshStatus(force: true)
                     store.refreshAsync(.doNotDisturb)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!allInstalled || isRefreshing || store.isActionBusy(.doNotDisturb))
+                .disabled(!setupReady || isRefreshing || store.isActionBusy(.doNotDisturb))
             }
 
             HStack(spacing: 10) {
@@ -4875,7 +4985,7 @@ private struct DoNotDisturbPreferencesPanel: View {
 
             Text(statusText)
                 .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(statusIsError ? Color.red : (allInstalled ? Color.green : Color.secondary))
+                .foregroundStyle(statusIsError ? Color.red : (setupReady ? Color.green : Color.secondary))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .onAppear {
@@ -4923,13 +5033,21 @@ private struct DoNotDisturbPreferencesPanel: View {
                 matching: DoNotDisturbPreferences.offShortcutCandidates,
                 in: installed
             ) != nil
+            let latestFocusStatus = DoNotDisturbPreferences.focusStatus
 
             DispatchQueue.main.async {
                 onInstalled = on
                 offInstalled = off
                 hasDistinctShortcutPair = distinctPair
-                statusIsError = configurationError != nil || shortcutError != nil || (on && off && !distinctPair)
-                if let configurationError {
+                focusStatus = latestFocusStatus
+                statusIsError = latestFocusStatus.authorization == .denied
+                    || latestFocusStatus.authorization == .restricted
+                    || configurationError != nil
+                    || shortcutError != nil
+                    || (on && off && !distinctPair)
+                if !focusStatusReady {
+                    statusText = focusStatusMessage
+                } else if let configurationError {
                     statusText = configurationError
                 } else if let shortcutError {
                     statusText = "Could not read Shortcuts: \(shortcutError)"
@@ -4951,6 +5069,36 @@ private struct DoNotDisturbPreferencesPanel: View {
                 }
                 store.refreshAsync(.doNotDisturb)
             }
+        }
+    }
+
+    private var focusStatusMessage: String {
+        switch focusStatus.authorization {
+        case .notDetermined:
+            return "Allow Mac Switch to read the current Focus status before using this switch."
+        case .restricted:
+            return "Focus Status access is restricted on this Mac."
+        case .denied:
+            return "Focus Status access is denied. Review Focus settings to allow Mac Switch."
+        case .authorized:
+            guard let isFocused = focusStatus.isFocused else {
+                return "macOS did not provide the current Focus status."
+            }
+            return isFocused ? "Focus is currently on." : "Focus is currently off."
+        }
+    }
+
+    private func requestFocusStatusAccess() {
+        guard !isRequestingFocusStatus else { return }
+        isRequestingFocusStatus = true
+        DoNotDisturbPreferences.requestFocusStatusAuthorization { authorization in
+            isRequestingFocusStatus = false
+            focusStatus = FocusStatusReading(
+                authorization: authorization,
+                isFocused: authorization == .authorized ? DoNotDisturbPreferences.focusStatus.isFocused : nil
+            )
+            refreshStatus(force: true)
+            store.refreshAsync(.doNotDisturb)
         }
     }
 }
@@ -5006,12 +5154,12 @@ private struct KeepAwakePreferencesPanel: View {
             Text("Default activation duration:")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-            Picker("", selection: Binding(
+            Picker("Default activation duration", selection: Binding(
                 get: { store.keepAwakeDuration },
                 set: { value, _ in store.setKeepAwakeDuration(value) }
             )) {
                 ForEach(KeepAwakeDuration.allCases) { duration in
-                    Text(duration.menuTitle).tag(duration)
+                    Text(LocalizedStringKey(duration.menuTitle)).tag(duration)
                 }
             }
             .labelsHidden()
@@ -5104,7 +5252,7 @@ private struct DarkModePreferencesPanel: View {
         VStack(alignment: .leading, spacing: 16) {
             Picker("Schedule:", selection: $store.darkModeScheduleMode) {
                 ForEach(DarkModeScheduleMode.allCases) { mode in
-                    Text(mode.title).tag(mode)
+                    Text(LocalizedStringKey(mode.title)).tag(mode)
                 }
             }
             .pickerStyle(.menu)
@@ -5214,7 +5362,7 @@ private struct NightShiftPreferencesPanel: View {
                     set: { value, _ in updateNightShiftScheduleMode(value) }
                 )) {
                     ForEach(NightShiftScheduleMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+                        Text(LocalizedStringKey(mode.title)).tag(mode)
                     }
                 }
                 .pickerStyle(.menu)
@@ -6240,16 +6388,18 @@ private struct HideWindowsPreferencesPanel: View {
     private func showHiddenApps() {
         guard !isShowingHidden else { return }
         isShowingHidden = true
-        DispatchQueue.main.async {
+        DispatchQueue.global(qos: .userInitiated).async {
             let result = HideWindowsPreferences.unhideAll()
-            isShowingHidden = false
-            if !result.failed.isEmpty {
-                store.lastError = "Could not show \(HideWindowsPreferences.joinedAppNames(result.failed))."
-            } else if store.lastError?.hasPrefix("Could not show ") == true {
-                store.clearLastError()
+            DispatchQueue.main.async {
+                isShowingHidden = false
+                if !result.failed.isEmpty {
+                    store.lastError = "Could not show \(HideWindowsPreferences.joinedAppNames(result.failed))."
+                } else if store.lastError?.hasPrefix("Could not show ") == true {
+                    store.clearLastError()
+                }
+                refreshCountsSoon()
+                store.refreshAsync(.hideWindows)
             }
-            refreshCountsSoon()
-            store.refreshAsync(.hideWindows)
         }
     }
 

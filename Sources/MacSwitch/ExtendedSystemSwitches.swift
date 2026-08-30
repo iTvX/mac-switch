@@ -3,6 +3,7 @@ import CoreAudio
 import CoreBluetooth
 import CoreGraphics
 import Foundation
+import Intents
 import IOBluetooth
 
 private func switchSnapshot(
@@ -803,11 +804,25 @@ enum ScreenResolutionPreferences {
 enum DoNotDisturbPreferences {
     static let onShortcut = "Mac Switch DND On"
     static let offShortcut = "Mac Switch DND Off"
-    static let stateKey = "switch.doNotDisturb.lastState"
+    static let legacyStateKey = "switch.doNotDisturb.lastState"
     private static let customOnShortcutKey = "switch.doNotDisturb.customOnShortcutName"
     private static let customOffShortcutKey = "switch.doNotDisturb.customOffShortcutName"
     private static let cacheTTL: TimeInterval = 5
     private static let shortcutCache = ShortcutCacheState()
+
+    static var focusStatus: FocusStatusReading {
+        SystemFocusStatusProvider.shared.read()
+    }
+
+    static func requestFocusStatusAuthorization(
+        completion: @escaping @MainActor @Sendable (FocusStatusAuthorization) -> Void
+    ) {
+        SystemFocusStatusProvider.shared.requestAuthorization { authorization in
+            Task { @MainActor in
+                completion(authorization)
+            }
+        }
+    }
 
     static var customOnShortcutName: String {
         get { UserDefaults.standard.string(forKey: customOnShortcutKey) ?? "" }
@@ -986,6 +1001,65 @@ enum DoNotDisturbPreferences {
         return result
     }
 
+}
+
+enum FocusStatusAuthorization: Equatable, Sendable {
+    case notDetermined
+    case restricted
+    case denied
+    case authorized
+}
+
+struct FocusStatusReading: Equatable, Sendable {
+    let authorization: FocusStatusAuthorization
+    let isFocused: Bool?
+}
+
+protocol FocusStatusProviding: AnyObject, Sendable {
+    func read() -> FocusStatusReading
+}
+
+final class SystemFocusStatusProvider: FocusStatusProviding, @unchecked Sendable {
+    static let shared = SystemFocusStatusProvider()
+
+    private let center: INFocusStatusCenter
+
+    private init(center: INFocusStatusCenter = .default) {
+        self.center = center
+    }
+
+    func read() -> FocusStatusReading {
+        let authorization = Self.authorization(from: center.authorizationStatus)
+        return FocusStatusReading(
+            authorization: authorization,
+            isFocused: authorization == .authorized ? center.focusStatus.isFocused : nil
+        )
+    }
+
+    func requestAuthorization(
+        completion: @escaping @Sendable (FocusStatusAuthorization) -> Void
+    ) {
+        center.requestAuthorization { status in
+            completion(Self.authorization(from: status))
+        }
+    }
+
+    private static func authorization(
+        from status: INFocusStatusAuthorizationStatus
+    ) -> FocusStatusAuthorization {
+        switch status {
+        case .notDetermined:
+            return .notDetermined
+        case .restricted:
+            return .restricted
+        case .denied:
+            return .denied
+        case .authorized:
+            return .authorized
+        @unknown default:
+            return .restricted
+        }
+    }
 }
 
 enum EjectDiskPreferences {
@@ -1674,10 +1748,46 @@ struct BluetoothAudioSwitch {
 }
 
 struct DoNotDisturbSwitch {
+    private let focusStatusProvider: any FocusStatusProviding
+
+    init(focusStatusProvider: any FocusStatusProviding = SystemFocusStatusProvider.shared) {
+        self.focusStatusProvider = focusStatusProvider
+    }
+
     func snapshot() -> SwitchSnapshot {
-        if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
-            UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.stateKey)
+        UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.legacyStateKey)
+
+        let focusStatus = focusStatusProvider.read()
+        guard focusStatus.authorization == .authorized else {
+            let detail: String
+            switch focusStatus.authorization {
+            case .notDetermined:
+                detail = "Allow Focus Status access in Customize > Do Not Disturb."
+            case .denied:
+                detail = "Focus Status access is denied. Review Do Not Disturb settings."
+            case .restricted:
+                detail = "Focus Status access is restricted on this Mac."
+            case .authorized:
+                detail = "Focus Status is unavailable."
+            }
             return switchSnapshot(
+                isAvailable: false,
+                subtitle: "Focus status permission required",
+                warning: detail
+            )
+        }
+
+        guard let isFocused = focusStatus.isFocused else {
+            return switchSnapshot(
+                isAvailable: false,
+                subtitle: "Focus status unavailable",
+                warning: "macOS did not provide the current Focus status."
+            )
+        }
+
+        if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
+            return switchSnapshot(
+                isOn: isFocused,
                 isAvailable: false,
                 subtitle: "Check shortcut names",
                 warning: configurationError
@@ -1685,11 +1795,8 @@ struct DoNotDisturbSwitch {
         }
         let installed = DoNotDisturbPreferences.allShortcutsInstalled
         let shortcutError = DoNotDisturbPreferences.installedShortcutsError
-        if !installed {
-            UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.stateKey)
-        }
         return switchSnapshot(
-            isOn: installed && UserDefaults.standard.bool(forKey: DoNotDisturbPreferences.stateKey),
+            isOn: isFocused,
             isAvailable: installed,
             subtitle: installed ? nil : (shortcutError == nil ? "Install shortcuts" : "Shortcuts unavailable"),
             warning: installed ? nil : (shortcutError ?? "Install shortcuts first")
@@ -1697,6 +1804,15 @@ struct DoNotDisturbSwitch {
     }
 
     func setEnabled(_ enabled: Bool) -> String? {
+        let focusStatus = focusStatusProvider.read()
+        guard focusStatus.authorization == .authorized else {
+            return "Focus status permission is required. Open Customize > Do Not Disturb and allow access."
+        }
+        guard let currentlyFocused = focusStatus.isFocused else {
+            return "macOS did not provide the current Focus status."
+        }
+        guard currentlyFocused != enabled else { return nil }
+
         if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
             return configurationError
         }
@@ -1710,8 +1826,10 @@ struct DoNotDisturbSwitch {
         let result = ProcessRunner.run("/usr/bin/shortcuts", ["run", shortcut], timeout: 12)
         if result.status == 0 {
             DoNotDisturbPreferences.invalidateInstalledShortcutsCache()
-            UserDefaults.standard.set(enabled, forKey: DoNotDisturbPreferences.stateKey)
-            return nil
+            return waitForCondition(timeout: 6, interval: 0.15, {
+                let reading = focusStatusProvider.read()
+                return reading.authorization == .authorized && reading.isFocused == enabled
+            }) ? nil : "The shortcut finished, but macOS Focus did not turn \(enabled ? "on" : "off")."
         }
         return ProcessRunner.failureMessage(for: result, fallback: "Could not run \(shortcut).")
     }
@@ -2312,7 +2430,7 @@ struct EjectDiskSwitch {
 
         var failed: [String] = []
         for volume in volumes {
-            if !NSWorkspace.shared.unmountAndEjectDevice(atPath: volume.path) || !waitForVolumeToUnmount(volume) {
+            if !requestEject(volume) || !waitForVolumeToUnmount(volume) {
                 failed.append(volume.lastPathComponent)
             }
         }
@@ -2325,6 +2443,17 @@ struct EjectDiskSwitch {
                 "Could not eject \(joinedVolumeNames(failed))",
                 error: "Could not eject \(joinedVolumeNames(failed))."
             )
+    }
+
+    private func requestEject(_ volume: URL) -> Bool {
+        if Thread.isMainThread {
+            return NSWorkspace.shared.unmountAndEjectDevice(atPath: volume.path)
+        }
+        var accepted = false
+        DispatchQueue.main.sync {
+            accepted = NSWorkspace.shared.unmountAndEjectDevice(atPath: volume.path)
+        }
+        return accepted
     }
 
     private func waitForVolumeToUnmount(_ volume: URL, timeout: TimeInterval = 3) -> Bool {
@@ -2400,7 +2529,7 @@ struct HideWindowsSwitch {
         var failedNames: [String] = []
 
         for app in apps {
-            if app.hide(), waitForAppToHide(app) {
+            if HideWindowsPreferences.requestHidden(true, for: app), waitForAppToHide(app) {
                 hiddenApps.append(app)
                 hiddenNames.append(HideWindowsPreferences.displayName(for: app))
             } else {
@@ -2424,12 +2553,12 @@ struct HideWindowsSwitch {
     private func waitForAppToHide(_ app: NSRunningApplication, timeout: TimeInterval = 0.6) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if app.isHidden {
+            if HideWindowsPreferences.isHidden(app) {
                 return true
             }
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         } while Date() < deadline
-        return app.isHidden
+        return HideWindowsPreferences.isHidden(app)
     }
 }
 
@@ -2443,7 +2572,7 @@ enum HideWindowsPreferences {
 
     static var hidableApps: [NSRunningApplication] {
         let bundleID = Bundle.main.bundleIdentifier
-        return NSWorkspace.shared.runningApplications.filter {
+        return runningApplications.filter {
             $0.activationPolicy == .regular &&
             $0.bundleIdentifier != bundleID &&
             !$0.isHidden
@@ -2454,7 +2583,7 @@ enum HideWindowsPreferences {
         pruneTrackedHiddenApps()
         let tokens = hiddenAppTokens
         let bundleID = Bundle.main.bundleIdentifier
-        return NSWorkspace.shared.runningApplications.filter {
+        return runningApplications.filter {
             $0.activationPolicy == .regular &&
             $0.bundleIdentifier != bundleID &&
             $0.isHidden &&
@@ -2472,7 +2601,7 @@ enum HideWindowsPreferences {
         var restored = 0
         var failed: [String] = []
         for app in hiddenApps {
-            if app.unhide(), waitForApp(app, hidden: false) {
+            if requestHidden(false, for: app), waitForApp(app, hidden: false) {
                 restored += 1
                 forgetHidden(app)
             } else {
@@ -2511,7 +2640,7 @@ enum HideWindowsPreferences {
 
     private static func pruneTrackedHiddenApps() {
         let bundleID = Bundle.main.bundleIdentifier
-        let liveHiddenTokens = Set(NSWorkspace.shared.runningApplications.compactMap { app -> String? in
+        let liveHiddenTokens = Set(runningApplications.compactMap { app -> String? in
             guard app.activationPolicy == .regular,
                   app.bundleIdentifier != bundleID,
                   app.isHidden
@@ -2527,12 +2656,46 @@ enum HideWindowsPreferences {
     private static func waitForApp(_ app: NSRunningApplication, hidden: Bool, timeout: TimeInterval = 0.6) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         repeat {
-            if app.isHidden == hidden {
+            if isHidden(app) == hidden {
                 return true
             }
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
         } while Date() < deadline
-        return app.isHidden == hidden
+        return isHidden(app) == hidden
+    }
+
+    static func requestHidden(_ hidden: Bool, for app: NSRunningApplication) -> Bool {
+        let request = { hidden ? app.hide() : app.unhide() }
+        if Thread.isMainThread {
+            return request()
+        }
+        var accepted = false
+        DispatchQueue.main.sync {
+            accepted = request()
+        }
+        return accepted
+    }
+
+    static func isHidden(_ app: NSRunningApplication) -> Bool {
+        if Thread.isMainThread {
+            return app.isHidden
+        }
+        var hidden = false
+        DispatchQueue.main.sync {
+            hidden = app.isHidden
+        }
+        return hidden
+    }
+
+    private static var runningApplications: [NSRunningApplication] {
+        if Thread.isMainThread {
+            return NSWorkspace.shared.runningApplications
+        }
+        var applications: [NSRunningApplication] = []
+        DispatchQueue.main.sync {
+            applications = NSWorkspace.shared.runningApplications
+        }
+        return applications
     }
 }
 

@@ -22,6 +22,20 @@ enum DiagnosticRedactor {
         for home in Set(homeCandidates).sorted(by: { $0.count > $1.count }) {
             redacted = redacted.replacingOccurrences(of: home, with: "~")
         }
+        let homeRootPatterns = [
+            ["/", "Users", "/"].joined(),
+            ["/", "home", "/"].joined()
+        ]
+        for root in homeRootPatterns {
+            let pattern = NSRegularExpression.escapedPattern(for: root) + #"[^/\s]+"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(redacted.startIndex..<redacted.endIndex, in: redacted)
+            redacted = regex.stringByReplacingMatches(
+                in: redacted,
+                range: range,
+                withTemplate: "~"
+            )
+        }
         return redacted
     }
 }
@@ -136,6 +150,14 @@ enum SystemSettingsLinks {
         openSystemSettings(
             primary: "x-apple.systempreferences:com.apple.AirDrop-Handoff-Settings.extension",
             fallback: "x-apple.systempreferences:com.apple.preference.general"
+        )
+    }
+
+    @discardableResult
+    static func openFocus() -> Bool {
+        openSystemSettings(
+            primary: "x-apple.systempreferences:com.apple.Focus-Settings.extension",
+            fallback: "x-apple.systempreferences:com.apple.preference.notifications"
         )
     }
 
@@ -1671,23 +1693,22 @@ enum LoginItemManager {
 
     static var isConfiguredForCurrentApp: Bool {
         if usesServiceManagement {
-            guard configuredProgramArguments == nil else { return false }
-            return serviceManagementStatusIsEnabled
+            return serviceManagementStatusIsEnabled && !legacyRegistrationIsPresent
         }
         return configuredProgramArguments == expectedProgramArguments && launchAgentPlistIsCurrent
     }
 
     static var isServiceLoaded: Bool {
         if usesServiceManagement {
-            return serviceManagementStatusIsEnabled
+            return serviceManagementStatusIsEnabled || launchAgentServiceLoaded
         }
         return launchAgentServiceLoaded
     }
 
     static var needsRepair: Bool {
         if usesServiceManagement {
-            return configuredProgramArguments != nil
-                || launchAgentServiceLoaded
+            guard !serviceManagementStatusRequiresApproval else { return false }
+            return legacyRegistrationIsPresent
         }
         guard configuredProgramArguments != nil || launchAgentServiceLoaded else { return false }
         return !isConfiguredForCurrentApp || !isServiceLoaded
@@ -1705,6 +1726,11 @@ enum LoginItemManager {
         try setLaunchAgentEnabled(enabled)
     }
 
+    static func migrateLegacyRegistrationIfNeeded() throws {
+        guard usesServiceManagement, legacyRegistrationIsPresent else { return }
+        try setServiceManagementEnabled(true)
+    }
+
     static var diagnosticSummary: String {
         let configured = DiagnosticRedactor.redact(configuredProgramArguments?.joined(separator: " ") ?? "none")
         let expected = DiagnosticRedactor.redact(expectedProgramArguments.joined(separator: " "))
@@ -1718,7 +1744,7 @@ enum LoginItemManager {
     }
 
     private static var usesServiceManagement: Bool {
-        Bundle.main.bundleURL.pathExtension == "app" && !serviceManagementStatusIsNotFound
+        Bundle.main.bundleURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame
     }
 
     private static var serviceManagementStatusIsEnabled: Bool {
@@ -1739,13 +1765,8 @@ enum LoginItemManager {
         }
     }
 
-    private static var serviceManagementStatusIsNotFound: Bool {
-        switch SMAppService.mainApp.status {
-        case .notFound:
-            return true
-        default:
-            return false
-        }
+    private static var legacyRegistrationIsPresent: Bool {
+        configuredProgramArguments != nil || launchAgentServiceLoaded
     }
 
     private static var serviceManagementStatusText: String {
@@ -1766,12 +1787,30 @@ enum LoginItemManager {
     private static func setServiceManagementEnabled(_ enabled: Bool) throws {
         if enabled {
             switch SMAppService.mainApp.status {
+            case .notRegistered, .notFound:
+                try SMAppService.mainApp.register()
             case .enabled, .requiresApproval:
                 break
-            default:
+            @unknown default:
                 try SMAppService.mainApp.register()
             }
-            try removeLegacyLaunchAgentIfPresent()
+
+            switch SMAppService.mainApp.status {
+            case .enabled:
+                try removeLegacyLaunchAgentIfPresent()
+            case .requiresApproval:
+                // Keep a working legacy registration until the user approves the
+                // modern login item, otherwise migration can disable login startup.
+                break
+            case .notRegistered, .notFound:
+                throw NSError(domain: "MacSwitchLoginItem", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "macOS did not register Mac Switch as a login item."
+                ])
+            @unknown default:
+                throw NSError(domain: "MacSwitchLoginItem", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "macOS returned an unknown login item status."
+                ])
+            }
             return
         }
 

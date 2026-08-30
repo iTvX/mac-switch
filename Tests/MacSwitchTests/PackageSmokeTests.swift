@@ -130,7 +130,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(footerSource.contains("CompactIconButton(symbol: \"gearshape\")"))
         XCTAssertFalse(footerSource.contains(".frame(maxWidth: .infinity)"))
         XCTAssertFalse(footerSource.contains(".buttonStyle(.bordered)"))
-        XCTAssertTrue(headerSource.contains("CompactIconButton(symbol: \"gearshape\")"))
+        XCTAssertTrue(headerSource.contains("CompactIconButton(symbol: \"gearshape\", accessibilityLabel: store.text(.preferences))"))
         XCTAssertFalse(headerSource.contains("CompactIconButton(symbol: \"arrow.clockwise\""))
         XCTAssertFalse(headerSource.contains("store.refreshVisibleAsync()"))
         XCTAssertTrue(dashboardSource.contains("@State private var dashboardVisualKinds: [SwitchKind] = []"))
@@ -254,8 +254,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(controlRowSource.contains(".contextMenu"))
         XCTAssertFalse(controlRowSource.contains("Button(role: .destructive)"))
         XCTAssertFalse(views.contains("RowOrderMenu"))
-        XCTAssertFalse(views.contains("Move Up"))
-        XCTAssertFalse(views.contains("Move Down"))
+        XCTAssertTrue(views.contains(".accessibilityAction(named: Text(\"Move Up\"))"))
+        XCTAssertTrue(views.contains(".accessibilityAction(named: Text(\"Move Down\"))"))
         XCTAssertTrue(appDelegate.contains("private var currentDashboardSize: NSSize"))
         XCTAssertTrue(appDelegate.contains("visibleModeCount: store.visibleModes.count"))
         XCTAssertTrue(appDelegate.contains("window.setContentSize(size)"))
@@ -648,7 +648,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(model.contains("func switchTitle(_ kind: SwitchKind) -> String"))
 
         XCTAssertTrue(generalPreferencesSource.contains("SettingsGroup(store.text(.language))"))
-        XCTAssertTrue(generalPreferencesSource.contains("Picker(\"\", selection: $store.appLanguage)"))
+        XCTAssertTrue(generalPreferencesSource.contains("Picker(store.text(.language), selection: $store.appLanguage)"))
         XCTAssertTrue(generalPreferencesSource.contains("ForEach(AppLanguage.allCases)"))
         XCTAssertTrue(generalPreferencesSource.contains("Text(language.pickerTitle(in: store.effectiveLanguage)).tag(language)"))
         XCTAssertTrue(generalPreferencesSource.contains("Text(store.menuBarIconTitle(icon))"))
@@ -847,6 +847,7 @@ final class PackageSmokeTests: XCTestCase {
 
     func testSparkleUpdateFlowIsBundledSignedAndPublished() throws {
         let package = try String(contentsOf: packageRoot.appendingPathComponent("Package.swift"))
+        let resolvedPackage = try String(contentsOf: packageRoot.appendingPathComponent("Package.resolved"))
         let appDelegate = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/AppDelegate.swift"))
         let manager = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/SoftwareUpdateManager.swift"))
         let views = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
@@ -869,6 +870,8 @@ final class PackageSmokeTests: XCTestCase {
         let publishScript = try String(contentsOf: publishScriptURL)
 
         XCTAssertTrue(package.contains("https://github.com/sparkle-project/Sparkle"))
+        XCTAssertTrue(package.contains("from: \"2.9.6\""))
+        XCTAssertTrue(resolvedPackage.contains("\"version\" : \"2.9.6\""))
         XCTAssertTrue(package.contains(".product(name: \"Sparkle\", package: \"Sparkle\")"))
         XCTAssertTrue(manager.contains("import Sparkle"))
         XCTAssertTrue(manager.contains("SPUStandardUpdaterController"))
@@ -892,6 +895,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(manager.contains("updater.observe(\\.automaticallyChecksForUpdates"))
         XCTAssertTrue(appDelegate.contains("SoftwareUpdateManager.shared"))
         XCTAssertTrue(appDelegate.contains("softwareUpdates.start()"))
+        XCTAssertTrue(appDelegate.contains("SwitchStore(enableRuntimeServices: !Self.automatedTestMode)"))
+        XCTAssertTrue(appDelegate.contains("if !Self.automatedTestMode"))
         XCTAssertFalse(appDelegate.contains("softwareUpdates.requiresBetaChannel"))
         XCTAssertFalse(generalPreferencesSource.contains("SettingsGroup(\"Updates\")"))
         XCTAssertFalse(generalPreferencesSource.contains("softwareUpdates"))
@@ -900,7 +905,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(aboutPreferencesSource.contains("softwareUpdates.checkForUpdates()"))
         XCTAssertTrue(aboutPreferencesSource.contains("title: \"Update Channel\""))
         XCTAssertTrue(aboutPreferencesSource.contains("SoftwareUpdateChannel.allCases"))
-        XCTAssertTrue(aboutPreferencesSource.contains("Picker(\"\", selection: $softwareUpdates.updateChannel)"))
+        XCTAssertTrue(aboutPreferencesSource.contains("Picker(\"Update Channel\", selection: $softwareUpdates.updateChannel)"))
         XCTAssertFalse(aboutPreferencesSource.contains("Turn off the active mode before changing update channels."))
         XCTAssertFalse(aboutPreferencesSource.contains("softwareUpdates.hasPendingChannelSwitch"))
         XCTAssertTrue(aboutPreferencesSource.contains("automaticallyChecksForUpdates"))
@@ -916,6 +921,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(buildScript.contains("Updater.app"))
         XCTAssertTrue(buildScript.contains("Autoupdate"))
         XCTAssertTrue(buildScript.contains("BUILD_NUMBER=\"${BUILD_NUMBER:-$(date -u +%Y%m%d%H%M%S)}\""))
+        XCTAssertTrue(buildScript.contains("CFFIXED_USER_HOME=\"$SMOKE_HOME\""))
         XCTAssertTrue(buildScript.contains("Set :CFBundleVersion $BUILD_NUMBER"))
         XCTAssertTrue(buildScript.contains("test -d \"$VERIFY_DIR/$APP_NAME.app/Contents/Frameworks/Sparkle.framework\""))
 
@@ -1193,7 +1199,9 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertTrue(switches.contains("static var needsUserApproval: Bool"))
         XCTAssertTrue(switches.contains("usesServiceManagement && serviceManagementStatusRequiresApproval"))
-        XCTAssertTrue(model.contains("startAtLoginNeedsApproval = LoginItemManager.needsUserApproval"))
+        XCTAssertTrue(model.contains("let needsApproval = LoginItemManager.needsUserApproval"))
+        XCTAssertTrue(model.contains("self.startAtLoginNeedsApproval = needsApproval"))
+        XCTAssertFalse(model.contains("func refreshStartAtLoginStatus()"))
         XCTAssertTrue(model.contains("Start at Login failed: \\(failure)"))
         XCTAssertTrue(generalPreferencesSource.contains("store.startAtLoginNeedsApproval"))
         XCTAssertTrue(generalPreferencesSource.contains("store.isUpdatingStartAtLogin || store.startAtLoginNeedsApproval"))
@@ -1228,14 +1236,17 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertTrue(package.contains(".linkedFramework(\"ServiceManagement\")"))
         XCTAssertTrue(switches.contains("import ServiceManagement"))
-        XCTAssertTrue(loginItemSource.contains("Bundle.main.bundleURL.pathExtension == \"app\" && !serviceManagementStatusIsNotFound"))
+        XCTAssertTrue(loginItemSource.contains("Bundle.main.bundleURL.pathExtension.caseInsensitiveCompare(\"app\") == .orderedSame"))
         XCTAssertTrue(loginItemSource.contains("static var initialIsEnabled: Bool"))
-        XCTAssertTrue(loginItemSource.contains("private static var serviceManagementStatusIsNotFound"))
+        XCTAssertFalse(loginItemSource.contains("serviceManagementStatusIsNotFound"))
         XCTAssertTrue(loginItemSource.contains("if serviceManagementStatusIsEnabled"))
         XCTAssertFalse(loginItemSource.contains("case .enabled, .requiresApproval:\n            return true"))
         XCTAssertTrue(loginItemSource.contains("SMAppService.mainApp.register()"))
         XCTAssertTrue(loginItemSource.contains("SMAppService.mainApp.unregister()"))
         XCTAssertTrue(loginItemSource.contains("removeLegacyLaunchAgentIfPresent()"))
+        XCTAssertTrue(loginItemSource.contains("migrateLegacyRegistrationIfNeeded()"))
+        XCTAssertTrue(loginItemSource.contains("case .notRegistered, .notFound:"))
+        XCTAssertTrue(loginItemSource.contains("Keep a working legacy registration until the user approves"))
         XCTAssertTrue(loginItemSource.contains("bootstrapWithLoadedServiceRecovery()"))
         XCTAssertTrue(loginItemSource.contains("isAlreadyLoaded(result)"))
         XCTAssertTrue(loginItemSource.contains("launchAgentPlistIsCurrent"))
@@ -1750,6 +1761,21 @@ final class PackageSmokeTests: XCTestCase {
             operationPolicy.contains(".keepAwake"),
             "Keep Awake can invoke administrator pmset prompts and must not block the main thread"
         )
+        for kind in [
+            SwitchKind.screenSaver, .nightShift, .trueTone, .screenResolution,
+            .ejectDisk, .hideWindows
+        ] {
+            XCTAssertFalse(
+                operationPolicy.contains(".\(kind.rawValue)"),
+                "\(kind.title) can wait for system state and must not block the main thread"
+            )
+        }
+        for kind in [SwitchKind.nightShift, .trueTone, .screenResolution] {
+            XCTAssertFalse(
+                snapshotPolicy.contains(".\(kind.rawValue)"),
+                "\(kind.title) snapshots are serialized and can run off the main thread"
+            )
+        }
         XCTAssertTrue(snapshotPolicy.contains(".hideWindows"))
         XCTAssertTrue(keepAwakeSource.contains("DispatchWorkItem"))
         XCTAssertTrue(keepAwakeSource.contains("DispatchQueue.global(qos: .utility).asyncAfter"))
@@ -2128,7 +2154,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(hideWindowsSource.contains("store.refreshAsync(.hideWindows)"))
         XCTAssertTrue(hideWindowsSource.contains("private func showHiddenApps()"))
         XCTAssertFalse(hideWindowsSource.contains("DispatchQueue.global(qos: .utility).async"))
-        XCTAssertFalse(hideWindowsSource.contains("DispatchQueue.global(qos: .userInitiated).async"))
+        XCTAssertTrue(hideWindowsSource.contains("DispatchQueue.global(qos: .userInitiated).async"))
         XCTAssertTrue(hideWindowsSource.contains("let result = HideWindowsPreferences.unhideAll()"))
         XCTAssertTrue(hideWindowsSource.contains("if !result.failed.isEmpty"))
         XCTAssertTrue(hideWindowsSource.contains("store.lastError = \"Could not show \\(HideWindowsPreferences.joinedAppNames(result.failed)).\""))
@@ -2243,7 +2269,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(nightShiftSource.contains(".disabled(isRefreshingNightShift || isUpdatingNightShiftSchedule || store.isActionBusy(.nightShift))"))
         XCTAssertTrue(doNotDisturbSource.contains(".disabled(store.isActionBusy(.doNotDisturb))"))
         XCTAssertTrue(doNotDisturbSource.contains(".disabled(isRefreshing || store.isActionBusy(.doNotDisturb))"))
-        XCTAssertTrue(doNotDisturbSource.contains(".disabled(!allInstalled || isRefreshing || store.isActionBusy(.doNotDisturb))"))
+        XCTAssertTrue(doNotDisturbSource.contains(".disabled(!setupReady || isRefreshing || store.isActionBusy(.doNotDisturb))"))
         XCTAssertTrue(audioSource.contains(".disabled(isRefreshingDevices || store.isActionBusy(.bluetoothAudio))"))
         XCTAssertTrue(screenResolutionSource.contains(".disabled(isRefreshingDisplays || store.isActionBusy(.screenResolution))"))
         XCTAssertTrue(playMusicSource.contains(".disabled(isRefreshingPlayers || store.isActionBusy(.playMusic))"))
@@ -2320,7 +2346,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(switches.contains("private func conciseOneLineFailure"))
         XCTAssertTrue(preferencesSource.contains("conciseOneLineFailure("))
         XCTAssertFalse(preferencesSource.contains("private static func conciseFailureMessage"))
-        XCTAssertTrue(switchSource.contains("UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.stateKey)"))
+        XCTAssertTrue(switchSource.contains("UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.legacyStateKey)"))
+        XCTAssertTrue(switchSource.contains("focusStatusProvider.read()"))
+        XCTAssertTrue(switchSource.contains("isOn: isFocused"))
+        XCTAssertFalse(switchSource.contains("UserDefaults.standard.bool(forKey:"))
         XCTAssertTrue(switchSource.contains("subtitle: \"Check shortcut names\""))
         XCTAssertTrue(switchSource.contains("DoNotDisturbPreferences.invalidateInstalledShortcutsCache()"))
         XCTAssertFalse(
@@ -2797,7 +2826,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(keepAwakeDurationMenuSource.contains("Divider()"))
         XCTAssertTrue(keepAwakeDurationMenuSource.contains("Toggle(\"Keep awake when the lid is closed\""))
         XCTAssertTrue(keepAwakeDurationMenuSource.contains("KeepAwakePreferences.keepAwakeWhenLidClosed = value"))
-        let allDurationRange = try XCTUnwrap(keepAwakeDurationMenuSource.range(of: "Button(KeepAwakeDuration.indefinitely.menuTitle)"))
+        let allDurationRange = try XCTUnwrap(keepAwakeDurationMenuSource.range(of: "Text(LocalizedStringKey(KeepAwakeDuration.indefinitely.menuTitle))"))
         let lidClosedRange = try XCTUnwrap(keepAwakeDurationMenuSource.range(of: "Toggle(\"Keep awake when the lid is closed\""))
         let otherDurationsRange = try XCTUnwrap(keepAwakeDurationMenuSource.range(of: "ForEach(KeepAwakeDuration.allCases.filter { $0 != .indefinitely })"))
         XCTAssertLessThan(allDurationRange.lowerBound, lidClosedRange.lowerBound)
@@ -3288,7 +3317,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(model.contains("private func nextActionVersion(for kind: SwitchKind) -> Int"))
         XCTAssertTrue(model.contains("private func isCurrentAction(_ kind: SwitchKind, version: Int) -> Bool"))
         XCTAssertTrue(model.contains("if kind.requiresFreshStateBeforeToggle {\n            preflightToggle(kind)"))
-        XCTAssertTrue(model.contains("case .handoff, .nightShift:"))
+        XCTAssertTrue(model.contains(".bluetoothAudio, .handoff, .doNotDisturb, .nightShift,"))
         XCTAssertTrue(views.contains("openCustomize(.handoff, store: store)"))
         XCTAssertTrue(views.contains("ErrorRemediation(title: \"Open Handoff\""))
         XCTAssertTrue(model.contains("private func preflightToggle(_ kind: SwitchKind)"))
@@ -3352,10 +3381,21 @@ final class PackageSmokeTests: XCTestCase {
         _ arguments: [String],
         timeout: TimeInterval
     ) throws -> (status: Int32, output: String, error: String, combinedOutput: String) {
+        let isolatedHome = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-switch-test-home-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: isolatedHome.appendingPathComponent("Library/Preferences", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: isolatedHome) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
         process.currentDirectoryURL = packageRoot
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "CFFIXED_USER_HOME": isolatedHome.path
+        ]) { _, isolated in isolated }
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
