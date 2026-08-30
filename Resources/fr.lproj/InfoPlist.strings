@@ -1,0 +1,6 @@
+"NSAppleEventsUsageDescription" = "Mac Switch utilise les événements Apple pour contrôler les apps système compatibles pour l’apparence, les médias, la corbeille et le verrouillage.";
+"NSBluetoothAlwaysUsageDescription" = "Mac Switch utilise le Bluetooth pour trouver et connecter les appareils audio jumelés.";
+"NSFocusStatusUsageDescription" = "Mac Switch lit l’état Concentration pour toujours refléter l’état réel de macOS.";
+"NSInputMonitoringUsageDescription" = "Mac Switch peut bloquer temporairement le clavier pour Verrouiller le clavier et Nettoyage de l’écran.";
+"NSLocationUsageDescription" = "Mac Switch utilise votre position pour changer le mode sombre au lever et au coucher du soleil.";
+"NSLocationWhenInUseUsageDescription" = "Mac Switch utilise votre position pour changer le mode sombre au lever et au coucher du soleil.";

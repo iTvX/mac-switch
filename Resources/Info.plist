@@ -14,12 +14,25 @@
 	<string>com.maxyu.macswitch</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+		<string>zh-Hant</string>
+		<string>es</string>
+		<string>ja</string>
+		<string>ko</string>
+		<string>de</string>
+		<string>fr</string>
+		<string>it</string>
+		<string>pt</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>Mac Switch</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.4</string>
+	<string>1.1.5</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSApplicationCategoryType</key>
@@ -32,6 +45,8 @@
 	<string>Mac Switch uses Apple Events to control supported system apps for appearance, media, trash, and lock-screen actions.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Mac Switch uses Bluetooth to find and connect paired Bluetooth audio devices.</string>
+	<key>NSFocusStatusUsageDescription</key>
+	<string>Mac Switch reads Focus status so Do Not Disturb always reflects the current macOS state.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Mac Switch contributors</string>
 	<key>NSInputMonitoringUsageDescription</key>

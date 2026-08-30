@@ -56,6 +56,7 @@ enum RegressionDiagnostics {
             "CFBundleName",
             "NSAppleEventsUsageDescription",
             "NSBluetoothAlwaysUsageDescription",
+            "NSFocusStatusUsageDescription",
             "NSInputMonitoringUsageDescription",
             "NSLocationWhenInUseUsageDescription"
         ]
@@ -357,14 +358,7 @@ enum RegressionDiagnostics {
     }
 
     private static func checkActionSafetyPreferences(_ reporter: inout SelfTestReporter) {
-        let suiteName = "com.maxyu.macswitch.selftest.safety.\(UUID().uuidString)"
-        guard let defaults = UserDefaults(suiteName: suiteName) else {
-            reporter.fail("safety preferences test defaults available")
-            return
-        }
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let defaults = InMemoryUserDefaults()
 
         for kind in ActionSafetyPreferences.protectedKinds.sorted(by: { $0.title < $1.title }) {
             reporter.check(
@@ -442,6 +436,7 @@ enum RegressionDiagnostics {
             "x-apple.systempreferences:com.apple.Desktop-Settings.extension",
             "x-apple.systempreferences:com.apple.Lock-Screen-Settings.extension",
             "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices",
+            "x-apple.systempreferences:com.apple.Focus-Settings.extension",
             "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"
         ]
 
@@ -529,14 +524,7 @@ enum RegressionDiagnostics {
     }
 
     private static func checkMicrophoneVolumeRestoreIsolation(_ reporter: inout SelfTestReporter) {
-        let suiteName = "com.maxyu.macswitch.selftest.microphone.\(UUID().uuidString)"
-        guard let defaults = UserDefaults(suiteName: suiteName) else {
-            reporter.fail("microphone restore test defaults available")
-            return
-        }
-        defer {
-            defaults.removePersistentDomain(forName: suiteName)
-        }
+        let defaults = InMemoryUserDefaults()
 
         MicrophoneVolumeRestoreStore.save(0.35, for: "uid:desk", defaults: defaults)
         MicrophoneVolumeRestoreStore.save(0.8, for: "uid:travel", defaults: defaults)

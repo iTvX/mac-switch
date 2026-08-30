@@ -189,6 +189,10 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_PATH/Content
 
 cp "Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
 cp "Resources/MacSwitchIcon.icns" "$APP_PATH/Contents/Resources/MacSwitchIcon.icns"
+for localization_dir in Resources/*.lproj; do
+    [[ -d "$localization_dir" ]] || continue
+    ditto "$localization_dir" "$APP_PATH/Contents/Resources/$(basename "$localization_dir")"
+done
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP_PATH/Contents/Info.plist"
 
@@ -239,8 +243,11 @@ run_codesign --force --options runtime --timestamp \
 run_codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --self-test-safe
 if [[ "$RUN_UI_SMOKE" == "1" ]]; then
-    "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --ui-smoke-test
-    "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --dashboard-smoke-test
+    SMOKE_HOME="$(mktemp -d)"
+    mkdir -p "$SMOKE_HOME/Library/Preferences"
+    CFFIXED_USER_HOME="$SMOKE_HOME" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --ui-smoke-test
+    CFFIXED_USER_HOME="$SMOKE_HOME" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --dashboard-smoke-test
+    rm -rf "$SMOKE_HOME"
 fi
 spctl --assess --type execute --verbose=4 "$APP_PATH" || true
 
@@ -249,6 +256,10 @@ VERIFY_DIR="$(mktemp -d)"
 ditto -x -k "$ZIP_PATH" "$VERIFY_DIR"
 test -x "$VERIFY_DIR/$APP_NAME.app/Contents/MacOS/$EXECUTABLE_NAME"
 test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/MacSwitchIcon.icns"
+for localization in en zh-Hans zh-Hant es ja ko de fr it pt; do
+    test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/$localization.lproj/Localizable.strings"
+    test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/$localization.lproj/InfoPlist.strings"
+done
 test -d "$VERIFY_DIR/$APP_NAME.app/Contents/Frameworks/Sparkle.framework"
 for arch in "${BUILD_ARCHS[@]}"; do
     lipo "$VERIFY_DIR/$APP_NAME.app/Contents/MacOS/$EXECUTABLE_NAME" -verify_arch "$arch" >/dev/null

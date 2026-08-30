@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let preferencesExpandedContentSize = NSSize(width: 980, height: 460)
     private let preferencesMinimumContentHeight: CGFloat = 320
     private let statusItemWidth: CGFloat = 20
-    private let store = SwitchStore()
+    private let store: SwitchStore
     private let softwareUpdates = SoftwareUpdateManager.shared
     private var statusItem: NSStatusItem?
     private var dashboardWindow: DashboardPanel?
@@ -27,6 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var dashboardLocalEventMonitor: Any?
     private var dashboardGlobalEventMonitor: Any?
 
+    override init() {
+        store = SwitchStore(enableRuntimeServices: !Self.automatedTestMode)
+        super.init()
+    }
+
     private struct PreferencesResizeState {
         let edge: PreferencesVerticalResizeEdge
         let initialFrame: NSRect
@@ -36,7 +41,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(Self.requiresRegularActivation ? .regular : .accessory)
-        softwareUpdates.start()
+        if !Self.automatedTestMode {
+            softwareUpdates.start()
+        }
 
         let item = NSStatusBar.system.statusItem(withLength: statusItemWidth)
         statusItem = item
@@ -106,6 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private static var dashboardSmokeMode: Bool {
         CommandLine.arguments.contains("--dashboard-smoke-test")
+    }
+
+    private static var automatedTestMode: Bool {
+        uiRegressionMode || preferencesSmokeMode || dashboardSmokeMode
     }
 
     private static var requiresRegularActivation: Bool {

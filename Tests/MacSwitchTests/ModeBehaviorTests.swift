@@ -5,8 +5,7 @@ import XCTest
 @MainActor
 final class ModeBehaviorTests: XCTestCase {
     func testModeActivationPersistsAndRestoresOriginalStatesAfterRelaunch() async throws {
-        let (defaults, suiteName) = isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = InMemoryUserDefaults()
 
         let controller = FakeSystemSwitchController(states: [
             .darkMode: false,
@@ -48,8 +47,7 @@ final class ModeBehaviorTests: XCTestCase {
     }
 
     func testModeActivationFailureRollsBackCompletedChanges() async throws {
-        let (defaults, suiteName) = isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = InMemoryUserDefaults()
 
         let controller = FakeSystemSwitchController(
             states: [.darkMode: false, .stageManager: true],
@@ -80,8 +78,7 @@ final class ModeBehaviorTests: XCTestCase {
     }
 
     func testDeletingActiveCustomModeRestoresStateBeforeRemovingIt() async throws {
-        let (defaults, suiteName) = isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let defaults = InMemoryUserDefaults()
 
         let controller = FakeSystemSwitchController(states: [.darkMode: false])
         let store = SwitchStore(
@@ -137,13 +134,6 @@ final class ModeBehaviorTests: XCTestCase {
                 XCTAssertFalse(sample.contains("%2$@"), "Unexpanded placeholder for \(language.rawValue): \(sample)")
             }
         }
-    }
-
-    private func isolatedDefaults() -> (UserDefaults, String) {
-        let suiteName = "com.maxyu.macswitch.tests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        return (defaults, suiteName)
     }
 
     private func waitUntil(

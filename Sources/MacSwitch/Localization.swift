@@ -156,6 +156,28 @@ enum L10nKey: String, CaseIterable {
 }
 
 enum L10n {
+    static func localizedResource(_ key: String, locale: Locale) -> String {
+        let identifier = locale.identifier.replacingOccurrences(of: "_", with: "-").lowercased()
+        let localization: String
+        if identifier.hasPrefix("zh-hant") || identifier.hasPrefix("zh-tw") || identifier.hasPrefix("zh-hk") {
+            localization = "zh-Hant"
+        } else if identifier.hasPrefix("zh") {
+            localization = "zh-Hans"
+        } else {
+            localization = String(identifier.prefix(2))
+        }
+        guard let bundle = localizedResourceBundles[localization] else { return key }
+        let localized = bundle.localizedString(forKey: key, value: key, table: nil)
+        if localized != key {
+            return localized
+        }
+        if key.hasPrefix("Custom ") {
+            let prefix = bundle.localizedString(forKey: "Custom", value: "Custom", table: nil)
+            return "\(prefix) \(key.dropFirst("Custom ".count))"
+        }
+        return key
+    }
+
     static func text(_ key: L10nKey, language: AppLanguage) -> String {
         values[language]?[key] ?? values[.english]?[key] ?? key.rawValue
     }
@@ -242,6 +264,16 @@ enum L10n {
             return count == 1 ? "1 On" : "\(count) On"
         }
     }
+
+    private static let localizedResourceBundles: [String: Bundle] = {
+        let localizations = ["en", "zh-Hans", "zh-Hant", "es", "ja", "ko", "de", "fr", "it", "pt"]
+        return Dictionary(uniqueKeysWithValues: localizations.compactMap { localization in
+            guard let path = Bundle.main.path(forResource: localization, ofType: "lproj"),
+                  let bundle = Bundle(path: path)
+            else { return nil }
+            return (localization, bundle)
+        })
+    }()
 
     private static let values: [AppLanguage: [L10nKey: String]] = [
         .english: [

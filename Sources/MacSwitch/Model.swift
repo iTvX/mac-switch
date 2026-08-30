@@ -781,6 +781,7 @@ final class SwitchStore: ObservableObject {
     private let actionQueue = DispatchQueue(label: "com.maxyu.macswitch.switch-actions", qos: .userInitiated)
     private let bluetoothActionQueue = DispatchQueue(label: "com.maxyu.macswitch.bluetooth-audio", qos: .userInitiated)
     private var timer: Timer?
+    private var focusStatusTimer: Timer?
     private var snapshotVersions: [SwitchKind: Int] = [:]
     private var actionVersions: [SwitchKind: Int] = [:]
     private var refreshInFlight = false
@@ -949,9 +950,18 @@ final class SwitchStore: ObservableObject {
             scheduleLegacyPresetRestoration()
             timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
                 Task { @MainActor [weak self] in
+                    if self?.darkModeScheduleMode == .sunriseSunset {
+                        self?.sunScheduleProvider.requestLocationIfStale()
+                    }
                     self?.enforceDarkModeScheduleAsync()
                     self?.enforceDoNotDisturbExpirationAsync()
                     self?.refreshVisibleAsync()
+                }
+            }
+            focusStatusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, self.enabledKinds.contains(.doNotDisturb) else { return }
+                    self.refreshAsync(.doNotDisturb)
                 }
             }
         }
@@ -1062,18 +1072,11 @@ final class SwitchStore: ObservableObject {
         lastError = nil
     }
 
-    func refreshStartAtLoginStatus() {
-        isApplyingStartAtLoginState = true
-        startAtLogin = LoginItemManager.isEnabled
-        startAtLoginNeedsRepair = LoginItemManager.needsRepair
-        startAtLoginNeedsApproval = LoginItemManager.needsUserApproval
-        isApplyingStartAtLoginState = false
-    }
-
     func refreshStartAtLoginStatusAsync() {
         guard !isUpdatingStartAtLogin, !startAtLoginStatusRefreshInFlight else { return }
         startAtLoginStatusRefreshInFlight = true
         actionQueue.async { [weak self] in
+            try? LoginItemManager.migrateLegacyRegistrationIfNeeded()
             let enabled = LoginItemManager.isEnabled
             let needsRepair = LoginItemManager.needsRepair
             let needsApproval = LoginItemManager.needsUserApproval
@@ -1692,6 +1695,14 @@ final class SwitchStore: ObservableObject {
             }
             let target = !decorated.isOn
             self.actionsPreparing.remove(kind)
+            if kind == .bluetoothAudio {
+                self.snapshots[kind] = SwitchSnapshot(
+                    isOn: decorated.isOn,
+                    isAvailable: true,
+                    subtitle: target ? "Connecting..." : "Disconnecting...",
+                    warning: nil
+                )
+            }
             self.set(kind, enabled: target)
         }
 
@@ -2096,6 +2107,8 @@ final class SwitchStore: ObservableObject {
     func prepareForTermination() {
         timer?.invalidate()
         timer = nil
+        focusStatusTimer?.invalidate()
+        focusStatusTimer = nil
         cancelDoNotDisturbExpirationMonitor()
         legacyPresetRestorationWorkItem?.cancel()
         legacyPresetRestorationWorkItem = nil
@@ -2751,7 +2764,10 @@ private enum DefaultsKey {
 private extension SwitchKind {
     var requiresFreshStateBeforeToggle: Bool {
         switch self {
-        case .handoff, .nightShift:
+        case .stageManager, .hideWidgets, .muteMicrophone, .hideDesktopIcons,
+             .darkMode, .bluetoothAudio, .handoff, .doNotDisturb, .nightShift,
+             .trueTone, .playMusic, .showHiddenFiles, .screenResolution, .hideDock,
+             .lowPowerMode, .energyMode:
             return true
         default:
             return false
@@ -2760,9 +2776,7 @@ private extension SwitchKind {
 
     var operationRequiresMainThread: Bool {
         switch self {
-        case .screenSaver, .nightShift, .trueTone,
-             .screenResolution, .screenClean, .lockKeyboard, .ejectDisk,
-             .emptyPasteboard, .hideWindows:
+        case .screenClean, .lockKeyboard, .emptyPasteboard:
             return true
         default:
             return false
@@ -2771,8 +2785,7 @@ private extension SwitchKind {
 
     var snapshotRequiresMainThread: Bool {
         switch self {
-        case .nightShift, .trueTone,
-             .screenResolution, .screenClean, .lockKeyboard, .emptyPasteboard, .hideWindows:
+        case .screenClean, .lockKeyboard, .emptyPasteboard, .hideWindows:
             return true
         default:
             return false

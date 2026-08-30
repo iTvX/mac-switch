@@ -28,9 +28,13 @@ struct SunWindow: Equatable {
 final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDelegate {
     var onUpdate: (() -> Void)?
 
+    static let cacheLifetime: TimeInterval = 6 * 60 * 60
+    static let automaticRetryInterval: TimeInterval = 15 * 60
+
     private let defaults: UserDefaults
     private var manager: CLLocationManager?
     private var pendingRequest = false
+    private var lastRequestAttemptAt: Date?
     private var status: Status = .idle
 
     init(defaults: UserDefaults = .standard) {
@@ -41,7 +45,10 @@ final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDele
     var statusText: String {
         switch status {
         case .idle:
-            return cachedCoordinate == nil ? "Location is not available" : "Location ready"
+            if cachedCoordinate == nil {
+                return "Location is not available"
+            }
+            return isCacheStale() ? "Updating saved location" : "Location ready"
         case .requesting:
             return "Requesting location"
         case .ready:
@@ -55,17 +62,48 @@ final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDele
         guard defaults.object(forKey: DefaultsKey.latitude) != nil,
               defaults.object(forKey: DefaultsKey.longitude) != nil
         else { return nil }
-        return CLLocationCoordinate2D(
+        let coordinate = CLLocationCoordinate2D(
             latitude: defaults.double(forKey: DefaultsKey.latitude),
             longitude: defaults.double(forKey: DefaultsKey.longitude)
         )
+        guard CLLocationCoordinate2DIsValid(coordinate),
+              coordinate.latitude.isFinite,
+              coordinate.longitude.isFinite
+        else { return nil }
+        return coordinate
+    }
+
+    var cachedLocationUpdatedAt: Date? {
+        defaults.object(forKey: DefaultsKey.updatedAt) as? Date
+    }
+
+    func isCacheStale(at date: Date = Date(), timeZone: TimeZone = .current) -> Bool {
+        guard cachedCoordinate != nil,
+              let updatedAt = cachedLocationUpdatedAt,
+              updatedAt <= date,
+              date.timeIntervalSince(updatedAt) < Self.cacheLifetime,
+              defaults.string(forKey: DefaultsKey.timeZoneIdentifier) == timeZone.identifier
+        else { return true }
+        return false
+    }
+
+    func requestLocationIfStale(at date: Date = Date(), timeZone: TimeZone = .current) {
+        guard isCacheStale(at: date, timeZone: timeZone), !pendingRequest else { return }
+        if let lastRequestAttemptAt,
+           date.timeIntervalSince(lastRequestAttemptAt) < Self.automaticRetryInterval {
+            return
+        }
+        requestLocation()
     }
 
     func requestLocation() {
+        guard !pendingRequest else { return }
         pendingRequest = true
+        lastRequestAttemptAt = Date()
         ensureManager()
 
         guard CLLocationManager.locationServicesEnabled() else {
+            pendingRequest = false
             status = .unavailable("Location Services are off")
             notify()
             return
@@ -82,9 +120,11 @@ final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDele
             notify()
             manager.requestLocation()
         case .denied, .restricted:
+            pendingRequest = false
             status = .unavailable(manager.authorizationStatus == .denied ? "Location access denied" : "Location access restricted")
             notify()
         @unknown default:
+            pendingRequest = false
             status = .unavailable("Location is not available")
             notify()
         }
@@ -103,22 +143,30 @@ final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDele
             notify()
             manager.requestLocation()
         case .denied, .restricted:
+            pendingRequest = false
             status = .unavailable(manager.authorizationStatus == .denied ? "Location access denied" : "Location access restricted")
             notify()
         case .notDetermined:
             break
         @unknown default:
+            pendingRequest = false
             status = .unavailable("Location is not available")
             notify()
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard let location = locations.last else { return }
+        guard let location = locations.last,
+              location.horizontalAccuracy >= 0,
+              CLLocationCoordinate2DIsValid(location.coordinate)
+        else {
+            pendingRequest = false
+            status = .unavailable("Location lookup returned invalid data")
+            notify()
+            return
+        }
         pendingRequest = false
-        defaults.set(location.coordinate.latitude, forKey: DefaultsKey.latitude)
-        defaults.set(location.coordinate.longitude, forKey: DefaultsKey.longitude)
-        defaults.set(Date(), forKey: DefaultsKey.updatedAt)
+        storeCoordinate(location.coordinate, updatedAt: location.timestamp)
         status = .ready
         notify()
     }
@@ -140,6 +188,21 @@ final class SunScheduleProvider: NSObject, @preconcurrency CLLocationManagerDele
     private func notify() {
         onUpdate?()
     }
+
+    func storeCoordinate(
+        _ coordinate: CLLocationCoordinate2D,
+        updatedAt: Date = Date(),
+        timeZone: TimeZone = .current
+    ) {
+        guard CLLocationCoordinate2DIsValid(coordinate),
+              coordinate.latitude.isFinite,
+              coordinate.longitude.isFinite
+        else { return }
+        defaults.set(coordinate.latitude, forKey: DefaultsKey.latitude)
+        defaults.set(coordinate.longitude, forKey: DefaultsKey.longitude)
+        defaults.set(updatedAt, forKey: DefaultsKey.updatedAt)
+        defaults.set(timeZone.identifier, forKey: DefaultsKey.timeZoneIdentifier)
+    }
 }
 
 private extension SunScheduleProvider {
@@ -154,6 +217,7 @@ private extension SunScheduleProvider {
         static let latitude = "switch.darkMode.location.latitude"
         static let longitude = "switch.darkMode.location.longitude"
         static let updatedAt = "switch.darkMode.location.updatedAt"
+        static let timeZoneIdentifier = "switch.darkMode.location.timeZoneIdentifier"
     }
 }
 
