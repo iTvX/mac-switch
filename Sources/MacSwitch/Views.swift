@@ -168,7 +168,9 @@ struct DashboardView: View {
         }
         .coordinateSpace(name: DashboardLayout.coordinateSpaceName)
         .onPreferenceChange(DashboardRowFramePreferenceKey.self) { frames in
-            dashboardRowFrames = frames
+            MainActor.assumeIsolated {
+                dashboardRowFrames = frames
+            }
         }
         .shadow(color: .black.opacity(0.14), radius: 24, y: 12)
         .environment(\.locale, Locale(identifier: store.effectiveLanguage.localeIdentifier))

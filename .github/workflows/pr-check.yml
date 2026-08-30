@@ -45,6 +45,26 @@ jobs:
       - name: Check out source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
 
+      - name: Select Swift 6 toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ matrix.os }}" == "macos-14" ]]; then
+            xcode_path="/Applications/Xcode_16.2.app"
+            if [[ ! -d "$xcode_path" ]]; then
+              echo "::error::Expected Swift 6 toolchain at $xcode_path"
+              exit 1
+            fi
+            sudo xcode-select --switch "$xcode_path/Contents/Developer"
+          fi
+
+          swift_version="$(swift --version)"
+          echo "$swift_version"
+          if [[ ! "$swift_version" =~ Swift\ version\ 6\. ]]; then
+            echo "::error::Handoff compatibility tests require Swift 6"
+            exit 1
+          fi
+
       - name: Verify Handoff contract and behavior
         run: swift test --filter HandoffBehaviorTests
 

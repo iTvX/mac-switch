@@ -1271,7 +1271,7 @@ final class SwitchStore: ObservableObject {
             return
         }
         let kinds = Set(items.map(\.kind))
-        guard !kinds.contains(where: isActionBusy) else {
+        guard !kinds.contains(where: { kind in isActionBusy(kind) }) else {
             reportModeError(modeText(.finishSwitchBeforeChanging))
             return
         }
@@ -1347,7 +1347,7 @@ final class SwitchStore: ObservableObject {
         guard let session = activeModeSessions[mode.id] else { return }
         let kinds = Set(session.originalKinds)
         guard activeModeOperationID == nil,
-              !kinds.contains(where: isActionBusy)
+              !kinds.contains(where: { kind in isActionBusy(kind) })
         else {
             reportModeError(modeText(.finishBeforeTurningOff))
             if Self.legacyPresetModeIDs.contains(mode.id) {
