@@ -16,6 +16,8 @@ struct HandoffPreferenceState: Equatable, Sendable {
     let receiving: Bool
     let isManaged: Bool
     let didSynchronize: Bool
+    let notificationContractAvailable: Bool
+    let observesExternalChanges: Bool
 
     var isEnabled: Bool {
         advertising && receiving
@@ -23,6 +25,10 @@ struct HandoffPreferenceState: Equatable, Sendable {
 
     var isConsistent: Bool {
         advertising == receiving
+    }
+
+    var isAvailable: Bool {
+        didSynchronize && notificationContractAvailable && !isManaged
     }
 }
 
@@ -40,41 +46,77 @@ enum HandoffStatePolicy {
 }
 
 protocol HandoffPreferencesClientProtocol: AnyObject, Sendable {
+    var supportsChangeNotification: Bool { get }
     func synchronize() -> Bool
     func rawValue(for key: HandoffPreferenceKey) -> Bool?
     func effectiveValue(for key: HandoffPreferenceKey) -> Bool?
     func isForced(_ key: HandoffPreferenceKey) -> Bool
-    func setRawValue(_ value: Bool?, for key: HandoffPreferenceKey)
+    func setRawValues(advertising: Bool?, receiving: Bool?)
     func postChangeNotification() -> Bool
+    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> (any HandoffChangeObservation)?
 }
 
-private enum HandoffDarwinNotification {
-    private static let fallbackName = "LSUserActivityManagerActivityContinuationIsEnabledChangedNotification"
+protocol HandoffChangeObservation: AnyObject, Sendable {}
+
+enum HandoffDarwinNotification {
     private static let userActivityFramework = "/System/Library/PrivateFrameworks/UserActivity.framework/UserActivity"
     private static let exportedName = "UAUserActivityManagerActivityContinuationIsEnabledChangedNotification"
+    private static let maximumNameLength = 512
 
-    static let name: String = {
+    static let resolvedName: String? = {
         guard let handle = dlopen(userActivityFramework, RTLD_LAZY) else {
-            return fallbackName
+            return nil
         }
         defer { dlclose(handle) }
         guard let symbol = dlsym(handle, exportedName) else {
-            return fallbackName
+            return nil
         }
         guard let pointer = symbol.load(as: Optional<UnsafePointer<CChar>>.self) else {
-            return fallbackName
+            return nil
         }
+        let length = strnlen(pointer, maximumNameLength)
+        guard length > 0, length < maximumNameLength else { return nil }
         let resolved = String(cString: pointer)
-        return resolved.isEmpty ? fallbackName : resolved
+        guard resolved.hasSuffix("ActivityContinuationIsEnabledChangedNotification") else {
+            return nil
+        }
+        return resolved
     }()
 
+    static var isSupported: Bool { resolvedName != nil }
+
     static func post() -> Bool {
-        name.withCString { MSNotifyPost($0) == 0 }
+        guard let resolvedName else { return false }
+        return resolvedName.withCString { MSNotifyPost($0) == 0 }
+    }
+}
+
+enum HandoffRuntimeCompatibility {
+    // Global Handoff has no public setter. Fail closed until each major macOS
+    // version is verified against the native AirDrop & Continuity extension.
+    static let verifiedMajorVersions: Set<Int> = [14, 15, 26]
+
+    static var supportsCurrentSystem: Bool {
+        supports(
+            osVersion: ProcessInfo.processInfo.operatingSystemVersion,
+            notificationContractAvailable: HandoffDarwinNotification.isSupported
+        )
+    }
+
+    static func supports(
+        osVersion: OperatingSystemVersion,
+        notificationContractAvailable: Bool
+    ) -> Bool {
+        verifiedMajorVersions.contains(osVersion.majorVersion) && notificationContractAvailable
     }
 }
 
 private final class CoreFoundationHandoffPreferencesClient: HandoffPreferencesClientProtocol, @unchecked Sendable {
     private let domain = "com.apple.coreservices.useractivityd" as CFString
+
+    var supportsChangeNotification: Bool {
+        HandoffRuntimeCompatibility.supportsCurrentSystem
+    }
 
     func synchronize() -> Bool {
         CFPreferencesSynchronize(domain, kCFPreferencesCurrentUser, kCFPreferencesCurrentHost)
@@ -99,16 +141,22 @@ private final class CoreFoundationHandoffPreferencesClient: HandoffPreferencesCl
         CFPreferencesAppValueIsForced(key.rawValue as CFString, domain)
     }
 
-    func setRawValue(_ value: Bool?, for key: HandoffPreferenceKey) {
-        let preferenceValue: CFPropertyList?
-        if let value {
-            preferenceValue = value ? kCFBooleanTrue : kCFBooleanFalse
-        } else {
-            preferenceValue = nil
+    func setRawValues(advertising: Bool?, receiving: Bool?) {
+        var valuesToSet: [String: Any] = [:]
+        var keysToRemove: [String] = []
+        for (key, value) in [
+            (HandoffPreferenceKey.advertising, advertising),
+            (HandoffPreferenceKey.receiving, receiving)
+        ] {
+            if let value {
+                valuesToSet[key.rawValue] = value
+            } else {
+                keysToRemove.append(key.rawValue)
+            }
         }
-        CFPreferencesSetValue(
-            key.rawValue as CFString,
-            preferenceValue,
+        CFPreferencesSetMultiple(
+            valuesToSet as CFDictionary,
+            keysToRemove as CFArray,
             domain,
             kCFPreferencesCurrentUser,
             kCFPreferencesCurrentHost
@@ -119,6 +167,10 @@ private final class CoreFoundationHandoffPreferencesClient: HandoffPreferencesCl
         HandoffDarwinNotification.post()
     }
 
+    func observeChanges(_ handler: @escaping @Sendable () -> Void) -> (any HandoffChangeObservation)? {
+        HandoffNotificationObserver(handler: handler)
+    }
+
     private func booleanValue(_ value: CFPropertyList?) -> Bool? {
         guard let value, CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID() else {
             return nil
@@ -127,12 +179,15 @@ private final class CoreFoundationHandoffPreferencesClient: HandoffPreferencesCl
     }
 }
 
-private final class HandoffNotificationObserver: @unchecked Sendable {
+private final class HandoffNotificationObserver: HandoffChangeObservation, @unchecked Sendable {
     private var token: Int32 = -1
 
     init?(handler: @escaping @Sendable () -> Void) {
+        guard let notificationName = HandoffDarwinNotification.resolvedName else {
+            return nil
+        }
         var registeredToken: Int32 = -1
-        let status = HandoffDarwinNotification.name.withCString { name in
+        let status = notificationName.withCString { name in
             MSNotifyRegisterDispatch(name, &registeredToken, DispatchQueue.global(qos: .utility)) { _ in
                 handler()
             }
@@ -152,15 +207,29 @@ private let handoffLogger = Logger(subsystem: "com.maxyu.macswitch", category: "
 
 final class HandoffSwitch: @unchecked Sendable {
     private let client: any HandoffPreferencesClientProtocol
+    private let waitForPropagation: @Sendable () -> Void
     private let lock = NSLock()
-    private var notificationObserver: HandoffNotificationObserver?
+    private var notificationObserver: (any HandoffChangeObservation)?
+    private var observationRegistrationSucceeded: Bool?
 
-    init(client: any HandoffPreferencesClientProtocol = CoreFoundationHandoffPreferencesClient()) {
+    init(
+        client: any HandoffPreferencesClientProtocol = CoreFoundationHandoffPreferencesClient(),
+        waitForPropagation: @escaping @Sendable () -> Void = {
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+    ) {
         self.client = client
+        self.waitForPropagation = waitForPropagation
     }
 
-    func observeStatusChanges(_ handler: @escaping @Sendable () -> Void) {
-        notificationObserver = HandoffNotificationObserver(handler: handler)
+    @discardableResult
+    func observeStatusChanges(_ handler: @escaping @Sendable () -> Void) -> Bool {
+        let observer = client.observeChanges(handler)
+        lock.withLock {
+            notificationObserver = observer
+            observationRegistrationSucceeded = observer != nil
+        }
+        return observer != nil
     }
 
     func currentState() -> HandoffPreferenceState {
@@ -176,15 +245,19 @@ final class HandoffSwitch: @unchecked Sendable {
             warning = "Handoff is managed by your organization"
         } else if !state.didSynchronize {
             warning = "Handoff status could not be refreshed"
+        } else if !state.notificationContractAvailable {
+            warning = "Handoff control is unavailable on this macOS version"
         } else if !state.isConsistent {
             warning = "Handoff settings are inconsistent; toggle to repair them"
+        } else if !state.observesExternalChanges {
+            warning = "Automatic Handoff status updates are unavailable; use Refresh"
         } else {
             warning = nil
         }
 
         return SwitchSnapshot(
             isOn: state.isEnabled,
-            isAvailable: !state.isManaged,
+            isAvailable: state.isAvailable,
             subtitle: nil,
             warning: warning
         )
@@ -205,9 +278,11 @@ final class HandoffSwitch: @unchecked Sendable {
             guard initial.isEnabled != enabled || !initial.isConsistent else {
                 return nil
             }
+            guard initial.notificationContractAvailable else {
+                return "Handoff control is unavailable on this macOS version. Use AirDrop & Handoff in System Settings."
+            }
 
-            client.setRawValue(enabled, for: .advertising)
-            client.setRawValue(enabled, for: .receiving)
+            client.setRawValues(advertising: enabled, receiving: enabled)
 
             guard client.synchronize() else {
                 return rollback(
@@ -218,11 +293,7 @@ final class HandoffSwitch: @unchecked Sendable {
             }
 
             let updated = readState(synchronize: false)
-            guard updated.rawAdvertising == enabled,
-                  updated.rawReceiving == enabled,
-                  updated.advertising == enabled,
-                  updated.receiving == enabled
-            else {
+            guard state(updated, matches: enabled) else {
                 return rollback(
                     advertising: originalAdvertising,
                     receiving: originalReceiving,
@@ -235,6 +306,23 @@ final class HandoffSwitch: @unchecked Sendable {
                     advertising: originalAdvertising,
                     receiving: originalReceiving,
                     reason: "the Handoff service could not be notified"
+                )
+            }
+
+            waitForPropagation()
+            guard client.synchronize() else {
+                return rollback(
+                    advertising: originalAdvertising,
+                    receiving: originalReceiving,
+                    reason: "the updated Handoff status could not be verified"
+                )
+            }
+            let verified = readState(synchronize: false)
+            guard state(verified, matches: enabled) else {
+                return rollback(
+                    advertising: originalAdvertising,
+                    receiving: originalReceiving,
+                    reason: "the Handoff setting did not remain applied"
                 )
             }
 
@@ -259,13 +347,21 @@ final class HandoffSwitch: @unchecked Sendable {
             advertising: advertising,
             receiving: receiving,
             isManaged: client.isForced(.advertising) || client.isForced(.receiving),
-            didSynchronize: didSynchronize
+            didSynchronize: didSynchronize,
+            notificationContractAvailable: client.supportsChangeNotification,
+            observesExternalChanges: observationRegistrationSucceeded != false
         )
     }
 
+    private func state(_ state: HandoffPreferenceState, matches enabled: Bool) -> Bool {
+        state.rawAdvertising == enabled
+            && state.rawReceiving == enabled
+            && state.advertising == enabled
+            && state.receiving == enabled
+    }
+
     private func rollback(advertising: Bool?, receiving: Bool?, reason: String) -> String {
-        client.setRawValue(advertising, for: .advertising)
-        client.setRawValue(receiving, for: .receiving)
+        client.setRawValues(advertising: advertising, receiving: receiving)
         let synchronized = client.synchronize()
         let valuesRestored = client.rawValue(for: .advertising) == advertising
             && client.rawValue(for: .receiving) == receiving
