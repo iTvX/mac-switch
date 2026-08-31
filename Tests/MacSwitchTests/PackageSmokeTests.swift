@@ -1333,7 +1333,10 @@ final class PackageSmokeTests: XCTestCase {
         )
 
         XCTAssertTrue(terminateSource.contains("store.prepareForTermination()"))
-        XCTAssertTrue(storeTerminationSource.contains("timer?.invalidate()"))
+        XCTAssertTrue(storeTerminationSource.contains("cancelDarkModeScheduleMonitor()"))
+        XCTAssertTrue(storeTerminationSource.contains("cancelDoNotDisturbExpirationMonitor()"))
+        XCTAssertTrue(storeTerminationSource.contains("removeRuntimeNotificationObservers()"))
+        XCTAssertFalse(storeTerminationSource.contains("timer?.invalidate()"))
         XCTAssertTrue(storeTerminationSource.contains("controller.prepareForTermination()"))
         XCTAssertTrue(controllerTerminationSource.contains("keepAwake.setEnabled(false"))
         XCTAssertTrue(controllerTerminationSource.contains("keyboardLocker.setEnabled(false)"))
@@ -1841,6 +1844,16 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct PlayMusicPreferencesPanel",
             to: "private struct EjectDiskPreferencesPanel"
         )
+        let bluetoothSource = try extract(
+            source,
+            from: "private struct BluetoothAudioPreferencesPanel",
+            to: "private struct RecoveryNotice"
+        )
+        let doNotDisturbSource = try extract(
+            source,
+            from: "private struct DoNotDisturbPreferencesPanel",
+            to: "private struct KeepAwakePreferencesPanel"
+        )
         let accessibilitySource = try extract(
             source,
             from: "private struct AccessibilityPreferencesPanel",
@@ -1874,6 +1887,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(generalSource.contains("DispatchQueue.global(qos: .utility).async"))
         XCTAssertTrue(generalSource.contains("store.refreshAsync(.screenClean)"))
         XCTAssertTrue(generalSource.contains("store.refreshAsync(.lockKeyboard)"))
+        XCTAssertTrue(generalSource.contains("publisher(for: NSApplication.didBecomeActiveNotification)"))
         XCTAssertFalse(
             generalSource.contains("Timer.publish(every: 3"),
             "General preferences should refresh after open/user actions instead of polling while navigating settings"
@@ -1907,17 +1921,31 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(playMusicSource.contains("isRefreshingPlayers"))
         XCTAssertTrue(playMusicSource.contains("pendingPlayersRefresh"))
         XCTAssertTrue(playMusicSource.contains("DispatchQueue.global(qos: .utility).async"))
-        XCTAssertTrue(playMusicSource.contains("Timer.publish(every: 6"))
+        XCTAssertTrue(playMusicSource.contains("publisher(for: NSApplication.didBecomeActiveNotification)"))
+        XCTAssertTrue(playMusicSource.contains("publisher(for: NSWorkspace.didLaunchApplicationNotification)"))
+        XCTAssertTrue(playMusicSource.contains("publisher(for: NSWorkspace.didTerminateApplicationNotification)"))
+        XCTAssertFalse(playMusicSource.contains("Timer.publish"))
         XCTAssertFalse(playMusicSource.contains("@State private var playerInfos = PlayMusicPreferences.playerInfos"))
         XCTAssertFalse(playMusicSource.contains("return PlayMusicPreferences.launchTarget"))
+
+        XCTAssertTrue(bluetoothSource.contains("publisher(for: NSApplication.didBecomeActiveNotification)"))
+        XCTAssertTrue(bluetoothSource.contains("publisher(for: .bluetoothDeviceConnected)"))
+        XCTAssertTrue(bluetoothSource.contains("publisher(for: .bluetoothDeviceDisconnected)"))
+        XCTAssertFalse(bluetoothSource.contains("Timer.publish"))
+        XCTAssertTrue(doNotDisturbSource.contains("publisher(for: NSApplication.didBecomeActiveNotification)"))
+        XCTAssertTrue(doNotDisturbSource.contains("refreshStatus(force: true)"))
+        XCTAssertFalse(doNotDisturbSource.contains("Timer.publish"))
 
         XCTAssertTrue(accessibilitySource.contains("@State private var isTrusted = false"))
         XCTAssertTrue(accessibilitySource.contains("isCheckingTrust"))
         XCTAssertTrue(accessibilitySource.contains("pendingTrustCheck"))
         XCTAssertTrue(accessibilitySource.contains("DispatchQueue.global(qos: .utility).async"))
         XCTAssertTrue(accessibilitySource.contains("store.refreshAsync(kind)"))
+        XCTAssertTrue(accessibilitySource.contains("publisher(for: NSApplication.didBecomeActiveNotification)"))
+        XCTAssertFalse(accessibilitySource.contains("Timer.publish"))
         XCTAssertFalse(accessibilitySource.contains("@State private var isTrusted = AccessibilityPermission.isTrusted"))
         XCTAssertFalse(accessibilitySource.contains("store.refresh(kind)"))
+        XCTAssertFalse(source.contains("Timer.publish(every:"), "settings panels should not poll while left open")
 
         XCTAssertTrue(energyModeSource.contains("@State private var selectedMode = EnergyModePreferences.storedSelection"))
         XCTAssertTrue(energyModeSource.contains("DispatchQueue.global(qos: .utility).async"))
@@ -1945,16 +1973,11 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(extendedSwitches.contains("static func availableModes(current: Int?) -> Set<Int>"))
     }
 
-    func testPeriodicScheduleEnforcementDoesNotPollSystemStateOnMainThread() throws {
+    func testRuntimeSchedulingUsesOneShotEventsWithoutIdlePolling() throws {
         let model = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Model.swift"))
-        let timerSource = try extract(
-            model,
-            from: "timer = Timer.scheduledTimer",
-            to: "func setEnabled(_ kind: SwitchKind, _ enabled: Bool)"
-        )
         let darkModeSource = try extract(
             model,
-            from: "private func enforceDarkModeScheduleAsync()",
+            from: "private func reconcileDarkModeSchedule()",
             to: "private func darkModeScheduleTarget"
         )
         let doNotDisturbSource = try extract(
@@ -1965,11 +1988,17 @@ final class PackageSmokeTests: XCTestCase {
 
         XCTAssertTrue(model.contains("private var darkModeScheduleEnforcementInFlight = false"))
         XCTAssertTrue(model.contains("private var doNotDisturbExpirationEnforcementInFlight = false"))
+        XCTAssertTrue(model.contains("private var darkModeScheduleWorkItem: DispatchWorkItem?"))
         XCTAssertTrue(model.contains("private var doNotDisturbExpirationWorkItem: DispatchWorkItem?"))
+        XCTAssertTrue(model.contains("installRuntimeNotificationObservers()"))
+        XCTAssertTrue(model.contains(".NSSystemClockDidChange"))
+        XCTAssertTrue(model.contains(".NSSystemTimeZoneDidChange"))
+        XCTAssertTrue(model.contains("NSWorkspace.didWakeNotification"))
+        XCTAssertTrue(model.contains("NSApplication.didBecomeActiveNotification"))
         XCTAssertTrue(model.contains("scheduleDoNotDisturbExpirationMonitorFromDefaults()"))
-        XCTAssertTrue(timerSource.contains("enforceDarkModeScheduleAsync()"))
-        XCTAssertTrue(timerSource.contains("enforceDoNotDisturbExpirationAsync()"))
-        XCTAssertFalse(timerSource.contains("controller.snapshot"), "periodic timer should not synchronously snapshot system state")
+        XCTAssertTrue(darkModeSource.contains("DarkModeSchedulePlanner.nextTransition"))
+        XCTAssertTrue(darkModeSource.contains("DispatchQueue.main.asyncAfter"))
+        XCTAssertTrue(darkModeSource.contains("cancelDarkModeScheduleMonitor()"))
         XCTAssertTrue(darkModeSource.contains("refreshQueue.async"))
         XCTAssertTrue(darkModeSource.contains("controller.snapshot(for: .darkMode"))
         XCTAssertTrue(doNotDisturbSource.contains("refreshQueue.async"))
@@ -1979,6 +2008,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(doNotDisturbSource.contains("private func cancelDoNotDisturbExpirationMonitor()"))
         XCTAssertTrue(model.contains("defaults.removeObject(forKey: DefaultsKey.doNotDisturbEndDate)"))
         XCTAssertTrue(model.contains("cancelDoNotDisturbExpirationMonitor()"))
+        XCTAssertFalse(model.contains("Timer.scheduledTimer"), "the menu bar utility should not wake periodically while idle")
+        XCTAssertFalse(model.contains("focusStatusTimer"), "Focus status should refresh from user and app lifecycle events")
+        XCTAssertFalse(model.contains("refreshVisiblePeriodically"), "hidden dashboard state should refresh when the menu opens")
+        XCTAssertFalse(model.contains("HandoffRefreshPolicy"), "Handoff should use notifications and explicit refreshes")
         XCTAssertFalse(
             doNotDisturbSource.contains("self.defaults.removeObject(forKey: DefaultsKey.doNotDisturbEndDate)\n                if snapshot.isOn"),
             "DND expiration should not be removed before a successful off shortcut run"

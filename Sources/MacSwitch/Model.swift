@@ -7,6 +7,8 @@ extension Notification.Name {
     static let setMacSwitchPreferencesLayout = Notification.Name("setMacSwitchPreferencesLayout")
     static let resetMacSwitchDashboardTransientState = Notification.Name("resetMacSwitchDashboardTransientState")
     static let nightShiftStatusDidChange = Notification.Name("nightShiftStatusDidChange")
+    static let bluetoothDeviceConnected = Notification.Name("IOBluetoothDeviceConnected")
+    static let bluetoothDeviceDisconnected = Notification.Name("IOBluetoothDeviceDisconnected")
     static let quitMacSwitch = Notification.Name("quitMacSwitch")
 }
 
@@ -425,6 +427,46 @@ struct TimeOfDay: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+enum DarkModeSchedulePlanner {
+    static func nextTransition(
+        mode: DarkModeScheduleMode,
+        start: TimeOfDay,
+        end: TimeOfDay,
+        sunWindows: [SunWindow] = [],
+        after date: Date,
+        calendar: Calendar
+    ) -> Date? {
+        switch mode {
+        case .manual:
+            return nil
+        case .custom:
+            guard start != end else { return nil }
+            return [start, end]
+                .compactMap { nextOccurrence(of: $0, after: date, calendar: calendar) }
+                .min()
+        case .sunriseSunset:
+            return sunWindows
+                .flatMap { [$0.sunrise, $0.sunset] }
+                .filter { $0 > date }
+                .min()
+        }
+    }
+
+    private static func nextOccurrence(
+        of time: TimeOfDay,
+        after date: Date,
+        calendar: Calendar
+    ) -> Date? {
+        calendar.nextDate(
+            after: date,
+            matching: DateComponents(hour: time.hour, minute: time.minute, second: 0),
+            matchingPolicy: .nextTime,
+            repeatedTimePolicy: .first,
+            direction: .forward
+        )
+    }
+}
+
 enum MenuBarIcon: String, CaseIterable, Codable, Identifiable {
     case switches
     case sliders
@@ -725,7 +767,7 @@ final class SwitchStore: ObservableObject {
             if darkModeScheduleMode == .sunriseSunset {
                 requestDarkModeLocation()
             }
-            enforceDarkModeScheduleAsync()
+            reconcileDarkModeSchedule()
             refresh(.darkMode)
         }
     }
@@ -733,7 +775,7 @@ final class SwitchStore: ObservableObject {
     @Published var darkModeScheduleStart: TimeOfDay {
         didSet {
             saveTimeOfDay(darkModeScheduleStart, forKey: DefaultsKey.darkModeScheduleStart)
-            enforceDarkModeScheduleAsync()
+            reconcileDarkModeSchedule()
             refresh(.darkMode)
         }
     }
@@ -741,7 +783,7 @@ final class SwitchStore: ObservableObject {
     @Published var darkModeScheduleEnd: TimeOfDay {
         didSet {
             saveTimeOfDay(darkModeScheduleEnd, forKey: DefaultsKey.darkModeScheduleEnd)
-            enforceDarkModeScheduleAsync()
+            reconcileDarkModeSchedule()
             refresh(.darkMode)
         }
     }
@@ -780,8 +822,6 @@ final class SwitchStore: ObservableObject {
     private let refreshQueue = DispatchQueue(label: "com.maxyu.macswitch.snapshot-refresh", qos: .utility)
     private let actionQueue = DispatchQueue(label: "com.maxyu.macswitch.switch-actions", qos: .userInitiated)
     private let bluetoothActionQueue = DispatchQueue(label: "com.maxyu.macswitch.bluetooth-audio", qos: .userInitiated)
-    private var timer: Timer?
-    private var focusStatusTimer: Timer?
     private var snapshotVersions: [SwitchKind: Int] = [:]
     private var actionVersions: [SwitchKind: Int] = [:]
     private var refreshInFlight = false
@@ -790,13 +830,15 @@ final class SwitchStore: ObservableObject {
     private var startAtLoginStatusRefreshInFlight = false
     private var darkModeScheduleEnforcementInFlight = false
     private var doNotDisturbExpirationEnforcementInFlight = false
+    private var darkModeScheduleWorkItem: DispatchWorkItem?
+    private var darkModeScheduleGeneration = 0
     private var doNotDisturbExpirationWorkItem: DispatchWorkItem?
     private var legacyPresetRestorationWorkItem: DispatchWorkItem?
     private var scheduledFollowUpRefreshes: Set<SwitchKind> = []
     private var pendingHideAfterDeactivation: Set<SwitchKind> = []
     private var keepAwakeRestoreEndDate: Date?
     private var modeReservedKinds: Set<SwitchKind> = []
-    private var lastHandoffRefreshDate: Date?
+    private var runtimeNotificationObservers: [(center: NotificationCenter, token: NSObjectProtocol)] = []
 
     private var modeErrorMessage: String?
 
@@ -936,36 +978,21 @@ final class SwitchStore: ObservableObject {
             sunScheduleProvider.onUpdate = { [weak self] in
                 guard let self else { return }
                 darkModeLocationStatus = sunScheduleProvider.statusText
-                enforceDarkModeScheduleAsync()
+                reconcileDarkModeSchedule()
                 refresh(.darkMode)
             }
 
+            installRuntimeNotificationObservers()
             refreshVisibleAsync()
             restoreKeepAwakeIfNeeded()
-            enforceDarkModeScheduleAsync()
             scheduleDoNotDisturbExpirationMonitorFromDefaults()
             enforceDoNotDisturbExpirationAsync()
             if darkModeScheduleMode == .sunriseSunset {
                 requestDarkModeLocation()
             }
+            reconcileDarkModeSchedule()
             registerShortcuts()
             scheduleLegacyPresetRestoration()
-            timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    if self?.darkModeScheduleMode == .sunriseSunset {
-                        self?.sunScheduleProvider.requestLocationIfStale()
-                    }
-                    self?.enforceDarkModeScheduleAsync()
-                    self?.enforceDoNotDisturbExpirationAsync()
-                    self?.refreshVisiblePeriodically()
-                }
-            }
-            focusStatusTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    guard let self, self.enabledKinds.contains(.doNotDisturb) else { return }
-                    self.refreshAsync(.doNotDisturb)
-                }
-            }
         }
     }
 
@@ -1372,7 +1399,7 @@ final class SwitchStore: ObservableObject {
                 if failures.isEmpty {
                     self.activeModeSessions.removeValue(forKey: mode.id)
                     self.clearModeError()
-                    self.enforceDarkModeScheduleAsync()
+                    self.reconcileDarkModeSchedule()
                     self.enforceDoNotDisturbExpirationAsync()
                 } else {
                     self.pendingCustomModeDeletionID = nil
@@ -1943,17 +1970,6 @@ final class SwitchStore: ObservableObject {
         refreshAsync(kinds: visibleKinds)
     }
 
-    private func refreshVisiblePeriodically(now: Date = Date()) {
-        var kinds = visibleKinds
-        if !HandoffRefreshPolicy.shouldPerformPeriodicRefresh(
-            lastRefresh: lastHandoffRefreshDate,
-            now: now
-        ) {
-            kinds.removeAll { $0 == .handoff }
-        }
-        refreshAsync(kinds: kinds)
-    }
-
     func refreshAllAsync() {
         refreshAsync(kinds: SwitchKind.allCases)
     }
@@ -1965,9 +1981,6 @@ final class SwitchStore: ObservableObject {
     private func refreshAsync(kinds: [SwitchKind]) {
         let requestedKinds = Set(kinds.filter { !isActionBusy($0) })
         guard !requestedKinds.isEmpty else { return }
-        if requestedKinds.contains(.handoff) {
-            lastHandoffRefreshDate = Date()
-        }
 
         if refreshInFlight {
             pendingRefreshKinds.formUnion(requestedKinds)
@@ -2118,17 +2131,50 @@ final class SwitchStore: ObservableObject {
         return !effectiveVisible.subtracting([kind]).isEmpty
     }
 
+    private func installRuntimeNotificationObservers() {
+        observeRuntimeNotification(.NSSystemClockDidChange, center: .default)
+        observeRuntimeNotification(.NSSystemTimeZoneDidChange, center: .default)
+        observeRuntimeNotification(NSApplication.didBecomeActiveNotification, center: .default)
+        observeRuntimeNotification(NSWorkspace.didWakeNotification, center: NSWorkspace.shared.notificationCenter)
+    }
+
+    private func observeRuntimeNotification(_ name: Notification.Name, center: NotificationCenter) {
+        let token = center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleRuntimeContextChange()
+            }
+        }
+        runtimeNotificationObservers.append((center, token))
+    }
+
+    private func handleRuntimeContextChange() {
+        if darkModeScheduleMode == .sunriseSunset {
+            sunScheduleProvider.requestLocationIfStale()
+            darkModeLocationStatus = sunScheduleProvider.statusText
+        }
+        reconcileDarkModeSchedule()
+        enforceDoNotDisturbExpirationAsync()
+        if enabledKinds.contains(.doNotDisturb) {
+            refreshAsync(.doNotDisturb)
+        }
+    }
+
+    private func removeRuntimeNotificationObservers() {
+        for observer in runtimeNotificationObservers {
+            observer.center.removeObserver(observer.token)
+        }
+        runtimeNotificationObservers.removeAll()
+    }
+
     func requestDarkModeLocation() {
         sunScheduleProvider.requestLocation()
         darkModeLocationStatus = sunScheduleProvider.statusText
     }
 
     func prepareForTermination() {
-        timer?.invalidate()
-        timer = nil
-        focusStatusTimer?.invalidate()
-        focusStatusTimer = nil
+        cancelDarkModeScheduleMonitor()
         cancelDoNotDisturbExpirationMonitor()
+        removeRuntimeNotificationObservers()
         legacyPresetRestorationWorkItem?.cancel()
         legacyPresetRestorationWorkItem = nil
         controller.prepareForTermination()
@@ -2404,6 +2450,64 @@ final class SwitchStore: ObservableObject {
         }
     }
 
+    private func reconcileDarkModeSchedule() {
+        scheduleDarkModeTransitionMonitor()
+        enforceDarkModeScheduleAsync()
+    }
+
+    private func scheduleDarkModeTransitionMonitor(
+        now: Date = Date(),
+        calendar: Calendar = .autoupdatingCurrent
+    ) {
+        cancelDarkModeScheduleMonitor()
+
+        let sunWindows: [SunWindow]
+        if darkModeScheduleMode == .sunriseSunset {
+            var scheduleDates = [now]
+            if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) {
+                scheduleDates.append(tomorrow)
+            }
+            sunWindows = scheduleDates.compactMap {
+                sunScheduleProvider.sunWindow(for: $0, calendar: calendar)
+            }
+        } else {
+            sunWindows = []
+        }
+
+        guard let transitionDate = DarkModeSchedulePlanner.nextTransition(
+            mode: darkModeScheduleMode,
+            start: darkModeScheduleStart,
+            end: darkModeScheduleEnd,
+            sunWindows: sunWindows,
+            after: now,
+            calendar: calendar
+        ) else { return }
+
+        let generation = darkModeScheduleGeneration
+        let workItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.darkModeScheduleGeneration == generation else { return }
+                self.darkModeScheduleWorkItem = nil
+                if self.darkModeScheduleMode == .sunriseSunset {
+                    self.sunScheduleProvider.requestLocationIfStale()
+                    self.darkModeLocationStatus = self.sunScheduleProvider.statusText
+                }
+                self.reconcileDarkModeSchedule()
+            }
+        }
+        darkModeScheduleWorkItem = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + max(transitionDate.timeIntervalSince(now), 0.1),
+            execute: workItem
+        )
+    }
+
+    private func cancelDarkModeScheduleMonitor() {
+        darkModeScheduleGeneration += 1
+        darkModeScheduleWorkItem?.cancel()
+        darkModeScheduleWorkItem = nil
+    }
+
     private func enforceDarkModeScheduleAsync() {
         guard darkModeScheduleMode != .manual else { return }
         guard activeModeTarget(for: .darkMode) == nil else { return }
@@ -2428,7 +2532,7 @@ final class SwitchStore: ObservableObject {
                       self.activeModeTarget(for: .darkMode) == nil
                 else {
                     if self.activeModeTarget(for: .darkMode) == nil {
-                        self.enforceDarkModeScheduleAsync()
+                        self.reconcileDarkModeSchedule()
                     }
                     return
                 }
@@ -2765,15 +2869,6 @@ final class SwitchStore: ObservableObject {
               (0...59).contains(value.minute)
         else { return defaultValue }
         return value
-    }
-}
-
-enum HandoffRefreshPolicy {
-    static let periodicInterval: TimeInterval = 5 * 60
-
-    static func shouldPerformPeriodicRefresh(lastRefresh: Date?, now: Date) -> Bool {
-        guard let lastRefresh else { return true }
-        return now.timeIntervalSince(lastRefresh) >= periodicInterval
     }
 }
 

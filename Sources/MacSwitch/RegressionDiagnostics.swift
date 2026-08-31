@@ -327,14 +327,6 @@ enum RegressionDiagnostics {
             HandoffRuntimeCompatibility.supportsCurrentSystem,
             "Handoff recognizes the current macOS preference and notification contract"
         )
-        let now = Date(timeIntervalSince1970: 10_000)
-        reporter.check(
-            !HandoffRefreshPolicy.shouldPerformPeriodicRefresh(
-                lastRefresh: now.addingTimeInterval(-(HandoffRefreshPolicy.periodicInterval - 1)),
-                now: now
-            ),
-            "Handoff avoids frequent forced preference synchronization"
-        )
     }
 
     private static func checkShortcutValidation(_ reporter: inout SelfTestReporter) {
@@ -579,6 +571,33 @@ enum RegressionDiagnostics {
                 "sun schedule aligns events to the requested local day for \(testCase.0)"
             )
         }
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let current = utc.date(from: DateComponents(year: 2026, month: 6, day: 21, hour: 23))
+        let expected = utc.date(from: DateComponents(year: 2026, month: 6, day: 22, hour: 7))
+        let next = current.flatMap {
+            DarkModeSchedulePlanner.nextTransition(
+                mode: .custom,
+                start: .defaultDarkStart,
+                end: .defaultDarkEnd,
+                after: $0,
+                calendar: utc
+            )
+        }
+        reporter.check(next == expected, "dark mode schedule uses the next exact boundary across midnight")
+        reporter.check(
+            current.flatMap {
+                DarkModeSchedulePlanner.nextTransition(
+                    mode: .manual,
+                    start: .defaultDarkStart,
+                    end: .defaultDarkEnd,
+                    after: $0,
+                    calendar: utc
+                )
+            } == nil,
+            "manual dark mode scheduling creates no background deadline"
+        )
     }
 
     private static func checkDefaultVisibility(_ reporter: inout SelfTestReporter) {
