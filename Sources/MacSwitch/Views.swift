@@ -2763,6 +2763,9 @@ private struct GeneralPreferencesView: View {
             store.refreshStartAtLoginStatusAsync()
             refreshAccessibilityStatus()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshDynamicStatus(forceSwitchRefresh: true)
+        }
     }
 
     private func refreshPermissionStatusSoon() {
@@ -4531,7 +4534,13 @@ private struct BluetoothAudioPreferencesPanel: View {
             selectedAddress = BluetoothAudioPreferences.selectedAddress
             reloadDevices(resetMissingSelection: false)
         }
-        .onReceive(Timer.publish(every: 6, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            reloadDevices(resetMissingSelection: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bluetoothDeviceConnected)) { _ in
+            reloadDevices(resetMissingSelection: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .bluetoothDeviceDisconnected)) { _ in
             reloadDevices(resetMissingSelection: false)
         }
     }
@@ -5039,8 +5048,8 @@ private struct DoNotDisturbPreferencesPanel: View {
             shortcutNameRefreshWorkItem?.cancel()
             shortcutNameRefreshWorkItem = nil
         }
-        .onReceive(Timer.publish(every: 2, on: .main, in: .common).autoconnect()) { _ in
-            refreshStatus()
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshStatus(force: true)
         }
     }
 
@@ -5727,7 +5736,13 @@ private struct PlayMusicPreferencesPanel: View {
             selectedPlayer = PlayMusicPreferences.selectedPlayer
             refreshPlayers()
         }
-        .onReceive(Timer.publish(every: 6, on: .main, in: .common).autoconnect()) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshPlayers()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didLaunchApplicationNotification)) { _ in
+            refreshPlayers()
+        }
+        .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didTerminateApplicationNotification)) { _ in
             refreshPlayers()
         }
     }
@@ -6829,8 +6844,8 @@ private struct AccessibilityPreferencesPanel: View {
         .onAppear {
             refreshTrust()
         }
-        .onReceive(Timer.publish(every: 1, on: .main, in: .common).autoconnect()) { _ in
-            refreshTrust()
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshTrust(forceSwitchRefresh: true)
         }
     }
 

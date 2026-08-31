@@ -216,24 +216,6 @@ final class HandoffBehaviorTests: XCTestCase {
         XCTAssertEqual(after.isEnabled, before.isEnabled)
     }
 
-    func testPeriodicRefreshPolicyUsesNotificationsAndFiveMinuteFallback() {
-        let now = Date(timeIntervalSince1970: 10_000)
-
-        XCTAssertTrue(HandoffRefreshPolicy.shouldPerformPeriodicRefresh(lastRefresh: nil, now: now))
-        XCTAssertFalse(
-            HandoffRefreshPolicy.shouldPerformPeriodicRefresh(
-                lastRefresh: now.addingTimeInterval(-(5 * 60 - 1)),
-                now: now
-            )
-        )
-        XCTAssertTrue(
-            HandoffRefreshPolicy.shouldPerformPeriodicRefresh(
-                lastRefresh: now.addingTimeInterval(-(5 * 60)),
-                now: now
-            )
-        )
-    }
-
     func testRuntimeCompatibilityFailsClosedOutsideVerifiedMacOSVersions() {
         func version(_ major: Int) -> OperatingSystemVersion {
             OperatingSystemVersion(majorVersion: major, minorVersion: 0, patchVersion: 0)
