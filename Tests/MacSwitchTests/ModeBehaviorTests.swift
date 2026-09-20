@@ -4,6 +4,15 @@ import XCTest
 
 @MainActor
 final class ModeBehaviorTests: XCTestCase {
+    func testMenuTitlesPreserveLongAndMultilingualNames() {
+        for title in ["Interview", "Interview Preparation", "面试准备：系统设计与架构", "👩🏽‍💻 Deep Work"] {
+            let mode = SwitchModeDefinition(id: .custom(), title: "  \(title)  ", subtitle: "", symbolName: "square.stack", items: [])
+            XCTAssertEqual(mode.compactTitle, title)
+        }
+        let blank = SwitchModeDefinition(id: .custom(), title: " \n ", subtitle: "", symbolName: "square.stack", items: [])
+        XCTAssertEqual(blank.compactTitle, "Mode")
+    }
+
     func testModeActivationPersistsAndRestoresOriginalStatesAfterRelaunch() async throws {
         let defaults = InMemoryUserDefaults()
 

@@ -52,9 +52,12 @@ Choose which switches appear in the menu, hide what you do not use, and drag vis
 Mac Switch only asks for macOS permissions needed by the features you use:
 
 - Apple Events: Dark Mode, Play Music, Empty Trash, and fallback Lock Screen actions.
-- Accessibility/Input Monitoring: Lock Keyboard and Screen Cleaning event suppression.
+- Accessibility/Input Monitoring: Lock Keyboard and Screen Cleaning event suppression, plus Do Not Disturb control through Control Center.
+- Focus Status: reading the current Focus state for Do Not Disturb.
 - Bluetooth: paired audio device listing and connection.
 - Location: sunrise/sunset Dark Mode scheduling.
+
+Do Not Disturb works through Control Center after granting Accessibility and Focus Status access. Creating shortcuts is optional; existing custom Focus on/off shortcut names can still be configured in Customize > Do Not Disturb.
 
 ## Official Releases
 

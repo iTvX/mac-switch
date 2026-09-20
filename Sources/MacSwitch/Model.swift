@@ -174,10 +174,7 @@ struct SwitchModeDefinition: Identifiable, Codable, Equatable, Sendable {
 
     var compactTitle: String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count <= 8 {
-            return trimmed.isEmpty ? "Mode" : trimmed
-        }
-        return String(trimmed.prefix(8))
+        return trimmed.isEmpty ? "Mode" : trimmed
     }
 }
 

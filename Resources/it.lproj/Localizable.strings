@@ -200,3 +200,15 @@
 "Visible" = "Visibile";
 "Record Shortcut" = "Registra abbreviazione";
 "Type shortcut..." = "Digita l’abbreviazione...";
+
+/* Do Not Disturb control */
+"Control Center" = "Centro di Controllo";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Consenti l’accesso ad Accessibilità per controllare Non disturbare senza comandi rapidi.";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Facoltativo: inserisci i nomi dei comandi rapidi per attivare e disattivare Full immersion al posto del Centro di Controllo.";
+"Ready. Do Not Disturb uses Control Center." = "Pronto. Non disturbare usa il Centro di Controllo.";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Controlla Non disturbare dal Centro di Controllo o scegli i tuoi comandi rapidi di Full immersion.";
+"Could not open Control Center for Do Not Disturb." = "Impossibile aprire il Centro di Controllo per Non disturbare.";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "Non disturbare non è stato trovato nel Centro di Controllo. Apri le impostazioni di Full immersion o configura i comandi rapidi.";
+"Could not read Do Not Disturb in Control Center." = "Impossibile leggere lo stato di Non disturbare nel Centro di Controllo.";
+"Could not change Do Not Disturb in Control Center." = "Impossibile modificare Non disturbare nel Centro di Controllo.";
+"macOS did not confirm the Do Not Disturb change." = "macOS non ha confermato la modifica di Non disturbare.";

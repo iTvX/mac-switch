@@ -200,3 +200,15 @@
 "Visible" = "Sichtbar";
 "Record Shortcut" = "Kurzbefehl aufnehmen";
 "Type shortcut..." = "Kurzbefehl eingeben...";
+
+/* Do Not Disturb control */
+"Control Center" = "Kontrollzentrum";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Erlaube den Zugriff auf Bedienungshilfen, um „Nicht stören“ ohne Kurzbefehle zu steuern.";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Optional: Gib die Namen deiner Kurzbefehle zum Ein- und Ausschalten des Fokus ein, um sie statt des Kontrollzentrums zu verwenden.";
+"Ready. Do Not Disturb uses Control Center." = "Bereit. „Nicht stören“ verwendet das Kontrollzentrum.";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Steuere „Nicht stören“ über das Kontrollzentrum oder wähle eigene Fokus-Kurzbefehle.";
+"Could not open Control Center for Do Not Disturb." = "Das Kontrollzentrum für „Nicht stören“ konnte nicht geöffnet werden.";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "„Nicht stören“ wurde im Kontrollzentrum nicht gefunden. Öffne die Fokus-Einstellungen oder richte Fokus-Kurzbefehle ein.";
+"Could not read Do Not Disturb in Control Center." = "Der Status von „Nicht stören“ im Kontrollzentrum konnte nicht gelesen werden.";
+"Could not change Do Not Disturb in Control Center." = "„Nicht stören“ konnte im Kontrollzentrum nicht geändert werden.";
+"macOS did not confirm the Do Not Disturb change." = "macOS hat die Änderung von „Nicht stören“ nicht bestätigt.";
