@@ -1604,11 +1604,13 @@ enum ProcessRunner {
     static func run(
         _ executable: String,
         _ arguments: [String],
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        nullInput: Bool = false
     ) -> (status: Int32, output: String, error: String) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        if nullInput { process.standardInput = FileHandle.nullDevice }
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()

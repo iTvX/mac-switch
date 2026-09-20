@@ -32,7 +32,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.10</string>
+	<string>1.1.11</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSApplicationCategoryType</key>
@@ -45,8 +45,6 @@
 	<string>Mac Switch uses Apple Events to control supported system apps for appearance, media, trash, and lock-screen actions.</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Mac Switch uses Bluetooth to find and connect paired Bluetooth audio devices.</string>
-	<key>NSFocusStatusUsageDescription</key>
-	<string>Mac Switch reads Focus status so Do Not Disturb always reflects the current macOS state.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 Mac Switch contributors</string>
 	<key>NSInputMonitoringUsageDescription</key>

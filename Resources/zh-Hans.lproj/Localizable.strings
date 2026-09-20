@@ -201,16 +201,14 @@
 "Record Shortcut" = "录制快捷键";
 "Type shortcut..." = "请按下快捷键…";
 
-/* Do Not Disturb control */
-"Control Center" = "控制中心";
-"Allow Accessibility access to control Do Not Disturb without shortcuts." = "允许辅助功能访问，即可无需快捷指令控制勿扰模式。";
-"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "可选：输入用于开启和关闭专注模式的快捷指令名称，以替代控制中心。";
-"Ready. Do Not Disturb uses Control Center." = "已就绪。勿扰模式通过控制中心控制。";
-"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "通过控制中心控制勿扰模式，或选择自己的专注模式快捷指令。";
-"Could not open Control Center for Do Not Disturb." = "无法打开控制中心来控制勿扰模式。";
-"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "无法在控制中心找到勿扰模式。请打开专注模式设置或配置专注模式快捷指令。";
-"Could not read Do Not Disturb in Control Center." = "无法读取控制中心的勿扰模式状态。";
-"Could not change Do Not Disturb in Control Center." = "无法更改控制中心的勿扰模式状态。";
-"macOS did not confirm the Do Not Disturb change." = "macOS 未确认勿扰模式的更改。";
-"Checked when used" = "使用时确认状态";
-"Do Not Disturb uses Control Center; Focus Status access is optional." = "勿扰模式通过控制中心控制，无需授权专注状态。";
+/* Do Not Disturb shortcuts */
+"Install" = "安装";
+"Reinstall" = "重新安装";
+"Not installed" = "未安装";
+"Verify Setup" = "验证设置";
+"Install these two shortcuts once. Mac Switch then controls Do Not Disturb in the background." = "只需安装这两个快捷指令一次，Mac Switch 即可在后台控制勿扰模式。";
+"After adding both, verify setup. Verification briefly turns Do Not Disturb on, then restores it to off. Turn off any active Focus before the first verification." = "添加两个快捷指令后，请验证设置。验证会短暂开启勿扰模式，然后恢复为关闭。首次验证前，请关闭当前专注模式。";
+"Ready. Do Not Disturb runs in the background." = "已就绪。勿扰模式将在后台运行。";
+"Both shortcuts are installed. Verify setup to continue." = "两个快捷指令均已安装。请验证设置以继续。";
+"Add both shortcuts, then return here to verify setup." = "添加两个快捷指令后，返回此处验证设置。";
+"Control Do Not Disturb in the background with two installed shortcuts." = "通过两个已安装的快捷指令在后台控制勿扰模式。";

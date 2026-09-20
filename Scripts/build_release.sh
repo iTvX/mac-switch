@@ -189,6 +189,11 @@ install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_PATH/Content
 
 cp "Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
 cp "Resources/MacSwitchIcon.icns" "$APP_PATH/Contents/Resources/MacSwitchIcon.icns"
+mkdir -p "$APP_PATH/Contents/Resources/Shortcuts"
+for shortcut in Resources/Shortcuts/*.wflow; do
+    /usr/bin/shortcuts sign --mode anyone --input "$shortcut" \
+        --output "$APP_PATH/Contents/Resources/Shortcuts/$(basename "${shortcut%.wflow}").shortcut"
+done
 for localization_dir in Resources/*.lproj; do
     [[ -d "$localization_dir" ]] || continue
     ditto "$localization_dir" "$APP_PATH/Contents/Resources/$(basename "$localization_dir")"
@@ -256,6 +261,9 @@ VERIFY_DIR="$(mktemp -d)"
 ditto -x -k "$ZIP_PATH" "$VERIFY_DIR"
 test -x "$VERIFY_DIR/$APP_NAME.app/Contents/MacOS/$EXECUTABLE_NAME"
 test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/MacSwitchIcon.icns"
+for shortcut in "Mac Switch DND Enable" "Mac Switch DND Disable"; do
+    test -s "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/Shortcuts/$shortcut.shortcut"
+done
 for localization in en zh-Hans zh-Hant es ja ko de fr it pt; do
     test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/$localization.lproj/Localizable.strings"
     test -f "$VERIFY_DIR/$APP_NAME.app/Contents/Resources/$localization.lproj/InfoPlist.strings"

@@ -201,16 +201,14 @@
 "Record Shortcut" = "Kurzbefehl aufnehmen";
 "Type shortcut..." = "Kurzbefehl eingeben...";
 
-/* Do Not Disturb control */
-"Control Center" = "Kontrollzentrum";
-"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Erlaube den Zugriff auf Bedienungshilfen, um „Nicht stören“ ohne Kurzbefehle zu steuern.";
-"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Optional: Gib die Namen deiner Kurzbefehle zum Ein- und Ausschalten des Fokus ein, um sie statt des Kontrollzentrums zu verwenden.";
-"Ready. Do Not Disturb uses Control Center." = "Bereit. „Nicht stören“ verwendet das Kontrollzentrum.";
-"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Steuere „Nicht stören“ über das Kontrollzentrum oder wähle eigene Fokus-Kurzbefehle.";
-"Could not open Control Center for Do Not Disturb." = "Das Kontrollzentrum für „Nicht stören“ konnte nicht geöffnet werden.";
-"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "„Nicht stören“ wurde im Kontrollzentrum nicht gefunden. Öffne die Fokus-Einstellungen oder richte Fokus-Kurzbefehle ein.";
-"Could not read Do Not Disturb in Control Center." = "Der Status von „Nicht stören“ im Kontrollzentrum konnte nicht gelesen werden.";
-"Could not change Do Not Disturb in Control Center." = "„Nicht stören“ konnte im Kontrollzentrum nicht geändert werden.";
-"macOS did not confirm the Do Not Disturb change." = "macOS hat die Änderung von „Nicht stören“ nicht bestätigt.";
-"Checked when used" = "Prüfung bei Verwendung";
-"Do Not Disturb uses Control Center; Focus Status access is optional." = "„Nicht stören“ verwendet das Kontrollzentrum; der Zugriff auf den Fokusstatus ist optional.";
+/* Do Not Disturb shortcuts */
+"Install" = "Installieren";
+"Reinstall" = "Neu installieren";
+"Not installed" = "Nicht installiert";
+"Verify Setup" = "Einrichtung prüfen";
+"Install these two shortcuts once. Mac Switch then controls Do Not Disturb in the background." = "Installiere diese beiden Kurzbefehle einmal. Mac Switch steuert „Nicht stören“ anschließend im Hintergrund.";
+"After adding both, verify setup. Verification briefly turns Do Not Disturb on, then restores it to off. Turn off any active Focus before the first verification." = "Prüfe die Einrichtung nach dem Hinzufügen. Dabei wird „Nicht stören“ kurz ein- und wieder ausgeschaltet. Deaktiviere vor der ersten Prüfung jeden aktiven Fokus.";
+"Ready. Do Not Disturb runs in the background." = "Bereit. „Nicht stören“ läuft im Hintergrund.";
+"Both shortcuts are installed. Verify setup to continue." = "Beide Kurzbefehle sind installiert. Prüfe die Einrichtung, um fortzufahren.";
+"Add both shortcuts, then return here to verify setup." = "Füge beide Kurzbefehle hinzu und kehre zur Prüfung hierher zurück.";
+"Control Do Not Disturb in the background with two installed shortcuts." = "Steuere „Nicht stören“ im Hintergrund mit zwei installierten Kurzbefehlen.";

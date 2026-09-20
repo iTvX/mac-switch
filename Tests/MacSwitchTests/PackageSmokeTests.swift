@@ -1001,7 +1001,8 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(systemSwitches.contains("final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable"))
         XCTAssertFalse(extendedSwitches.contains("nonisolated(unsafe)"))
         XCTAssertTrue(extendedSwitches.contains("private final class SizeCacheState: @unchecked Sendable"))
-        XCTAssertTrue(extendedSwitches.contains("private final class ShortcutCacheState: @unchecked Sendable"))
+        let dnd = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/DoNotDisturbShortcuts.swift"))
+        XCTAssertTrue(dnd.contains("final class DoNotDisturbShortcuts: @unchecked Sendable"))
         XCTAssertTrue(views.contains("set: { value, _ in"), "custom Binding setters should use Swift 6's transaction-aware overload")
     }
 
@@ -2312,7 +2313,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(nightShiftSource.contains(".disabled(isRefreshingNightShift || isUpdatingNightShiftSchedule || store.isActionBusy(.nightShift))"))
         XCTAssertTrue(doNotDisturbSource.contains(".disabled(store.isActionBusy(.doNotDisturb))"))
         XCTAssertTrue(doNotDisturbSource.contains(".disabled(isRefreshing || store.isActionBusy(.doNotDisturb))"))
-        XCTAssertTrue(doNotDisturbSource.contains(".disabled(!setupReady || isRefreshing || store.isActionBusy(.doNotDisturb))"))
+        XCTAssertTrue(doNotDisturbSource.contains(".disabled(!installation.allInstalled || isRefreshing || store.isActionBusy(.doNotDisturb))"))
         XCTAssertTrue(audioSource.contains(".disabled(isRefreshingDevices || store.isActionBusy(.bluetoothAudio))"))
         XCTAssertTrue(screenResolutionSource.contains(".disabled(isRefreshingDisplays || store.isActionBusy(.screenResolution))"))
         XCTAssertTrue(playMusicSource.contains(".disabled(isRefreshingPlayers || store.isActionBusy(.playMusic))"))
@@ -2334,71 +2335,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(lowPowerSource.contains(".disabled(store.isActionBusy(.lowPowerMode))"))
         XCTAssertTrue(energyModeSource.contains(".disabled(store.isActionBusy(.energyMode))"))
         XCTAssertTrue(energyModeSource.contains(".disabled(isLoadingModes || store.isActionBusy(.energyMode))"))
-    }
-
-    func testDoNotDisturbShortcutNameEditingIsDebounced() throws {
-        let source = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/Views.swift"))
-        let switches = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
-        let doNotDisturbSource = try extract(
-            source,
-            from: "private struct DoNotDisturbPreferencesPanel",
-            to: "private struct ShortcutInstallRow"
-        )
-        let preferencesSource = try extract(
-            switches,
-            from: "enum DoNotDisturbPreferences",
-            to: "struct DoNotDisturbSwitch"
-        )
-        let switchSource = try extract(
-            switches,
-            from: "struct DoNotDisturbSwitch",
-            to: "struct PlayMusicSwitch"
-        )
-
-        XCTAssertTrue(doNotDisturbSource.contains("@State private var shortcutNameRefreshWorkItem: DispatchWorkItem?"))
-        XCTAssertTrue(doNotDisturbSource.contains("scheduleShortcutNameRefresh()"))
-        XCTAssertTrue(doNotDisturbSource.contains("DispatchQueue.main.asyncAfter(deadline: .now() + 0.35"))
-        XCTAssertTrue(doNotDisturbSource.contains("refreshStatus(force: true)"))
-        XCTAssertTrue(doNotDisturbSource.contains(".onDisappear"))
-        XCTAssertFalse(doNotDisturbSource.contains("guard !allInstalled else { return }"))
-        XCTAssertTrue(doNotDisturbSource.contains("@State private var hasDistinctShortcutPair = false"))
-        XCTAssertTrue(doNotDisturbSource.contains("DoNotDisturbPreferences.shortcutConfigurationError"))
-        XCTAssertTrue(doNotDisturbSource.contains("let shortcutPair = DoNotDisturbPreferences.installedShortcutPair(in: installed)"))
-        XCTAssertTrue(doNotDisturbSource.contains("DoNotDisturbPreferences.installedShortcutName("))
-        XCTAssertTrue(doNotDisturbSource.contains(".disabled(isRefreshing || store.isActionBusy(.doNotDisturb))"))
-        XCTAssertTrue(doNotDisturbSource.contains("isDisabled: store.isActionBusy(.doNotDisturb)"))
-        XCTAssertTrue(doNotDisturbSource.contains("Ready. Using \\(shortcutPair.on) and \\(shortcutPair.off)."))
-        XCTAssertTrue(doNotDisturbSource.contains("DND On and DND Off must resolve to two different shortcuts."))
-        XCTAssertTrue(preferencesSource.contains("invalidateInstalledShortcutsCache()"))
-        XCTAssertTrue(preferencesSource.contains("shortcutCache.invalidate()"))
-        XCTAssertTrue(preferencesSource.contains("private final class ShortcutCacheState: @unchecked Sendable"))
-        XCTAssertTrue(preferencesSource.contains("static var shortcutConfigurationError: String?"))
-        XCTAssertTrue(preferencesSource.contains("Use different shortcut names for DND On and DND Off."))
-        XCTAssertTrue(preferencesSource.contains("static func installedShortcutPair(in installed: Set<String>)"))
-        XCTAssertTrue(preferencesSource.contains("static func installedShortcutName(matching candidates: [String], in installed: Set<String>) -> String?"))
-        XCTAssertTrue(preferencesSource.contains("private static func normalizedShortcutName(_ value: String) -> String"))
-        XCTAssertTrue(preferencesSource.contains("private static func shortcutMatchKey(_ value: String) -> String"))
-        XCTAssertTrue(preferencesSource.contains("private static func installedShortcutsByMatchKey(_ installed: Set<String>) -> [String: String]"))
-        XCTAssertTrue(preferencesSource.contains(".folding(options: [.caseInsensitive, .diacriticInsensitive]"))
-        XCTAssertTrue(preferencesSource.contains("let normalizedCustom = normalizedShortcutName(custom)"))
-        XCTAssertTrue(preferencesSource.contains("let names = normalizedCustom.isEmpty ? defaults : [normalizedCustom]"))
-        XCTAssertTrue(preferencesSource.contains("result.output.split(separator: \"\\n\").map { normalizedShortcutName(String($0)) }.filter { !$0.isEmpty }"))
-        XCTAssertFalse(preferencesSource.contains("([custom] + defaults)\n            .map(normalizedShortcutName)"))
-        XCTAssertFalse(preferencesSource.contains("let normalizedInstalled = Set(installed.map(normalizedShortcutName).filter { !$0.isEmpty })"))
-        XCTAssertTrue(preferencesSource.contains("guard shortcutConfigurationError == nil else { return false }"))
-        XCTAssertTrue(switches.contains("private func conciseOneLineFailure"))
-        XCTAssertTrue(preferencesSource.contains("conciseOneLineFailure("))
-        XCTAssertFalse(preferencesSource.contains("private static func conciseFailureMessage"))
-        XCTAssertTrue(switchSource.contains("UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.legacyStateKey)"))
-        XCTAssertTrue(switchSource.contains("focusStatusProvider.read()"))
-        XCTAssertTrue(switchSource.contains("isOn: isFocused"))
-        XCTAssertFalse(switchSource.contains("UserDefaults.standard.bool(forKey:"))
-        XCTAssertTrue(switchSource.contains("subtitle: \"Check shortcut names\""))
-        XCTAssertTrue(switchSource.contains("DoNotDisturbPreferences.invalidateInstalledShortcutsCache()"))
-        XCTAssertFalse(
-            doNotDisturbSource.contains("DoNotDisturbPreferences.customOnShortcutName = value\n                        refreshStatus()"),
-            "typing shortcut names should not run shortcuts list on every keypress"
-        )
     }
 
     func testScreenCleanRequiresExplicitExitAndRetainsFailSafes() throws {
@@ -2531,7 +2467,7 @@ final class PackageSmokeTests: XCTestCase {
         let resolutionPreferencesSource = try extract(
             source,
             from: "enum ScreenResolutionPreferences",
-            to: "enum DoNotDisturbPreferences"
+            to: "enum EjectDiskPreferences"
         )
         let ejectSource = try extract(
             source,
@@ -2626,7 +2562,7 @@ final class PackageSmokeTests: XCTestCase {
         let audioSource = try extract(
             extendedSwitches,
             from: "struct BluetoothAudioSwitch",
-            to: "struct DoNotDisturbSwitch"
+            to: "struct PlayMusicSwitch"
         )
         let playMusicSource = try extract(
             extendedSwitches,
@@ -2725,7 +2661,7 @@ final class PackageSmokeTests: XCTestCase {
         let audioSwitchSource = try extract(
             extendedSwitches,
             from: "struct BluetoothAudioSwitch",
-            to: "struct DoNotDisturbSwitch"
+            to: "struct PlayMusicSwitch"
         )
         let audioPanelSource = try extract(
             views,
@@ -3078,7 +3014,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("Could not open Login Items settings."))
         XCTAssertTrue(views.contains("Could not open Accessibility settings."))
         XCTAssertTrue(views.contains("Could not open Disk Utility."))
-        XCTAssertTrue(views.contains("Could not open Shortcuts."))
+        XCTAssertTrue(views.contains("Could not open the Do Not Disturb shortcut installer."))
         XCTAssertFalse(views.contains("https://www." + "i" + "cloud.com/shortcuts/"))
         XCTAssertTrue(views.contains("Could not open \\(target.displayName)."))
         XCTAssertTrue(views.contains("lowercased.contains(\"disable sleep\")"))
@@ -3090,7 +3026,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("lowercased.contains(\"globallyenabled\")"))
         XCTAssertTrue(views.contains("reportOpenResult(\n                            PlayMusicPreferences.open(target)"))
         XCTAssertTrue(views.contains("XcodeCleanPreferences.refreshSizeEstimate()"))
-        XCTAssertTrue(views.contains("store: store,\n                isDisabled: store.isActionBusy(.doNotDisturb)"))
+        XCTAssertTrue(views.contains("isDisabled: isRefreshing || store.isActionBusy(.doNotDisturb)"))
         XCTAssertTrue(dashboardBanner.contains("L10n.localizedRuntimeMessage(message, locale: locale)"))
         XCTAssertTrue(preferencesBanner.contains("L10n.localizedRuntimeMessage(message, locale: locale)"))
         XCTAssertTrue(dashboardBanner.contains(".help(localizedMessage)"))
@@ -3388,9 +3324,9 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(loginSource.contains("Label(store.text(.cancel), systemImage: \"xmark.circle\")"))
         XCTAssertFalse(loginSource.contains("cancel the pending login item"))
 
-        XCTAssertTrue(shortcutInstallSource.contains("Button(\"Open Shortcuts\")"))
-        XCTAssertTrue(shortcutInstallSource.contains("AppLinks.shortcutsApp"))
-        XCTAssertTrue(shortcutInstallSource.contains("Create or choose in Shortcuts"))
+        XCTAssertTrue(shortcutInstallSource.contains("Button(installed ? \"Reinstall\" : \"Install\")"))
+        XCTAssertTrue(shortcutInstallSource.contains("shortcut.resourceURL"))
+        XCTAssertTrue(shortcutInstallSource.contains("Not installed"))
         XCTAssertTrue(shortcutInstallSource.contains(".disabled(isDisabled)"))
         XCTAssertFalse(shortcutInstallSource.contains(".disabled(installed || isDisabled)"))
 
