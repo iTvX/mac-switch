@@ -2002,7 +2002,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(darkModeSource.contains("refreshQueue.async"))
         XCTAssertTrue(darkModeSource.contains("controller.snapshot(for: .darkMode"))
         XCTAssertTrue(doNotDisturbSource.contains("refreshQueue.async"))
-        XCTAssertTrue(doNotDisturbSource.contains("controller.snapshot(for: .doNotDisturb"))
+        XCTAssertTrue(doNotDisturbSource.contains("controller.snapshotForAction(for: .doNotDisturb"))
         XCTAssertTrue(doNotDisturbSource.contains("scheduleDoNotDisturbExpirationMonitor(for: endDate)"))
         XCTAssertTrue(doNotDisturbSource.contains("scheduleDoNotDisturbExpirationMonitor(for: currentEndDate, minimumDelay: 30)"))
         XCTAssertTrue(doNotDisturbSource.contains("private func cancelDoNotDisturbExpirationMonitor()"))

@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "Impossible de lire l’état de Ne pas déranger dans le Centre de contrôle.";
 "Could not change Do Not Disturb in Control Center." = "Impossible de modifier Ne pas déranger dans le Centre de contrôle.";
 "macOS did not confirm the Do Not Disturb change." = "macOS n’a pas confirmé la modification de Ne pas déranger.";
+"Checked when used" = "Vérifié à l’utilisation";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "Ne pas déranger utilise le Centre de contrôle ; l’accès à l’état de Concentration est facultatif.";

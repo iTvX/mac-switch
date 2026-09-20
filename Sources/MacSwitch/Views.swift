@@ -4892,7 +4892,7 @@ private struct DoNotDisturbPreferencesPanel: View {
     }
 
     private var setupReady: Bool {
-        (controlCenterReady || allInstalled) && focusStatusReady
+        controlCenterReady || (allInstalled && focusStatusReady)
     }
 
     var body: some View {
@@ -4919,7 +4919,7 @@ private struct DoNotDisturbPreferencesPanel: View {
             )
 
             HStack(spacing: 10) {
-                if focusStatus.authorization == .notDetermined {
+                if focusStatus.authorization == .notDetermined && !controlCenterReady {
                     Button {
                         requestFocusStatusAccess()
                     } label: {
@@ -4927,7 +4927,7 @@ private struct DoNotDisturbPreferencesPanel: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(isRequestingFocusStatus)
-                } else if !focusStatusReady {
+                } else if !focusStatusReady && !controlCenterReady {
                     Button {
                         reportOpenResult(
                             SystemSettingsLinks.openFocus(),
@@ -5116,13 +5116,13 @@ private struct DoNotDisturbPreferencesPanel: View {
                 offInstalled = off
                 hasDistinctShortcutPair = distinctPair
                 focusStatus = latestFocusStatus
-                statusIsError = latestFocusStatus.authorization == .denied
+                statusIsError = !nativeReady && (latestFocusStatus.authorization == .denied
                     || latestFocusStatus.authorization == .restricted
-                    || (!nativeReady && (configurationError != nil || shortcutError != nil || (on && off && !distinctPair)))
-                if !focusStatusReady {
-                    statusText = focusStatusMessage
-                } else if nativeReady {
+                    || configurationError != nil || shortcutError != nil || (on && off && !distinctPair))
+                if nativeReady {
                     statusText = "Ready. Do Not Disturb uses Control Center."
+                } else if !focusStatusReady {
+                    statusText = focusStatusMessage
                 } else if let configurationError {
                     statusText = configurationError
                 } else if let shortcutError {
@@ -5149,6 +5149,9 @@ private struct DoNotDisturbPreferencesPanel: View {
     }
 
     private var focusStatusMessage: String {
+        if controlCenterReady {
+            return "Do Not Disturb uses Control Center; Focus Status access is optional."
+        }
         switch focusStatus.authorization {
         case .notDetermined:
             return "Allow Mac Switch to read the current Focus status before using this switch."

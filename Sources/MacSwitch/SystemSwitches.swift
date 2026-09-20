@@ -272,6 +272,7 @@ enum AutomationPermission {
 protocol SystemSwitchControlling: AnyObject, Sendable {
     var onExternalChange: (@Sendable (SwitchKind) -> Void)? { get set }
     func snapshot(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot
+    func snapshotForAction(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot
     func set(_ kind: SwitchKind, enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult
     func setKeepAwake(
         enabled: Bool,
@@ -280,6 +281,12 @@ protocol SystemSwitchControlling: AnyObject, Sendable {
     ) -> SwitchOperationResult
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult
     func prepareForTermination()
+}
+
+extension SystemSwitchControlling {
+    func snapshotForAction(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot {
+        snapshot(for: kind, keepAwakeDuration: keepAwakeDuration)
+    }
 }
 
 // Calls are partitioned between serial worker queues and the main thread by SwitchStore.
@@ -295,7 +302,7 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
     private let screenSaver = ScreenSaverSwitch()
     private let bluetoothAudio = BluetoothAudioSwitch()
     private let handoff = HandoffSwitch()
-    private let doNotDisturb = DoNotDisturbSwitch()
+    private let doNotDisturb: DoNotDisturbSwitch
     private let nightShift = NightShiftSwitch.shared
     private let trueTone = TrueToneSwitch()
     private let playMusic = PlayMusicSwitch()
@@ -322,7 +329,8 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
         }
     }()
 
-    init() {
+    init(doNotDisturb: DoNotDisturbSwitch = DoNotDisturbSwitch()) {
+        self.doNotDisturb = doNotDisturb
         keepAwake.onExpired = { [weak self] in
             self?.onExternalChange?(.keepAwake)
         }
@@ -333,6 +341,11 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
         handoff.observeStatusChanges { [weak self] in
             self?.onExternalChange?(.handoff)
         }
+    }
+
+    func snapshotForAction(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot {
+        if kind == .doNotDisturb { return doNotDisturb.snapshotForAction() }
+        return snapshot(for: kind, keepAwakeDuration: keepAwakeDuration)
     }
 
     func snapshot(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot {
@@ -428,8 +441,7 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
             let error = handoff.setEnabled(enabled)
             return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
         case .doNotDisturb:
-            let error = doNotDisturb.setEnabled(enabled)
-            return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
+            return doNotDisturb.set(enabled)
         case .nightShift:
             let error = nightShift.setEnabled(enabled)
             return SwitchOperationResult(snapshot: snapshot(for: kind, keepAwakeDuration: keepAwakeDuration), error: error)
