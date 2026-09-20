@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "Could not read Do Not Disturb in Control Center.";
 "Could not change Do Not Disturb in Control Center." = "Could not change Do Not Disturb in Control Center.";
 "macOS did not confirm the Do Not Disturb change." = "macOS did not confirm the Do Not Disturb change.";
+"Checked when used" = "Checked when used";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "Do Not Disturb uses Control Center; Focus Status access is optional.";

@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드 상태를 읽을 수 없습니다.";
 "Could not change Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드를 변경할 수 없습니다.";
 "macOS did not confirm the Do Not Disturb change." = "macOS가 방해금지 모드 변경을 확인하지 못했습니다.";
+"Checked when used" = "사용 시 상태 확인";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "방해금지 모드는 제어 센터를 사용합니다. 집중 모드 상태 접근은 선택 사항입니다.";

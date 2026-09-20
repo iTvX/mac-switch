@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "Der Status von „Nicht stören“ im Kontrollzentrum konnte nicht gelesen werden.";
 "Could not change Do Not Disturb in Control Center." = "„Nicht stören“ konnte im Kontrollzentrum nicht geändert werden.";
 "macOS did not confirm the Do Not Disturb change." = "macOS hat die Änderung von „Nicht stören“ nicht bestätigt.";
+"Checked when used" = "Prüfung bei Verwendung";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "„Nicht stören“ verwendet das Kontrollzentrum; der Zugriff auf den Fokusstatus ist optional.";

@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "コントロールセンターのおやすみモードの状態を読み取れませんでした。";
 "Could not change Do Not Disturb in Control Center." = "コントロールセンターでおやすみモードを変更できませんでした。";
 "macOS did not confirm the Do Not Disturb change." = "macOSがおやすみモードの変更を確認できませんでした。";
+"Checked when used" = "使用時に状態を確認";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "おやすみモードはコントロールセンターを使用します。集中モードの状態へのアクセスは任意です。";

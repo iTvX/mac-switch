@@ -1769,6 +1769,10 @@ struct DoNotDisturbSwitch {
     func snapshot() -> SwitchSnapshot {
         UserDefaults.standard.removeObject(forKey: DoNotDisturbPreferences.legacyStateKey)
 
+        if !hasCustomShortcuts(), controlCenter.isAvailable {
+            let state = controlCenter.lastConfirmedState
+            return switchSnapshot(isOn: state ?? false, subtitle: state == nil ? "Checked when used" : nil)
+        }
         let focusStatus = focusStatusProvider.read()
         guard focusStatus.authorization == .authorized else {
             let detail: String
@@ -1797,9 +1801,6 @@ struct DoNotDisturbSwitch {
             )
         }
 
-        if !hasCustomShortcuts(), controlCenter.isAvailable {
-            return switchSnapshot(isOn: isFocused)
-        }
         if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
             return switchSnapshot(
                 isOn: isFocused,
@@ -1821,15 +1822,44 @@ struct DoNotDisturbSwitch {
     }
 
     func setEnabled(_ enabled: Bool) -> String? {
+        set(enabled).error
+    }
+
+    /// Mode capture and toggle preflight need a fresh DND-specific observation.
+    /// INFocusStatus describes shared Focus status and can stay false with DND on.
+    func snapshotForAction() -> SwitchSnapshot {
+        if !hasCustomShortcuts(), controlCenter.isAvailable {
+            return operationResult(controlCenter.readState()).snapshot
+        }
+        return snapshot()
+    }
+
+    func set(_ enabled: Bool) -> SwitchOperationResult {
+        if !hasCustomShortcuts(), controlCenter.isAvailable {
+            return operationResult(controlCenter.setEnabled(enabled))
+        }
+        let error = setUsingShortcuts(enabled)
+        return SwitchOperationResult(snapshot: snapshot(), error: error)
+    }
+
+    private func operationResult(_ result: DoNotDisturbControlResult) -> SwitchOperationResult {
+        guard let state = result.state, result.error == nil else {
+            let error = result.error ?? "Could not read Do Not Disturb in Control Center."
+            return SwitchOperationResult(
+                snapshot: switchSnapshot(isOn: result.state ?? false, isAvailable: false, warning: error),
+                error: error
+            )
+        }
+        return SwitchOperationResult(snapshot: switchSnapshot(isOn: state), error: nil)
+    }
+
+    private func setUsingShortcuts(_ enabled: Bool) -> String? {
         let focusStatus = focusStatusProvider.read()
         guard focusStatus.authorization == .authorized else {
             return "Focus status permission is required. Open Customize > Do Not Disturb and allow access."
         }
         guard let currentlyFocused = focusStatus.isFocused else {
             return "macOS did not provide the current Focus status."
-        }
-        if !hasCustomShortcuts(), controlCenter.isAvailable {
-            return controlCenter.setEnabled(enabled)
         }
         guard currentlyFocused != enabled else { return nil }
         if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {

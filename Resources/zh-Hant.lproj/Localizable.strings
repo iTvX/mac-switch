@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "無法讀取控制中心的勿擾模式狀態。";
 "Could not change Do Not Disturb in Control Center." = "無法變更控制中心的勿擾模式狀態。";
 "macOS did not confirm the Do Not Disturb change." = "macOS 未確認勿擾模式的變更。";
+"Checked when used" = "使用時確認狀態";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "勿擾模式透過控制中心控制，不需要授權專注模式狀態。";

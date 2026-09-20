@@ -212,3 +212,5 @@
 "Could not read Do Not Disturb in Control Center." = "Impossibile leggere lo stato di Non disturbare nel Centro di Controllo.";
 "Could not change Do Not Disturb in Control Center." = "Impossibile modificare Non disturbare nel Centro di Controllo.";
 "macOS did not confirm the Do Not Disturb change." = "macOS non ha confermato la modifica di Non disturbare.";
+"Checked when used" = "Verificato all’uso";
+"Do Not Disturb uses Control Center; Focus Status access is optional." = "Non disturbare usa il Centro di Controllo; l’accesso allo stato di Full immersion è facoltativo.";

@@ -1481,7 +1481,7 @@ final class SwitchStore: ObservableObject {
         let mainKinds = kinds.filter(\.snapshotRequiresMainThread)
         let backgroundKinds = kinds.filter { !$0.snapshotRequiresMainThread }
         let captured = Dictionary(uniqueKeysWithValues: mainKinds.map { kind in
-            (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
+            (kind, controller.snapshotForAction(for: kind, keepAwakeDuration: duration))
         })
 
         let finish: @MainActor @Sendable ([SwitchKind: SwitchSnapshot]) -> Void = { [weak self] backgroundSnapshots in
@@ -1506,7 +1506,7 @@ final class SwitchStore: ObservableObject {
 
         actionQueue.async {
             let backgroundSnapshots = Dictionary(uniqueKeysWithValues: backgroundKinds.map { kind in
-                (kind, controller.snapshot(for: kind, keepAwakeDuration: duration))
+                (kind, controller.snapshotForAction(for: kind, keepAwakeDuration: duration))
             })
             Task { @MainActor in
                 finish(backgroundSnapshots)
@@ -1737,11 +1737,11 @@ final class SwitchStore: ObservableObject {
 
         if kind.snapshotRequiresMainThread {
             DispatchQueue.main.async {
-                finish(controller.snapshot(for: kind, keepAwakeDuration: duration))
+                finish(controller.snapshotForAction(for: kind, keepAwakeDuration: duration))
             }
         } else {
             actionQueue.async {
-                let snapshot = controller.snapshot(for: kind, keepAwakeDuration: duration)
+                let snapshot = controller.snapshotForAction(for: kind, keepAwakeDuration: duration)
                 Task { @MainActor in
                     finish(snapshot)
                 }
@@ -2586,7 +2586,7 @@ final class SwitchStore: ObservableObject {
         let controller = self.controller
 
         refreshQueue.async { [weak self] in
-            let snapshot = controller.snapshot(for: .doNotDisturb, keepAwakeDuration: duration)
+            let snapshot = controller.snapshotForAction(for: .doNotDisturb, keepAwakeDuration: duration)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 self.doNotDisturbExpirationEnforcementInFlight = false

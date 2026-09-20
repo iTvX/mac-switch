@@ -1,39 +1,67 @@
 import AppKit
 import ApplicationServices
 
+struct DoNotDisturbControlResult: Sendable {
+    let state: Bool?
+    let error: String?
+}
+
 protocol DoNotDisturbControlling: Sendable {
     var isAvailable: Bool { get }
-    func setEnabled(_ enabled: Bool) -> String?
+    var lastConfirmedState: Bool? { get }
+    func readState() -> DoNotDisturbControlResult
+    func setEnabled(_ enabled: Bool) -> DoNotDisturbControlResult
 }
 
 /// Controls the system's DND checkbox without requiring user-created Shortcuts.
-/// Only user actions open Control Center; availability checks never open UI.
-struct ControlCenterFocusController: DoNotDisturbControlling {
+/// Only action preflight and writes open Control Center; passive refreshes never open UI.
+final class ControlCenterFocusController: DoNotDisturbControlling, @unchecked Sendable {
     static let permissionMessage = "Allow Accessibility access to control Do Not Disturb without shortcuts."
     private static let queue = DispatchQueue(label: "com.maxyu.macswitch.control-center-focus")
     private static let dndIdentifier = "focus-mode-activity-com.apple.donotdisturb.mode.default"
 
     var isAvailable: Bool { AccessibilityPermission.isTrusted }
 
-    func setEnabled(_ enabled: Bool) -> String? {
+    // Accessed only on queue. This is an observed system value, never a requested
+    // value or a persisted preference. Passive refreshes must not open system UI.
+    private var confirmedState: Bool?
+
+    var lastConfirmedState: Bool? {
+        Self.queue.sync { confirmedState }
+    }
+
+    func readState() -> DoNotDisturbControlResult {
+        Self.queue.sync { update(nil) }
+    }
+
+    func setEnabled(_ enabled: Bool) -> DoNotDisturbControlResult {
         Self.queue.sync { update(enabled) }
     }
 
-    private func update(_ enabled: Bool) -> String? {
-        guard isAvailable else { return Self.permissionMessage }
+    private func update(_ enabled: Bool?) -> DoNotDisturbControlResult {
+        func failed(_ message: String) -> DoNotDisturbControlResult {
+            // An unverified result must not be mistaken for a successful change.
+            confirmedState = nil
+            return DoNotDisturbControlResult(state: nil, error: message)
+        }
+        func observed(_ state: Bool) -> DoNotDisturbControlResult {
+            confirmedState = state
+            return DoNotDisturbControlResult(state: state, error: nil)
+        }
+        guard isAvailable else { return failed(Self.permissionMessage) }
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").first else {
-            return "Could not open Control Center for Do Not Disturb."
+            return failed("Could not open Control Center for Do Not Disturb.")
         }
         let root = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.5)
         guard let menuItem = find("com.apple.menuextra.controlcenter", in: root) else {
-            return "Could not open Control Center for Do Not Disturb."
+            return failed("Could not open Control Center for Do Not Disturb.")
         }
 
         // Do not close a Control Center panel the user had already opened.
         let openedHere = windows(in: root).isEmpty
         if openedHere, AXUIElementPerformAction(menuItem, kAXPressAction as CFString) != .success {
-            return "Could not open Control Center for Do Not Disturb."
+            return failed("Could not open Control Center for Do Not Disturb.")
         }
         defer {
             if openedHere {
@@ -43,7 +71,7 @@ struct ControlCenterFocusController: DoNotDisturbControlling {
 
         if findInWindows(Self.dndIdentifier, root: root) == nil {
             guard let focus = waitForElement("controlcenter-focus-modes", root: root) else {
-                return "Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts."
+                return failed("Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts.")
             }
             var actionNames: CFArray?
             AXUIElementCopyActionNames(focus, &actionNames)
@@ -54,26 +82,26 @@ struct ControlCenterFocusController: DoNotDisturbControlling {
                 ?? (actions.contains(kAXShowMenuAction) ? kAXShowMenuAction : nil)
             guard let detailsAction,
                   AXUIElementPerformAction(focus, detailsAction as CFString) == .success else {
-                return "Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts."
+                return failed("Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts.")
             }
         }
 
         guard let checkbox = waitForElement(Self.dndIdentifier, root: root),
               let current = checked(checkbox) else {
-            return "Could not read Do Not Disturb in Control Center."
+            return failed("Could not read Do Not Disturb in Control Center.")
         }
-        guard current != enabled else { return nil }
+        guard let enabled, current != enabled else { return observed(current) }
         guard AXUIElementPerformAction(checkbox, kAXPressAction as CFString) == .success else {
-            return "Could not change Do Not Disturb in Control Center."
+            return failed("Could not change Do Not Disturb in Control Center.")
         }
         let deadline = Date().addingTimeInterval(3)
         repeat {
             if let updated = findInWindows(Self.dndIdentifier, root: root), checked(updated) == enabled {
-                return nil
+                return observed(enabled)
             }
             Thread.sleep(forTimeInterval: 0.1)
         } while Date() < deadline
-        return "macOS did not confirm the Do Not Disturb change."
+        return failed("macOS did not confirm the Do Not Disturb change.")
     }
 
     private func waitForElement(_ identifier: String, root: AXUIElement) -> AXUIElement? {
