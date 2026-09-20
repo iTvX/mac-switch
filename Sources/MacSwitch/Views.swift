@@ -584,7 +584,7 @@ private struct DashboardModesStrip: View {
         }
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 34)
     }
 }
@@ -662,11 +662,11 @@ private struct DashboardModeButton: View {
                 Text(mode.compactTitle)
                     .font(.system(size: 10.6, weight: .bold))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.78)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(isActive ? Color.accentColor : DashboardColors.subtleText)
             .padding(.horizontal, 6)
-            .frame(minWidth: 54, maxWidth: 72, minHeight: 27)
+            .frame(minWidth: 54, minHeight: 27)
             .background(
                 Capsule()
                     .fill(backgroundFill)
@@ -4881,6 +4881,7 @@ private struct DoNotDisturbPreferencesPanel: View {
     @State private var onShortcutName = DoNotDisturbPreferences.customOnShortcutName
     @State private var offShortcutName = DoNotDisturbPreferences.customOffShortcutName
     @State private var shortcutNameRefreshWorkItem: DispatchWorkItem?
+    @State private var controlCenterReady = false
 
     private var allInstalled: Bool {
         onInstalled && offInstalled && hasDistinctShortcutPair
@@ -4891,7 +4892,7 @@ private struct DoNotDisturbPreferencesPanel: View {
     }
 
     private var setupReady: Bool {
-        allInstalled && focusStatusReady
+        (controlCenterReady || allInstalled) && focusStatusReady
     }
 
     var body: some View {
@@ -4952,11 +4953,32 @@ private struct DoNotDisturbPreferencesPanel: View {
 
             Divider()
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Control Center")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("Allow Accessibility access to control Do Not Disturb without shortcuts.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    reportOpenResult(
+                        AccessibilityPermission.requestAndOpenSettings(),
+                        store: store,
+                        failureMessage: "Could not open Accessibility settings."
+                    )
+                } label: {
+                    Label("Open Accessibility", systemImage: "hand.raised")
+                }
+                .buttonStyle(.bordered)
+            }
+
+            Divider()
+
             VStack(alignment: .leading, spacing: 6) {
                 Text("Focus Shortcuts")
                     .font(.system(size: 15, weight: .semibold))
 
-                Text("Create Focus on/off shortcuts in Shortcuts, then enter the exact names here.")
+                Text("Optional: enter your own Focus on/off shortcut names to use them instead of Control Center.")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -5085,19 +5107,22 @@ private struct DoNotDisturbPreferencesPanel: View {
                 in: installed
             ) != nil
             let latestFocusStatus = DoNotDisturbPreferences.focusStatus
+            let nativeReady = !DoNotDisturbPreferences.hasCustomShortcuts
+                && ControlCenterFocusController().isAvailable
 
             DispatchQueue.main.async {
+                controlCenterReady = nativeReady
                 onInstalled = on
                 offInstalled = off
                 hasDistinctShortcutPair = distinctPair
                 focusStatus = latestFocusStatus
                 statusIsError = latestFocusStatus.authorization == .denied
                     || latestFocusStatus.authorization == .restricted
-                    || configurationError != nil
-                    || shortcutError != nil
-                    || (on && off && !distinctPair)
+                    || (!nativeReady && (configurationError != nil || shortcutError != nil || (on && off && !distinctPair)))
                 if !focusStatusReady {
                     statusText = focusStatusMessage
+                } else if nativeReady {
+                    statusText = "Ready. Do Not Disturb uses Control Center."
                 } else if let configurationError {
                     statusText = configurationError
                 } else if let shortcutError {
@@ -5111,7 +5136,7 @@ private struct DoNotDisturbPreferencesPanel: View {
                 } else if off {
                     statusText = "DND Off is installed. Install DND On to complete setup."
                 } else {
-                    statusText = "Waiting for both shortcuts to be installed."
+                    statusText = ControlCenterFocusController.permissionMessage
                 }
                 isRefreshing = false
                 if pendingRefresh {
@@ -6927,7 +6952,7 @@ private extension SwitchKind {
         case .handoff:
             return "Allows supported tasks and Universal Clipboard to continue between this Mac and nearby iCloud devices."
         case .doNotDisturb:
-            return "Use the Do Not Disturb options panel to configure the required Focus shortcuts."
+            return "Control Do Not Disturb through Control Center, or choose your own Focus shortcuts."
         case .nightShift:
             return "Use the Night Shift options panel to control its sunrise/sunset schedule mode."
         case .trueTone:

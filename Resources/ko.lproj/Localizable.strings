@@ -200,3 +200,15 @@
 "Visible" = "표시";
 "Record Shortcut" = "단축키 기록";
 "Type shortcut..." = "단축키를 누르세요...";
+
+/* Do Not Disturb control */
+"Control Center" = "제어 센터";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "손쉬운 사용 접근을 허용하면 단축어 없이 방해금지 모드를 제어할 수 있습니다.";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "선택 사항: 제어 센터 대신 사용할 집중 모드 켜기/끄기 단축어 이름을 입력하세요.";
+"Ready. Do Not Disturb uses Control Center." = "준비 완료. 방해금지 모드는 제어 센터를 사용합니다.";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "제어 센터에서 방해금지 모드를 제어하거나 집중 모드 단축어를 선택하세요.";
+"Could not open Control Center for Do Not Disturb." = "방해금지 모드를 위한 제어 센터를 열 수 없습니다.";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "제어 센터에서 방해금지 모드를 찾을 수 없습니다. 집중 모드 설정을 열거나 단축어를 구성하세요.";
+"Could not read Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드 상태를 읽을 수 없습니다.";
+"Could not change Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드를 변경할 수 없습니다.";
+"macOS did not confirm the Do Not Disturb change." = "macOS가 방해금지 모드 변경을 확인하지 못했습니다.";

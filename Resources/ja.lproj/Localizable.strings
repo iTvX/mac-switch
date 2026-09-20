@@ -200,3 +200,15 @@
 "Visible" = "表示";
 "Record Shortcut" = "ショートカットを記録";
 "Type shortcut..." = "ショートカットを入力...";
+
+/* Do Not Disturb control */
+"Control Center" = "コントロールセンター";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "アクセシビリティを許可すると、ショートカットなしでおやすみモードを操作できます。";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "任意：コントロールセンターの代わりに使う、集中モードのオン・オフ用ショートカット名を入力します。";
+"Ready. Do Not Disturb uses Control Center." = "準備完了。おやすみモードはコントロールセンターを使用します。";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "コントロールセンターでおやすみモードを操作するか、独自の集中モード用ショートカットを選択します。";
+"Could not open Control Center for Do Not Disturb." = "おやすみモードのコントロールセンターを開けませんでした。";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "コントロールセンターにおやすみモードが見つかりません。集中モードの設定を開くか、ショートカットを設定してください。";
+"Could not read Do Not Disturb in Control Center." = "コントロールセンターのおやすみモードの状態を読み取れませんでした。";
+"Could not change Do Not Disturb in Control Center." = "コントロールセンターでおやすみモードを変更できませんでした。";
+"macOS did not confirm the Do Not Disturb change." = "macOSがおやすみモードの変更を確認できませんでした。";

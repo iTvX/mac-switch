@@ -200,3 +200,15 @@
 "Visible" = "Visível";
 "Record Shortcut" = "Gravar atalho";
 "Type shortcut..." = "Introduza o atalho...";
+
+/* Do Not Disturb control */
+"Control Center" = "Central de Controle";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Permita o acesso à Acessibilidade para controlar Não Perturbe sem atalhos.";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Opcional: insira os nomes dos atalhos para ativar e desativar o Foco no lugar da Central de Controle.";
+"Ready. Do Not Disturb uses Control Center." = "Pronto. Não Perturbe usa a Central de Controle.";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Controle Não Perturbe pela Central de Controle ou escolha seus próprios atalhos de Foco.";
+"Could not open Control Center for Do Not Disturb." = "Não foi possível abrir a Central de Controle para Não Perturbe.";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "Não Perturbe não foi encontrado na Central de Controle. Abra os ajustes de Foco ou configure atalhos.";
+"Could not read Do Not Disturb in Control Center." = "Não foi possível ler o estado de Não Perturbe na Central de Controle.";
+"Could not change Do Not Disturb in Control Center." = "Não foi possível alterar Não Perturbe na Central de Controle.";
+"macOS did not confirm the Do Not Disturb change." = "O macOS não confirmou a alteração de Não Perturbe.";

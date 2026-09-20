@@ -200,3 +200,15 @@
 "Visible" = "Affiché";
 "Record Shortcut" = "Enregistrer le raccourci";
 "Type shortcut..." = "Saisissez le raccourci...";
+
+/* Do Not Disturb control */
+"Control Center" = "Centre de contrôle";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Autorisez l’accès à Accessibilité pour contrôler Ne pas déranger sans raccourcis.";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Facultatif : saisissez les noms de vos raccourcis d’activation et de désactivation de Concentration pour les utiliser à la place du Centre de contrôle.";
+"Ready. Do Not Disturb uses Control Center." = "Prêt. Ne pas déranger utilise le Centre de contrôle.";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Contrôlez Ne pas déranger depuis le Centre de contrôle ou choisissez vos propres raccourcis de Concentration.";
+"Could not open Control Center for Do Not Disturb." = "Impossible d’ouvrir le Centre de contrôle pour Ne pas déranger.";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "Ne pas déranger est introuvable dans le Centre de contrôle. Ouvrez les réglages de Concentration ou configurez des raccourcis.";
+"Could not read Do Not Disturb in Control Center." = "Impossible de lire l’état de Ne pas déranger dans le Centre de contrôle.";
+"Could not change Do Not Disturb in Control Center." = "Impossible de modifier Ne pas déranger dans le Centre de contrôle.";
+"macOS did not confirm the Do Not Disturb change." = "macOS n’a pas confirmé la modification de Ne pas déranger.";

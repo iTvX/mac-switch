@@ -848,6 +848,10 @@ enum DoNotDisturbPreferences {
         shortcutCandidates(custom: customOffShortcutName, defaults: [offShortcut, "DND Off", "Focus Off"])
     }
 
+    static var hasCustomShortcuts: Bool {
+        !customOnShortcutName.isEmpty || !customOffShortcutName.isEmpty
+    }
+
     static var shortcutConfigurationError: String? {
         let customOn = customOnShortcutName.trimmingCharacters(in: .whitespacesAndNewlines)
         let customOff = customOffShortcutName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1749,9 +1753,17 @@ struct BluetoothAudioSwitch {
 
 struct DoNotDisturbSwitch {
     private let focusStatusProvider: any FocusStatusProviding
+    private let controlCenter: any DoNotDisturbControlling
+    private let hasCustomShortcuts: @Sendable () -> Bool
 
-    init(focusStatusProvider: any FocusStatusProviding = SystemFocusStatusProvider.shared) {
+    init(
+        focusStatusProvider: any FocusStatusProviding = SystemFocusStatusProvider.shared,
+        controlCenter: any DoNotDisturbControlling = ControlCenterFocusController(),
+        hasCustomShortcuts: @escaping @Sendable () -> Bool = { DoNotDisturbPreferences.hasCustomShortcuts }
+    ) {
         self.focusStatusProvider = focusStatusProvider
+        self.controlCenter = controlCenter
+        self.hasCustomShortcuts = hasCustomShortcuts
     }
 
     func snapshot() -> SwitchSnapshot {
@@ -1785,6 +1797,9 @@ struct DoNotDisturbSwitch {
             )
         }
 
+        if !hasCustomShortcuts(), controlCenter.isAvailable {
+            return switchSnapshot(isOn: isFocused)
+        }
         if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
             return switchSnapshot(
                 isOn: isFocused,
@@ -1798,8 +1813,10 @@ struct DoNotDisturbSwitch {
         return switchSnapshot(
             isOn: isFocused,
             isAvailable: installed,
-            subtitle: installed ? nil : (shortcutError == nil ? "Install shortcuts" : "Shortcuts unavailable"),
-            warning: installed ? nil : (shortcutError ?? "Install shortcuts first")
+            subtitle: installed ? nil : (hasCustomShortcuts() ? "Check shortcut names" : "Accessibility permission required"),
+            warning: installed ? nil : (hasCustomShortcuts()
+                ? (shortcutError ?? "Install or choose Focus shortcuts in Customize > Do Not Disturb, then try again.")
+                : ControlCenterFocusController.permissionMessage)
         )
     }
 
@@ -1811,12 +1828,15 @@ struct DoNotDisturbSwitch {
         guard let currentlyFocused = focusStatus.isFocused else {
             return "macOS did not provide the current Focus status."
         }
+        if !hasCustomShortcuts(), controlCenter.isAvailable {
+            return controlCenter.setEnabled(enabled)
+        }
         guard currentlyFocused != enabled else { return nil }
-
         if let configurationError = DoNotDisturbPreferences.shortcutConfigurationError {
             return configurationError
         }
         guard DoNotDisturbPreferences.allShortcutsInstalled(forceRefresh: true) else {
+            if !hasCustomShortcuts() { return ControlCenterFocusController.permissionMessage }
             if let error = DoNotDisturbPreferences.installedShortcutsError {
                 return "Could not read Shortcuts: \(error)"
             }

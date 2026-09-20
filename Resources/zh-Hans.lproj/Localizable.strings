@@ -200,3 +200,15 @@
 "Visible" = "可见";
 "Record Shortcut" = "录制快捷键";
 "Type shortcut..." = "请按下快捷键…";
+
+/* Do Not Disturb control */
+"Control Center" = "控制中心";
+"Allow Accessibility access to control Do Not Disturb without shortcuts." = "允许辅助功能访问，即可无需快捷指令控制勿扰模式。";
+"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "可选：输入用于开启和关闭专注模式的快捷指令名称，以替代控制中心。";
+"Ready. Do Not Disturb uses Control Center." = "已就绪。勿扰模式通过控制中心控制。";
+"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "通过控制中心控制勿扰模式，或选择自己的专注模式快捷指令。";
+"Could not open Control Center for Do Not Disturb." = "无法打开控制中心来控制勿扰模式。";
+"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "无法在控制中心找到勿扰模式。请打开专注模式设置或配置专注模式快捷指令。";
+"Could not read Do Not Disturb in Control Center." = "无法读取控制中心的勿扰模式状态。";
+"Could not change Do Not Disturb in Control Center." = "无法更改控制中心的勿扰模式状态。";
+"macOS did not confirm the Do Not Disturb change." = "macOS 未确认勿扰模式的更改。";
