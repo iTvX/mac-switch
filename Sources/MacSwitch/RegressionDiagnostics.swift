@@ -56,7 +56,6 @@ enum RegressionDiagnostics {
             "CFBundleName",
             "NSAppleEventsUsageDescription",
             "NSBluetoothAlwaysUsageDescription",
-            "NSFocusStatusUsageDescription",
             "NSInputMonitoringUsageDescription",
             "NSLocationWhenInUseUsageDescription"
         ]
@@ -353,8 +352,8 @@ enum RegressionDiagnostics {
     }
 
     private static func checkDoNotDisturbShortcutStatus(_ reporter: inout SelfTestReporter) {
-        _ = DoNotDisturbPreferences.refreshInstalledShortcuts()
-        if let error = DoNotDisturbPreferences.installedShortcutsError {
+        let installation = DoNotDisturbShortcuts.shared.installation()
+        if let error = installation.error {
             reporter.pass("Shortcuts list failure is captured: \(error)")
         } else {
             reporter.pass("Shortcuts list status available")

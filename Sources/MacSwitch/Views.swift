@@ -4869,38 +4869,17 @@ private struct ScreenResolutionPreferencesPanel: View {
 
 private struct DoNotDisturbPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
-    @State private var onInstalled = false
-    @State private var offInstalled = false
+    @State private var installation = DNDShortcutInstallation()
     @State private var isRefreshing = false
     @State private var pendingRefresh = false
     @State private var statusText = "Checking shortcut installation..."
     @State private var statusIsError = false
-    @State private var hasDistinctShortcutPair = false
-    @State private var focusStatus = DoNotDisturbPreferences.focusStatus
-    @State private var isRequestingFocusStatus = false
-    @State private var onShortcutName = DoNotDisturbPreferences.customOnShortcutName
-    @State private var offShortcutName = DoNotDisturbPreferences.customOffShortcutName
-    @State private var shortcutNameRefreshWorkItem: DispatchWorkItem?
-    @State private var controlCenterReady = false
-
-    private var allInstalled: Bool {
-        onInstalled && offInstalled && hasDistinctShortcutPair
-    }
-
-    private var focusStatusReady: Bool {
-        focusStatus.authorization == .authorized && focusStatus.isFocused != nil
-    }
-
-    private var setupReady: Bool {
-        controlCenterReady || (allInstalled && focusStatusReady)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Default activation duration:")
                 .font(.system(size: 14))
                 .foregroundStyle(.secondary)
-
             Picker("Default activation duration", selection: $store.doNotDisturbDuration) {
                 ForEach(DoNotDisturbDuration.allCases) { duration in
                     Text(LocalizedStringKey(duration.menuTitle)).tag(duration)
@@ -4909,303 +4888,93 @@ private struct DoNotDisturbPreferencesPanel: View {
             .labelsHidden()
             .pickerStyle(.menu)
             .disabled(store.isActionBusy(.doNotDisturb))
-
             Divider()
-
-            StatusSummaryRow(
-                symbol: focusStatusReady ? "checkmark.shield.fill" : "shield.lefthalf.filled",
-                title: "Focus Status Access",
-                message: focusStatusMessage
-            )
-
+            Text("Install these two shortcuts once. Mac Switch then controls Do Not Disturb in the background.")
+                .font(.system(size: 13.5))
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(DNDShortcut.allCases, id: \.self) { shortcut in
+                ShortcutInstallRow(
+                    shortcut: shortcut,
+                    installed: installation.identifiers[shortcut] != nil,
+                    store: store,
+                    isDisabled: isRefreshing || store.isActionBusy(.doNotDisturb)
+                )
+            }
+            Text("After adding both, verify setup. Verification briefly turns Do Not Disturb on, then restores it to off. Turn off any active Focus before the first verification.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
-                if focusStatus.authorization == .notDetermined && !controlCenterReady {
-                    Button {
-                        requestFocusStatusAccess()
-                    } label: {
-                        Label(isRequestingFocusStatus ? "Requesting..." : "Allow Access", systemImage: "checkmark.shield")
-                    }
+                Button("Verify Setup") { refreshStatus(force: true, verify: true) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(isRequestingFocusStatus)
-                } else if !focusStatusReady && !controlCenterReady {
-                    Button {
-                        reportOpenResult(
-                            SystemSettingsLinks.openFocus(),
-                            store: store,
-                            failureMessage: "Could not open Focus settings."
-                        )
-                    } label: {
-                        Label("Review Focus", systemImage: "gearshape")
-                    }
+                    .disabled(!installation.allInstalled || isRefreshing || store.isActionBusy(.doNotDisturb))
+                Button("Refresh") { refreshStatus(force: true) }
                     .buttonStyle(.bordered)
-                }
-
-                Button {
-                    refreshStatus(force: true)
-                } label: {
-                    Label("Refresh Focus Status", systemImage: "arrow.clockwise")
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRefreshing || isRequestingFocusStatus)
-
-                Spacer()
+                    .disabled(isRefreshing || store.isActionBusy(.doNotDisturb))
+                if isRefreshing { ProgressView().controlSize(.small) }
             }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Control Center")
-                    .font(.system(size: 15, weight: .semibold))
-                Text("Allow Accessibility access to control Do Not Disturb without shortcuts.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    reportOpenResult(
-                        AccessibilityPermission.requestAndOpenSettings(),
-                        store: store,
-                        failureMessage: "Could not open Accessibility settings."
-                    )
-                } label: {
-                    Label("Open Accessibility", systemImage: "hand.raised")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Focus Shortcuts")
-                    .font(.system(size: 15, weight: .semibold))
-
-                Text("Optional: enter your own Focus on/off shortcut names to use them instead of Control Center.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                TextField("On shortcut name", text: $onShortcutName)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: onShortcutName) { _, value in
-                        DoNotDisturbPreferences.customOnShortcutName = value
-                        scheduleShortcutNameRefresh()
-                    }
-
-                TextField("Off shortcut name", text: $offShortcutName)
-                    .textFieldStyle(.roundedBorder)
-                    .onChange(of: offShortcutName) { _, value in
-                        DoNotDisturbPreferences.customOffShortcutName = value
-                        scheduleShortcutNameRefresh()
-                    }
-            }
-            .disabled(isRefreshing || store.isActionBusy(.doNotDisturb))
-
-            ShortcutInstallRow(
-                title: "DND On",
-                installed: onInstalled,
-                store: store,
-                isDisabled: store.isActionBusy(.doNotDisturb)
-            )
-
-            ShortcutInstallRow(
-                title: "DND Off",
-                installed: offInstalled,
-                store: store,
-                isDisabled: store.isActionBusy(.doNotDisturb)
-            )
-
-            HStack(spacing: 10) {
-                Button(isRefreshing ? "Checking..." : "Refresh Status") {
-                    refreshStatus(force: true)
-                }
-                .buttonStyle(.bordered)
-                .disabled(isRefreshing || store.isActionBusy(.doNotDisturb))
-
-                Spacer()
-
-                Button(setupReady ? "Ready" : "Continue") {
-                    refreshStatus(force: true)
-                    store.refreshAsync(.doNotDisturb)
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!setupReady || isRefreshing || store.isActionBusy(.doNotDisturb))
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    openWorkspaceURLOrReport(
-                        AppLinks.shortcutsApp,
-                        store: store,
-                        failureMessage: "Could not open Shortcuts."
-                    )
-                } label: {
-                    Label("Open Shortcuts", systemImage: "square.stack")
-                }
-                .buttonStyle(.bordered)
-
-                Button {
-                    reportOpenResult(
-                        SystemSettingsLinks.openAutomation(),
-                        store: store,
-                        failureMessage: "Could not open Automation settings."
-                    )
-                } label: {
-                    Label("Review Automation", systemImage: "gearshape")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            Text(statusText)
-                .font(.system(size: 12.5, weight: .medium))
-                .foregroundStyle(statusIsError ? Color.red : (setupReady ? Color.green : Color.secondary))
+            Text(LocalizedStringKey(statusText))
+                .font(.system(size: 12))
+                .foregroundStyle(statusIsError ? Color.orange : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .onAppear {
-            onShortcutName = DoNotDisturbPreferences.customOnShortcutName
-            offShortcutName = DoNotDisturbPreferences.customOffShortcutName
-            refreshStatus(force: true)
-        }
-        .onDisappear {
-            shortcutNameRefreshWorkItem?.cancel()
-            shortcutNameRefreshWorkItem = nil
-        }
+        .onAppear { refreshStatus(force: true) }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshStatus(force: true)
         }
     }
 
-    private func scheduleShortcutNameRefresh() {
-        shortcutNameRefreshWorkItem?.cancel()
-        let workItem = DispatchWorkItem {
-            refreshStatus(force: true)
-        }
-        shortcutNameRefreshWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: workItem)
-    }
-
-    private func refreshStatus(force: Bool = false) {
-        guard !isRefreshing else {
-            pendingRefresh = true
-            return
-        }
+    private func refreshStatus(force: Bool, verify: Bool = false) {
+        guard !isRefreshing else { pendingRefresh = true; return }
         isRefreshing = true
-        DispatchQueue.global(qos: .utility).async {
-            let installed = force
-                ? DoNotDisturbPreferences.refreshInstalledShortcuts()
-                : DoNotDisturbPreferences.installedShortcuts
-            let shortcutError = DoNotDisturbPreferences.installedShortcutsError
-            let configurationError = DoNotDisturbPreferences.shortcutConfigurationError
-            let shortcutPair = DoNotDisturbPreferences.installedShortcutPair(in: installed)
-            let distinctPair = shortcutPair != nil
-            let on = DoNotDisturbPreferences.installedShortcutName(
-                matching: DoNotDisturbPreferences.onShortcutCandidates,
-                in: installed
-            ) != nil
-            let off = DoNotDisturbPreferences.installedShortcutName(
-                matching: DoNotDisturbPreferences.offShortcutCandidates,
-                in: installed
-            ) != nil
-            let latestFocusStatus = DoNotDisturbPreferences.focusStatus
-            let nativeReady = !DoNotDisturbPreferences.hasCustomShortcuts
-                && ControlCenterFocusController().isAvailable
-
+        DispatchQueue.global(qos: .userInitiated).async {
+            let backend = DoNotDisturbShortcuts.shared
+            let verificationError = verify ? backend.verifySetup() : nil
+            let updated = backend.installation(force: force)
+            let snapshot = updated.isVerified ? backend.snapshot(force: true) : nil
             DispatchQueue.main.async {
-                controlCenterReady = nativeReady
-                onInstalled = on
-                offInstalled = off
-                hasDistinctShortcutPair = distinctPair
-                focusStatus = latestFocusStatus
-                statusIsError = !nativeReady && (latestFocusStatus.authorization == .denied
-                    || latestFocusStatus.authorization == .restricted
-                    || configurationError != nil || shortcutError != nil || (on && off && !distinctPair))
-                if nativeReady {
-                    statusText = "Ready. Do Not Disturb uses Control Center."
-                } else if !focusStatusReady {
-                    statusText = focusStatusMessage
-                } else if let configurationError {
-                    statusText = configurationError
-                } else if let shortcutError {
-                    statusText = "Could not read Shortcuts: \(shortcutError)"
-                } else if let shortcutPair {
-                    statusText = "Ready. Using \(shortcutPair.on) and \(shortcutPair.off)."
-                } else if on && off {
-                    statusText = "DND On and DND Off must resolve to two different shortcuts."
-                } else if on {
-                    statusText = "DND On is installed. Install DND Off to complete setup."
-                } else if off {
-                    statusText = "DND Off is installed. Install DND On to complete setup."
-                } else {
-                    statusText = ControlCenterFocusController.permissionMessage
-                }
+                installation = updated
                 isRefreshing = false
+                let error = verificationError ?? updated.error ?? snapshot?.warning
+                statusIsError = error != nil
+                statusText = error ?? (updated.isVerified
+                    ? "Ready. Do Not Disturb runs in the background."
+                    : (updated.allInstalled ? "Both shortcuts are installed. Verify setup to continue." : "Add both shortcuts, then return here to verify setup."))
+                store.refreshAsync(.doNotDisturb)
                 if pendingRefresh {
                     pendingRefresh = false
-                    refreshStatus(force: true)
+                    // Keep a failed verification visible until the next explicit action.
+                    if verificationError == nil { refreshStatus(force: true) }
                 }
-                store.refreshAsync(.doNotDisturb)
             }
-        }
-    }
-
-    private var focusStatusMessage: String {
-        if controlCenterReady {
-            return "Do Not Disturb uses Control Center; Focus Status access is optional."
-        }
-        switch focusStatus.authorization {
-        case .notDetermined:
-            return "Allow Mac Switch to read the current Focus status before using this switch."
-        case .restricted:
-            return "Focus Status access is restricted on this Mac."
-        case .denied:
-            return "Focus Status access is denied. Review Focus settings to allow Mac Switch."
-        case .authorized:
-            guard let isFocused = focusStatus.isFocused else {
-                return "macOS did not provide the current Focus status."
-            }
-            return isFocused ? "Focus is currently on." : "Focus is currently off."
-        }
-    }
-
-    private func requestFocusStatusAccess() {
-        guard !isRequestingFocusStatus else { return }
-        isRequestingFocusStatus = true
-        DoNotDisturbPreferences.requestFocusStatusAuthorization { authorization in
-            isRequestingFocusStatus = false
-            focusStatus = FocusStatusReading(
-                authorization: authorization,
-                isFocused: authorization == .authorized ? DoNotDisturbPreferences.focusStatus.isFocused : nil
-            )
-            refreshStatus(force: true)
-            store.refreshAsync(.doNotDisturb)
         }
     }
 }
 
 private struct ShortcutInstallRow: View {
-    let title: String
+    let shortcut: DNDShortcut
     let installed: Bool
     @ObservedObject var store: SwitchStore
     var isDisabled = false
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: installed ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            Image(systemName: installed ? "checkmark.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(installed ? .green : .orange)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
+                Text(shortcut.name)
                     .font(.system(size: 13.5, weight: .medium))
-                Text(installed ? "Installed" : "Create or choose in Shortcuts")
+                Text(installed ? "Installed" : "Not installed")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Open Shortcuts") {
-                openWorkspaceURLOrReport(
-                    AppLinks.shortcutsApp,
-                    store: store,
-                    failureMessage: "Could not open Shortcuts."
-                )
+            Button(installed ? "Reinstall" : "Install") {
+                guard let url = shortcut.resourceURL else {
+                    store.lastError = "Do Not Disturb installer is missing. Download the latest Mac Switch release."
+                    return
+                }
+                openWorkspaceURLOrReport(url, store: store, failureMessage: "Could not open the Do Not Disturb shortcut installer.")
             }
             .buttonStyle(.bordered)
             .disabled(isDisabled)
@@ -6955,7 +6724,7 @@ private extension SwitchKind {
         case .handoff:
             return "Allows supported tasks and Universal Clipboard to continue between this Mac and nearby iCloud devices."
         case .doNotDisturb:
-            return "Control Do Not Disturb through Control Center, or choose your own Focus shortcuts."
+            return "Control Do Not Disturb in the background with two installed shortcuts."
         case .nightShift:
             return "Use the Night Shift options panel to control its sunrise/sunset schedule mode."
         case .trueTone:

@@ -201,16 +201,14 @@
 "Record Shortcut" = "Grabar atajo";
 "Type shortcut..." = "Pulsa el atajo...";
 
-/* Do Not Disturb control */
-"Control Center" = "Centro de control";
-"Allow Accessibility access to control Do Not Disturb without shortcuts." = "Permite el acceso de Accesibilidad para controlar No molestar sin atajos.";
-"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "Opcional: introduce los nombres de tus atajos para activar y desactivar Concentración en lugar del Centro de control.";
-"Ready. Do Not Disturb uses Control Center." = "Listo. No molestar usa el Centro de control.";
-"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "Controla No molestar desde el Centro de control o elige tus propios atajos de Concentración.";
-"Could not open Control Center for Do Not Disturb." = "No se pudo abrir el Centro de control para No molestar.";
-"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "No se encontró No molestar en el Centro de control. Abre los ajustes de Concentración o configura atajos.";
-"Could not read Do Not Disturb in Control Center." = "No se pudo leer el estado de No molestar en el Centro de control.";
-"Could not change Do Not Disturb in Control Center." = "No se pudo cambiar No molestar en el Centro de control.";
-"macOS did not confirm the Do Not Disturb change." = "macOS no confirmó el cambio de No molestar.";
-"Checked when used" = "Se comprueba al usarlo";
-"Do Not Disturb uses Control Center; Focus Status access is optional." = "No molestar usa el Centro de control; el acceso al estado de Concentración es opcional.";
+/* Do Not Disturb shortcuts */
+"Install" = "Instalar";
+"Reinstall" = "Reinstalar";
+"Not installed" = "Sin instalar";
+"Verify Setup" = "Verificar configuración";
+"Install these two shortcuts once. Mac Switch then controls Do Not Disturb in the background." = "Instala estos dos atajos una vez. Mac Switch controlará No molestar en segundo plano.";
+"After adding both, verify setup. Verification briefly turns Do Not Disturb on, then restores it to off. Turn off any active Focus before the first verification." = "Tras añadir ambos, verifica la configuración. La verificación activa brevemente No molestar y luego lo desactiva. Desactiva cualquier modo de concentración antes de la primera verificación.";
+"Ready. Do Not Disturb runs in the background." = "Listo. No molestar funciona en segundo plano.";
+"Both shortcuts are installed. Verify setup to continue." = "Ambos atajos están instalados. Verifica la configuración para continuar.";
+"Add both shortcuts, then return here to verify setup." = "Añade ambos atajos y vuelve aquí para verificar la configuración.";
+"Control Do Not Disturb in the background with two installed shortcuts." = "Controla No molestar en segundo plano con dos atajos instalados.";

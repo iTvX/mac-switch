@@ -33,7 +33,6 @@ final class LocalizationResourceTests: XCTestCase {
         let expectedKeys: Set<String> = [
             "NSAppleEventsUsageDescription",
             "NSBluetoothAlwaysUsageDescription",
-            "NSFocusStatusUsageDescription",
             "NSInputMonitoringUsageDescription",
             "NSLocationUsageDescription",
             "NSLocationWhenInUseUsageDescription"

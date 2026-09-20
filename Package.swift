@@ -37,7 +37,6 @@ let package = Package(
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreLocation"),
                 .linkedFramework("IOBluetooth"),
-                .linkedFramework("Intents"),
                 .linkedFramework("ServiceManagement")
             ]
         ),

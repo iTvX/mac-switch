@@ -201,16 +201,14 @@
 "Record Shortcut" = "단축키 기록";
 "Type shortcut..." = "단축키를 누르세요...";
 
-/* Do Not Disturb control */
-"Control Center" = "제어 센터";
-"Allow Accessibility access to control Do Not Disturb without shortcuts." = "손쉬운 사용 접근을 허용하면 단축어 없이 방해금지 모드를 제어할 수 있습니다.";
-"Optional: enter your own Focus on/off shortcut names to use them instead of Control Center." = "선택 사항: 제어 센터 대신 사용할 집중 모드 켜기/끄기 단축어 이름을 입력하세요.";
-"Ready. Do Not Disturb uses Control Center." = "준비 완료. 방해금지 모드는 제어 센터를 사용합니다.";
-"Control Do Not Disturb through Control Center, or choose your own Focus shortcuts." = "제어 센터에서 방해금지 모드를 제어하거나 집중 모드 단축어를 선택하세요.";
-"Could not open Control Center for Do Not Disturb." = "방해금지 모드를 위한 제어 센터를 열 수 없습니다.";
-"Could not find Do Not Disturb in Control Center. Open Focus settings or configure Focus shortcuts." = "제어 센터에서 방해금지 모드를 찾을 수 없습니다. 집중 모드 설정을 열거나 단축어를 구성하세요.";
-"Could not read Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드 상태를 읽을 수 없습니다.";
-"Could not change Do Not Disturb in Control Center." = "제어 센터에서 방해금지 모드를 변경할 수 없습니다.";
-"macOS did not confirm the Do Not Disturb change." = "macOS가 방해금지 모드 변경을 확인하지 못했습니다.";
-"Checked when used" = "사용 시 상태 확인";
-"Do Not Disturb uses Control Center; Focus Status access is optional." = "방해금지 모드는 제어 센터를 사용합니다. 집중 모드 상태 접근은 선택 사항입니다.";
+/* Do Not Disturb shortcuts */
+"Install" = "설치";
+"Reinstall" = "다시 설치";
+"Not installed" = "설치되지 않음";
+"Verify Setup" = "설정 확인";
+"Install these two shortcuts once. Mac Switch then controls Do Not Disturb in the background." = "이 두 단축어를 한 번 설치하면 Mac Switch가 백그라운드에서 방해금지 모드를 제어합니다.";
+"After adding both, verify setup. Verification briefly turns Do Not Disturb on, then restores it to off. Turn off any active Focus before the first verification." = "두 단축어를 추가한 후 설정을 확인하세요. 확인 중 방해금지 모드가 잠시 켜졌다가 다시 꺼집니다. 처음 확인하기 전에 활성 집중 모드를 꺼주세요.";
+"Ready. Do Not Disturb runs in the background." = "준비됨. 방해금지 모드가 백그라운드에서 실행됩니다.";
+"Both shortcuts are installed. Verify setup to continue." = "두 단축어가 설치되었습니다. 계속하려면 설정을 확인하세요.";
+"Add both shortcuts, then return here to verify setup." = "두 단축어를 추가한 후 여기로 돌아와 설정을 확인하세요.";
+"Control Do Not Disturb in the background with two installed shortcuts." = "설치된 두 단축어로 백그라운드에서 방해금지 모드를 제어합니다.";

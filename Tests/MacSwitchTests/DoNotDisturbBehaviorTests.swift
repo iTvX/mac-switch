@@ -2,182 +2,208 @@ import XCTest
 @testable import MacSwitch
 
 final class DoNotDisturbBehaviorTests: XCTestCase {
-    func testShortcutPathStillRequiresSharedFocusPermission() {
-        for authorization in [FocusStatusAuthorization.notDetermined, .restricted, .denied] {
-            let provider = FakeFocusStatusProvider(authorization: authorization, isFocused: nil)
-            let subject = DoNotDisturbSwitch(focusStatusProvider: provider, controlCenter: FakeDoNotDisturbController(isAvailable: false))
-            XCTAssertFalse(subject.snapshot().isAvailable)
-            XCTAssertEqual(subject.snapshot().subtitle, "Focus status permission required")
+    func testBundledWorkflowsHaveReadOnlyBranchAndExplicitOutputs() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        for role in DNDShortcut.allCases {
+            let path = root.appendingPathComponent("Resources/Shortcuts/\(role.name).wflow")
+            let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: path), format: nil) as? [String: Any])
+            let actions = try XCTUnwrap(plist["WFWorkflowActions"] as? [[String: Any]])
+            let parameters = actions.compactMap { $0["WFWorkflowActionParameters"] as? [String: Any] }
+            XCTAssertEqual(actions.count, 11)
+            let input = try XCTUnwrap(parameters[0]["WFInput"] as? [String: Any])
+            let variable = try XCTUnwrap(input["Variable"] as? [String: Any])
+            XCTAssertEqual((variable["Value"] as? [String: String])?["Type"], "ExtensionInput")
+            XCTAssertEqual(parameters[1]["WFControlFlowMode"] as? Int, 1, "Only the no-input branch can change DND")
+            XCTAssertEqual(actions[2]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.dnd.set")
+            XCTAssertEqual(parameters[2]["Enabled"] as? Int, role == .enable ? 1 : 0)
+            XCTAssertEqual(actions[4]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.dnd.getfocus")
+            for index in [7, 9] {
+                XCTAssertEqual(actions[index]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.output")
+            }
+            XCTAssertEqual(parameters[9]["WFOutput"] as? String, role.outputPrefix)
+            let output = try XCTUnwrap(parameters[7]["WFOutput"] as? [String: Any])
+            XCTAssertEqual(output["WFSerializationType"] as? String, "WFTextTokenString")
+            XCTAssertEqual((output["Value"] as? [String: Any])?["string"] as? String, role.outputPrefix + "\u{fffc}")
         }
     }
 
-    func testShortcutPathDoesNotPretendUnknownFocusStateIsOff() {
-        let subject = DoNotDisturbSwitch(
-            focusStatusProvider: FakeFocusStatusProvider(isFocused: nil),
-            controlCenter: FakeDoNotDisturbController(isAvailable: false)
-        )
+    func testInstallationRejectsLegacyAmbiguousAndInvalidIdentifiers() {
+        let fake = FakeDNDExecutor()
+        let listing = fake.listing
+        XCTAssertEqual(DNDShortcutInstallation.parse(listing).count, 2)
+        XCTAssertEqual(DNDShortcutInstallation.parse(listing + "\n" + listing).count, 0)
+        XCTAssertTrue(DNDShortcutInstallation.parse("Mac Switch DND On (\(fake.onID))").isEmpty)
+        XCTAssertTrue(DNDShortcutInstallation.parse("Mac Switch DND Enable (bad-id)").isEmpty)
+    }
+
+    func testOutputMustBeExplicitVersionedAndRoleMatched() throws {
+        XCTAssertEqual(try DNDShortcut.enable.focusName(from: "mac-switch-dnd-v1|enable|勿扰模式\n"), "勿扰模式")
+        XCTAssertEqual(try DNDShortcut.disable.focusName(from: "mac-switch-dnd-v1|disable|"), "")
+        for text in ["", "Do Not Disturb", "mac-switch-dnd-v1|disable|", "mac-switch-dnd-v2|enable|"] {
+            XCTAssertThrowsError(try DNDShortcut.enable.focusName(from: text))
+        }
+    }
+
+    func testFirstVerificationCalibratesLocalizedNameAndRestoresOff() {
+        let fake = FakeDNDExecutor()
+        fake.dndName = "勿扰模式"
+        let subject = DoNotDisturbShortcuts(executor: fake, defaults: InMemoryUserDefaults())
         XCTAssertFalse(subject.snapshot().isAvailable)
-        XCTAssertEqual(subject.snapshot().subtitle, "Focus status unavailable")
-    }
-
-    func testNativePathDoesNotRequireSharedFocusPermission() {
-        let provider = FakeFocusStatusProvider(authorization: .denied, isFocused: nil)
-        let native = FakeDoNotDisturbController()
-        let subject = DoNotDisturbSwitch(focusStatusProvider: provider, controlCenter: native, hasCustomShortcuts: { false })
-        XCTAssertTrue(subject.snapshot().isAvailable)
-        XCTAssertEqual(subject.snapshot().subtitle, "Checked when used")
-        XCTAssertFalse(subject.snapshotForAction().isOn)
-        let result = subject.set(true)
-        XCTAssertNil(result.error)
-        XCTAssertTrue(result.snapshot.isOn)
-        XCTAssertEqual(provider.readCount, 0)
-    }
-
-    func testVerifiedResultSurvivesFalseSharedFocusStatusAndPassiveRefresh() {
-        let native = FakeDoNotDisturbController()
-        let provider = FakeFocusStatusProvider(isFocused: false)
-        let subject = DoNotDisturbSwitch(focusStatusProvider: provider, controlCenter: native, hasCustomShortcuts: { false })
-        let controller = SystemSwitchController(doNotDisturb: subject)
-
-        let result = controller.set(.doNotDisturb, enabled: true, keepAwakeDuration: .indefinitely)
-
-        XCTAssertNil(result.error)
-        XCTAssertTrue(result.snapshot.isOn, "The controller must return the actual checkbox observation, not re-read shared Focus status")
-        XCTAssertTrue(controller.snapshot(for: .doNotDisturb, keepAwakeDuration: .indefinitely).isOn)
-        XCTAssertEqual(provider.readCount, 0)
-        XCTAssertEqual(native.readCount, 0, "Passive refreshes must not open Control Center")
-    }
-
-    func testActionPreflightRechecksExternalChangesInsteadOfUsingLastObservation() {
-        let native = FakeDoNotDisturbController()
-        let subject = nativeSwitch(native)
+        XCTAssertTrue(fake.writes.isEmpty)
+        XCTAssertNil(subject.verifySetup())
+        XCTAssertEqual(fake.writes, [true, false])
+        XCTAssertEqual(fake.focus, "")
+        XCTAssertTrue(subject.installation().isVerified)
         XCTAssertNil(subject.set(true).error)
-        native.actualState = false // Changed outside Mac Switch.
+        XCTAssertEqual(fake.focus, "勿扰模式")
+        XCTAssertTrue(subject.snapshot(force: true).isOn)
+    }
+
+    func testVerificationDoesNotDisturbAnExistingFocus() {
+        let fake = FakeDNDExecutor()
+        fake.focus = "Work"
+        let subject = DoNotDisturbShortcuts(executor: fake, defaults: InMemoryUserDefaults())
+        XCTAssertNotNil(subject.verifySetup())
+        XCTAssertTrue(fake.writes.isEmpty)
+        XCTAssertEqual(fake.focus, "Work")
+    }
+
+    func testFailedVerificationStillAttemptsRestoration() {
+        let fake = FakeDNDExecutor()
+        fake.invalidEnableOutput = true
+        let subject = DoNotDisturbShortcuts(executor: fake, defaults: InMemoryUserDefaults())
+        XCTAssertNotNil(subject.verifySetup())
+        XCTAssertEqual(fake.writes, [true, false])
+        XCTAssertEqual(fake.focus, "")
+        XCTAssertFalse(subject.installation().isVerified)
+    }
+
+    func testReadFailureDoesNotReuseAConfirmedStateForAnAction() {
+        let (subject, fake) = verified()
+        XCTAssertNil(subject.set(true).error)
+        fake.failRead = true
+        XCTAssertFalse(subject.snapshot(force: true).isAvailable)
+        fake.writes = []
+        XCTAssertNotNil(subject.set(false).error)
+        XCTAssertTrue(fake.writes.isEmpty)
+    }
+
+    func testSetupReportsFailedRestorationAndStaysUnverified() {
+        let fake = FakeDNDExecutor()
+        fake.failDisable = true
+        let backend = DoNotDisturbShortcuts(executor: fake, defaults: InMemoryUserDefaults())
+        XCTAssertTrue(backend.verifySetup()?.contains("Could not restore") == true)
+        XCTAssertFalse(backend.installation().isVerified)
+        XCTAssertEqual(fake.writes, [true, false])
+    }
+
+    func testMissingOrReinstalledHelpersRequireSetupAgain() {
+        let (subject, fake) = verified()
+        fake.listing = ""
+        XCTAssertFalse(subject.snapshot(force: true).isAvailable)
+        XCTAssertNotNil(subject.set(true).error)
+        XCTAssertTrue(fake.writes.isEmpty)
+        fake.listing = "\(DNDShortcut.enable.name) (\(UUID()))\n\(DNDShortcut.disable.name) (\(fake.offID))"
+        XCTAssertFalse(subject.installation().isVerified)
+    }
+
+    func testFreshPreflightObservesExternalChangesAndOtherFocusIsProtected() {
+        let (subject, fake) = verified()
+        XCTAssertNil(subject.set(true).error)
+        fake.focus = ""
         XCTAssertTrue(subject.snapshot().isOn)
-        XCTAssertFalse(subject.snapshotForAction().isOn)
-        XCTAssertFalse(subject.snapshot().isOn)
-        XCTAssertEqual(native.readCount, 1)
+        XCTAssertFalse(subject.snapshot(force: true).isOn)
+        fake.focus = "Sleep"
+        fake.writes = []
+        XCTAssertFalse(subject.snapshot(force: true).isAvailable)
+        XCTAssertNotNil(subject.set(true).error)
+        XCTAssertNotNil(subject.set(false).error)
+        XCTAssertEqual(fake.focus, "Sleep")
+        XCTAssertTrue(fake.writes.isEmpty)
     }
 
-    func testUnconfirmedWriteCannotReportRequestedStateAsSuccess() {
-        let native = FakeDoNotDisturbController()
-        native.error = "macOS did not confirm the Do Not Disturb change."
-        let result = nativeSwitch(native).set(true)
-        XCTAssertEqual(result.error, native.error)
-        XCTAssertFalse(result.snapshot.isAvailable)
-        XCTAssertFalse(result.snapshot.isOn)
-    }
-
-    func testMissingWriteObservationIsAnErrorEvenWithoutBackendError() {
-        let native = FakeDoNotDisturbController()
-        native.omitObservation = true
-        let result = nativeSwitch(native).set(true)
-        XCTAssertNotNil(result.error)
-        XCTAssertFalse(result.snapshot.isAvailable)
-    }
-
-    func testExplicitShortcutConfigurationDoesNotSilentlyUseNativeBackend() {
-        let native = FakeDoNotDisturbController()
-        let subject = DoNotDisturbSwitch(
-            focusStatusProvider: FakeFocusStatusProvider(isFocused: true),
-            controlCenter: native,
-            hasCustomShortcuts: { true }
-        )
-        XCTAssertNil(subject.setEnabled(true))
-        XCTAssertTrue(native.requests.isEmpty)
-        XCTAssertEqual(native.readCount, 0)
+    func testFailedOrUnconfirmedWritesNeverReportSuccess() {
+        for failure in 0...2 {
+            let (subject, fake) = verified()
+            fake.invalidEnableOutput = failure == 0
+            fake.failEnable = failure == 1
+            fake.ignoreEnable = failure == 2
+            let result = subject.set(true)
+            XCTAssertNotNil(result.error)
+            XCTAssertFalse(result.snapshot.isAvailable)
+        }
     }
 
     @MainActor
-    func testModeStartsAndRestoresThroughRealSystemControllerWithUnsharedFocus() async throws {
-        let native = FakeDoNotDisturbController()
-        let controller = SystemSwitchController(doNotDisturb: nativeSwitch(native))
-        let store = SwitchStore(controller: controller, defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
-        let mode = try makeMode(store)
-
-        store.toggleMode(mode)
-        try await waitUntil { store.activeModeOperationID == nil }
-        XCTAssertNil(store.lastError)
-        XCTAssertTrue(store.isModeActive(mode.id))
-        XCTAssertTrue(native.actualState)
-        XCTAssertEqual(store.snapshots[.doNotDisturb]?.isOn, true)
-        XCTAssertEqual(store.activeModeSessions[mode.id]?.originalState(for: .doNotDisturb), false)
-
-        store.toggleMode(mode)
-        try await waitUntil { store.activeModeOperationID == nil }
-        XCTAssertNil(store.lastError)
-        XCTAssertFalse(store.isModeActive(mode.id))
-        XCTAssertFalse(native.actualState)
-        XCTAssertEqual(native.requests, [true, false])
-        XCTAssertEqual(native.readCount, 2)
+    func testModeRoundTripRestoresBothInitialStates() async throws {
+        for initial in [false, true] {
+            let (backend, fake) = verified()
+            fake.focus = initial ? fake.dndName : ""
+            let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: DoNotDisturbSwitch(shortcuts: backend)), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
+            let mode = try makeMode(store)
+            store.toggleMode(mode)
+            try await waitUntil { store.activeModeOperationID == nil }
+            XCTAssertNil(store.lastError)
+            XCTAssertTrue(store.isModeActive(mode.id))
+            XCTAssertEqual(store.activeModeSessions[mode.id]?.originalState(for: .doNotDisturb), initial)
+            XCTAssertEqual(fake.focus, fake.dndName)
+            store.toggleMode(mode)
+            try await waitUntil { store.activeModeOperationID == nil }
+            XCTAssertNil(store.lastError)
+            XCTAssertFalse(store.isModeActive(mode.id))
+            XCTAssertEqual(fake.focus, initial ? fake.dndName : "")
+            XCTAssertEqual(fake.writes, initial ? [] : [true, false])
+        }
     }
 
     @MainActor
-    func testModePreservesDNDThatWasAlreadyOnDespiteFalseSharedStatus() async throws {
-        let native = FakeDoNotDisturbController()
-        native.actualState = true
-        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: nativeSwitch(native)), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
+    func testModeRestorationRechecksExternalChanges() async throws {
+        let (backend, fake) = verified()
+        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: DoNotDisturbSwitch(shortcuts: backend)), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
         let mode = try makeMode(store)
         store.toggleMode(mode)
         try await waitUntil { store.activeModeOperationID == nil }
-        XCTAssertTrue(store.isModeActive(mode.id))
-        XCTAssertEqual(store.activeModeSessions[mode.id]?.originalState(for: .doNotDisturb), true)
+        fake.focus = ""
         store.toggleMode(mode)
         try await waitUntil { store.activeModeOperationID == nil }
         XCTAssertNil(store.lastError)
-        XCTAssertTrue(native.actualState)
-        XCTAssertTrue(native.requests.isEmpty)
-    }
-
-    @MainActor
-    func testModeRestorationRechecksExternalDNDChanges() async throws {
-        let native = FakeDoNotDisturbController()
-        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: nativeSwitch(native)), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
-        let mode = try makeMode(store)
-        store.toggleMode(mode)
-        try await waitUntil { store.activeModeOperationID == nil }
-        native.actualState = false
-        store.toggleMode(mode)
-        try await waitUntil { store.activeModeOperationID == nil }
-        XCTAssertNil(store.lastError)
-        XCTAssertFalse(native.actualState)
-        XCTAssertEqual(native.requests, [true], "Restoration should not toggle DND back on after an external change")
+        XCTAssertEqual(fake.writes, [true])
+        XCTAssertEqual(fake.focus, "")
     }
 
     @MainActor
     func testLiveModeActivationAndRestoration() async throws {
         guard ProcessInfo.processInfo.environment["MAC_SWITCH_LIVE_DND_TEST"] == "1" else {
-            throw XCTSkip("Opt in on an interactive Mac to verify real DND state changes")
+            throw XCTSkip("Opt in on an interactive Mac with the bundled helpers installed and Focus off")
         }
-        let native = ControlCenterFocusController()
-        guard native.isAvailable else { throw XCTSkip("Accessibility access is required") }
-        let initial = try XCTUnwrap(native.readState().state)
-        defer { XCTAssertNil(native.setEnabled(initial).error, "Restore the original system state") }
-        // Hold the shared Focus reading false throughout, reproducing the report.
-        let dnd = DoNotDisturbSwitch(focusStatusProvider: FakeFocusStatusProvider(isFocused: false), controlCenter: native, hasCustomShortcuts: { false })
-        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: dnd), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
-        var mode = try makeMode(store)
-        mode.items = [SwitchModeItem(kind: .doNotDisturb, targetIsOn: !initial)]
-        store.updateCustomMode(mode)
-
-        store.toggleMode(mode)
-        try await waitUntil(timeout: 15) { store.activeModeOperationID == nil }
-        XCTAssertNil(store.lastError)
-        XCTAssertTrue(store.isModeActive(mode.id))
-        XCTAssertEqual(native.readState().state, !initial)
-        XCTAssertEqual(store.snapshots[.doNotDisturb]?.isOn, !initial)
-        guard store.isModeActive(mode.id) else { return }
-
-        store.toggleMode(mode)
-        try await waitUntil(timeout: 15) { store.activeModeOperationID == nil }
-        XCTAssertNil(store.lastError)
-        XCTAssertFalse(store.isModeActive(mode.id))
-        XCTAssertEqual(native.readState().state, initial)
-        print("LIVE DND MODE: initial=\(initial), active=\(!initial), restored=\(initial), sharedFocus=false")
+        let backend = DoNotDisturbShortcuts(defaults: InMemoryUserDefaults())
+        XCTAssertNil(backend.verifySetup())
+        guard backend.installation().isVerified else { return XCTFail("Live setup verification failed") }
+        defer { XCTAssertNil(backend.set(false).error) }
+        for initial in [false, true] {
+            XCTAssertNil(backend.set(initial).error)
+            let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: DoNotDisturbSwitch(shortcuts: backend)), defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
+            let mode = try makeMode(store)
+            store.toggleMode(mode)
+            try await waitUntil(timeout: 45) { store.activeModeOperationID == nil }
+            XCTAssertNil(store.lastError)
+            XCTAssertTrue(store.isModeActive(mode.id))
+            XCTAssertTrue(backend.snapshot(force: true).isOn)
+            store.toggleMode(mode)
+            try await waitUntil(timeout: 45) { store.activeModeOperationID == nil }
+            XCTAssertNil(store.lastError)
+            XCTAssertFalse(store.isModeActive(mode.id))
+            XCTAssertEqual(backend.snapshot(force: true).isOn, initial)
+            print("LIVE DND MODE: initial=\(initial), active=true, restored=\(initial)")
+        }
     }
 
-    private func nativeSwitch(_ native: FakeDoNotDisturbController) -> DoNotDisturbSwitch {
-        DoNotDisturbSwitch(focusStatusProvider: FakeFocusStatusProvider(isFocused: false), controlCenter: native, hasCustomShortcuts: { false })
+    private func verified() -> (DoNotDisturbShortcuts, FakeDNDExecutor) {
+        let fake = FakeDNDExecutor()
+        let backend = DoNotDisturbShortcuts(executor: fake, defaults: InMemoryUserDefaults())
+        XCTAssertNil(backend.verifySetup())
+        fake.writes = []
+        return (backend, fake)
     }
 
     @MainActor
@@ -191,58 +217,43 @@ final class DoNotDisturbBehaviorTests: XCTestCase {
     }
 
     @MainActor
-    private func waitUntil(timeout: TimeInterval = 4, _ condition: () -> Bool) async throws {
+    private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(condition(), "Mode operation did not finish")
     }
 }
 
-private final class FakeDoNotDisturbController: DoNotDisturbControlling, @unchecked Sendable {
-    let isAvailable: Bool
+private final class FakeDNDExecutor: DNDShortcutExecuting, @unchecked Sendable {
+    let onID = "00000000-0000-0000-0000-000000000001"
+    let offID = "00000000-0000-0000-0000-000000000002"
     private let lock = NSLock()
-    private var state = false
-    private var confirmed: Bool?
-    private var requested: [Bool] = []
-    private var reads = 0
-    // Configured before concurrent test operations start.
-    var error: String?
-    var omitObservation = false
-    var actualState: Bool {
-        get { lock.withLock { state } }
-        set { lock.withLock { state = newValue } }
-    }
-    var lastConfirmedState: Bool? { lock.withLock { confirmed } }
-    var requests: [Bool] { lock.withLock { requested } }
-    var readCount: Int { lock.withLock { reads } }
-    init(isAvailable: Bool = true) { self.isAvailable = isAvailable }
-    func readState() -> DoNotDisturbControlResult {
-        lock.withLock {
-            reads += 1
-            confirmed = state
-            return DoNotDisturbControlResult(state: state, error: nil)
+    private var storedFocus = ""
+    private var storedWrites: [Bool] = []
+    var focus: String { get { lock.withLock { storedFocus } } set { lock.withLock { storedFocus = newValue } } }
+    var writes: [Bool] { get { lock.withLock { storedWrites } } set { lock.withLock { storedWrites = newValue } } }
+    // Test configuration is set before starting concurrent operations.
+    var dndName = "Do Not Disturb"
+    var listing: String
+    var invalidEnableOutput = false
+    var failRead = false
+    var failDisable = false
+    var failEnable = false
+    var ignoreEnable = false
+    init() { listing = "Mac Switch DND Enable (\(onID))\nMac Switch DND Disable (\(offID))" }
+    func list() throws -> String { listing }
+    func run(identifier: String, readOnly: Bool) throws -> String {
+        try lock.withLock {
+            let role: DNDShortcut = identifier == onID ? .enable : .disable
+            if readOnly && failRead { throw DNDShortcutError("Do Not Disturb status unavailable.") }
+            if !readOnly {
+                storedWrites.append(role == .enable)
+                if role == .disable && failDisable { throw DNDShortcutError("Do Not Disturb restoration failed.") }
+                if role == .enable && failEnable { throw DNDShortcutError("Do Not Disturb shortcut timed out.") }
+                if !(role == .enable && ignoreEnable) { storedFocus = role == .enable ? dndName : "" }
+                if role == .enable && invalidEnableOutput { return "" }
+            }
+            return role.outputPrefix + storedFocus
         }
-    }
-    func setEnabled(_ enabled: Bool) -> DoNotDisturbControlResult {
-        lock.withLock {
-            requested.append(enabled)
-            if error != nil || omitObservation { return DoNotDisturbControlResult(state: nil, error: error) }
-            state = enabled
-            confirmed = state
-            return DoNotDisturbControlResult(state: state, error: nil)
-        }
-    }
-}
-
-private final class FakeFocusStatusProvider: FocusStatusProviding, @unchecked Sendable {
-    private let lock = NSLock()
-    private let reading: FocusStatusReading
-    private var reads = 0
-    var readCount: Int { lock.withLock { reads } }
-    init(authorization: FocusStatusAuthorization = .authorized, isFocused: Bool?) {
-        reading = FocusStatusReading(authorization: authorization, isFocused: isFocused)
-    }
-    func read() -> FocusStatusReading {
-        lock.withLock { reads += 1; return reading }
     }
 }
