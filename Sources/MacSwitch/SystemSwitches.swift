@@ -279,11 +279,17 @@ protocol SystemSwitchControlling: AnyObject, Sendable {
         duration: TimeInterval?,
         defaultDuration: KeepAwakeDuration
     ) -> SwitchOperationResult
+    func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult
     func prepareForTermination()
 }
 
 extension SystemSwitchControlling {
+    func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        let remaining = endDate?.timeIntervalSinceNow
+        return setKeepAwake(enabled: remaining.map { $0 > 0 } ?? true, duration: remaining, defaultDuration: defaultDuration)
+    }
+
     func snapshotForAction(for kind: SwitchKind, keepAwakeDuration: KeepAwakeDuration) -> SwitchSnapshot {
         snapshot(for: kind, keepAwakeDuration: keepAwakeDuration)
     }
@@ -502,6 +508,11 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
         )
     }
 
+    func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error = keepAwake.setEnabled(true, duration: nil, endingAt: endDate)
+        return SwitchOperationResult(snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration), error: error)
+    }
+
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult {
         xcodeClean.perform(progress: progress)
     }
@@ -561,9 +572,11 @@ private final class KeepAwakeManager {
         return "Active until \(timeDisplay(for: endDate))"
     }
 
-    func setEnabled(_ enabled: Bool, duration: TimeInterval?) -> String? {
+    func setEnabled(_ enabled: Bool, duration: TimeInterval?, endingAt endDate: Date? = nil) -> String? {
         if enabled {
+            let expirationDate = endDate ?? duration.map { Date().addingTimeInterval($0) }
             let restoreError = disable()
+            if let expirationDate, expirationDate <= Date() { return restoreError }
             let reason = "Mac Switch Keep Awake" as CFString
             var systemID = IOPMAssertionID(0)
             var displayID = IOPMAssertionID(0)
@@ -598,8 +611,10 @@ private final class KeepAwakeManager {
                 }
             }
 
-            if let duration {
-                scheduleExpiration(after: duration)
+            if let expirationDate {
+                // Authorization may take longer than the remaining session. Never extend it.
+                guard expirationDate > Date() else { return disable() ?? disableSleepError ?? restoreError }
+                scheduleExpiration(at: expirationDate)
             } else {
                 clearExpiration()
             }
@@ -638,8 +653,8 @@ private final class KeepAwakeManager {
         stateLock.unlock()
     }
 
-    private func scheduleExpiration(after duration: TimeInterval) {
-        let deadline = Date().addingTimeInterval(duration)
+    private func scheduleExpiration(at deadline: Date) {
+        let duration = max(0, deadline.timeIntervalSinceNow)
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             _ = self.disable()

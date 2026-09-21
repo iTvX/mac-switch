@@ -41,6 +41,7 @@ final class KeepAwakeBehaviorTests: XCTestCase {
         store.setKeepAwakeWhenLidClosed(true)
         try await settle(store)
         XCTAssertTrue(store.keepAwakeWhenLidClosed)
+        XCTAssertEqual(controller.receivedDeadline, originalDeadline)
         XCTAssertEqual(try XCTUnwrap(controller.requests.last?.duration), 43, accuracy: 2)
         XCTAssertEqual(defaults.object(forKey: "switch.keepAwake.endDate") as? Date, originalDeadline)
         store.setKeepAwakeWhenLidClosed(false)
@@ -69,6 +70,21 @@ final class KeepAwakeBehaviorTests: XCTestCase {
         defaults.set(Date().addingTimeInterval(-1), forKey: "switch.keepAwake.endDate")
         store.setKeepAwakeWhenLidClosed(true)
         try await settle(store)
+        XCTAssertEqual(controller.requests.last?.enabled, false)
+        XCTAssertFalse(store.snapshots[.keepAwake]?.isOn ?? true)
+        XCTAssertNil(defaults.object(forKey: "switch.keepAwake.endDate"))
+    }
+
+    func testAuthorizationDelayCannotRestartAnExpiredSession() async throws {
+        let (store, controller, defaults) = fixture()
+        store.set(.keepAwake, enabled: true)
+        try await settle(store)
+        let deadline = Date().addingTimeInterval(0.03)
+        defaults.set(deadline, forKey: "switch.keepAwake.endDate")
+        controller.delay = 0.08
+        store.setKeepAwakeWhenLidClosed(true)
+        try await settle(store)
+        XCTAssertEqual(controller.receivedDeadline, deadline)
         XCTAssertEqual(controller.requests.last?.enabled, false)
         XCTAssertFalse(store.snapshots[.keepAwake]?.isOn ?? true)
         XCTAssertNil(defaults.object(forKey: "switch.keepAwake.endDate"))
@@ -121,6 +137,8 @@ private final class KeepAwakeTestController: SystemSwitchControlling, @unchecked
     private let lock = NSLock()
     private var state = false
     private var recorded: [Request] = []
+    private var deadline: Date?
+    var receivedDeadline: Date? { lock.withLock { deadline } }
     var requests: [Request] { lock.withLock { recorded } }
     var onExternalChange: (@Sendable (SwitchKind) -> Void)?
     // Configured before the next asynchronous operation starts.
@@ -140,6 +158,12 @@ private final class KeepAwakeTestController: SystemSwitchControlling, @unchecked
             if failure == nil { state = enabled }
         }
         return SwitchOperationResult(snapshot: snapshot(for: .keepAwake, keepAwakeDuration: defaultDuration), error: failure)
+    }
+    func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        lock.withLock { deadline = endDate }
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+        let remaining = endDate?.timeIntervalSinceNow
+        return setKeepAwake(enabled: remaining.map { $0 > 0 } ?? true, duration: remaining, defaultDuration: defaultDuration)
     }
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult {
         SwitchOperationResult(snapshot: .off, error: nil)

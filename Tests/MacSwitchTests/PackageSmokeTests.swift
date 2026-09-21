@@ -1390,7 +1390,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(restoreSource.contains("defaults.set(Date().addingTimeInterval(duration), forKey: DefaultsKey.keepAwakeEndDate)"))
         XCTAssertTrue(restoreSource.contains("defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date"))
         XCTAssertTrue(restoreSource.contains("guard remaining > 0 else"))
-        XCTAssertTrue(restoreSource.contains("restoreKeepAwake(duration: restoreDuration, endDate: restoreEndDate)"))
+        XCTAssertTrue(restoreSource.contains("restoreKeepAwake(endDate: restoreEndDate)"))
         XCTAssertTrue(restoreSource.contains("keepAwakeRestoreEndDate = endDate"))
         XCTAssertTrue(restoreSource.contains("controller.setKeepAwake("))
         XCTAssertTrue(controllerSource.contains("func setKeepAwake(enabled: Bool, duration: TimeInterval?, defaultDuration: KeepAwakeDuration)"))

@@ -1038,7 +1038,7 @@ final class SwitchStore: ObservableObject {
             return
         }
         pendingKeepAwakeLidChange = (previousValue, endDate)
-        restoreKeepAwake(duration: endDate.map { max(0, $0.timeIntervalSinceNow) }, endDate: endDate)
+        restoreKeepAwake(endDate: endDate)
     }
 
     func move(_ source: SwitchKind, before target: SwitchKind) {
@@ -2432,7 +2432,6 @@ final class SwitchStore: ObservableObject {
             return
         }
 
-        let restoreDuration: TimeInterval?
         let restoreEndDate: Date?
         if let endDate = defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date {
             let remaining = endDate.timeIntervalSinceNow
@@ -2440,17 +2439,15 @@ final class SwitchStore: ObservableObject {
                 clearKeepAwakeRestoreState()
                 return
             }
-            restoreDuration = remaining
             restoreEndDate = endDate
         } else {
-            restoreDuration = nil
             restoreEndDate = nil
         }
 
-        restoreKeepAwake(duration: restoreDuration, endDate: restoreEndDate)
+        restoreKeepAwake(endDate: restoreEndDate)
     }
 
-    private func restoreKeepAwake(duration: TimeInterval?, endDate: Date?) {
+    private func restoreKeepAwake(endDate: Date?) {
         guard !isActionBusy(.keepAwake) else { return }
         invalidatePendingSnapshot(for: .keepAwake)
         let actionVersion = nextActionVersion(for: .keepAwake)
@@ -2461,8 +2458,7 @@ final class SwitchStore: ObservableObject {
 
         actionQueue.async { [weak self] in
             let result = controller.setKeepAwake(
-                enabled: true,
-                duration: duration,
+                endingAt: endDate,
                 defaultDuration: defaultDuration
             )
             DispatchQueue.main.async {
