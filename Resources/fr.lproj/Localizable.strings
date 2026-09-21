@@ -219,3 +219,10 @@
 "Keep Awake duration" = "Durée du maintien en éveil";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Choisissez la durée et le comportement du capot fermé directement dans la ligne de maintien en éveil de la barre de menus.";
 "Lid-closed mode may request administrator permission when activated." = "Le mode capot fermé peut demander une autorisation administrateur lors de son activation.";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "État vérifié à l’utilisation";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "Autorisez une fois le maintien en éveil dans les éléments d’ouverture. Aucun mot de passe ne sera demandé pour les modifications suivantes.";
+"Authorize Keep Awake" = "Autoriser le maintien en éveil";
+"Keep Awake access is ready" = "Maintien en éveil autorisé";
+"Apply to current session" = "Appliquer à la session actuelle";

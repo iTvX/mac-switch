@@ -219,3 +219,10 @@
 "Keep Awake duration" = "Durata del mantenimento attivo";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Scegli durata e comportamento a coperchio chiuso direttamente dalla voce per mantenere attivo nella barra dei menu.";
 "Lid-closed mode may request administrator permission when activated." = "La modalità a coperchio chiuso potrebbe richiedere il permesso di amministratore durante l’attivazione.";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "Stato verificato durante l’uso";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "Autorizza una volta negli elementi login. Le modifiche successive non richiedono la password.";
+"Authorize Keep Awake" = "Autorizza mantenimento attivo";
+"Keep Awake access is ready" = "Accesso al mantenimento attivo pronto";
+"Apply to current session" = "Applica alla sessione corrente";

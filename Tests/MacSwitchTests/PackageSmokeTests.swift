@@ -214,7 +214,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(controlRowSource.contains("DashboardRightClickDetector { event in"))
         XCTAssertTrue(controlRowSource.contains("quickMenuOpeningEventNumber = event.eventNumber"))
         XCTAssertFalse(controlRowSource.contains(".simultaneousGesture(TapGesture().onEnded"))
-        XCTAssertTrue(controlRowSource.contains("private struct DashboardRowQuickMenu"))
+        XCTAssertTrue(controlRowSource.contains("struct DashboardRowQuickMenu"))
         XCTAssertTrue(controlRowSource.contains("CGSize(width: 154, height: 84)"))
         XCTAssertFalse(controlRowSource.contains("static let width: CGFloat = 178"))
         XCTAssertTrue(controlRowSource.contains("private struct DashboardQuickMenuButton"))
@@ -1307,7 +1307,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(model.contains("case .indefinitely: return \"Activate indefinitely\""))
         XCTAssertTrue(model.contains("case .tomorrow: return \"Activate until tomorrow\""))
         XCTAssertTrue(switches.contains("return \"Active indefinitely\""))
-        XCTAssertTrue(switches.contains("return \"Active until \\(timeDisplay(for: endDate))\""))
+        XCTAssertTrue(switches.contains("return \"Active until "))
         XCTAssertFalse(model.contains("Activate for indefinitely"))
         XCTAssertFalse(switches.contains("Activate for indefinitely"))
         XCTAssertFalse(switches.contains("Activate till"))
@@ -1330,7 +1330,7 @@ final class PackageSmokeTests: XCTestCase {
         let controllerTerminationSource = try extract(
             switches,
             from: "func prepareForTermination()",
-            to: "}\n\nprivate final class KeepAwakeManager"
+            to: "}\n\nprotocol KeepAwakeAsserting"
         )
 
         XCTAssertTrue(terminateSource.contains("store.prepareForTermination()"))
@@ -1371,7 +1371,7 @@ final class PackageSmokeTests: XCTestCase {
         let controllerSource = try extract(
             switches,
             from: "final class SystemSwitchController",
-            to: "private final class KeepAwakeManager"
+            to: "final class KeepAwakeManager"
         )
 
         XCTAssertTrue(model.contains("static let keepAwakeActive = \"switch.keepAwake.active\""))
@@ -1767,7 +1767,7 @@ final class PackageSmokeTests: XCTestCase {
         )
         let keepAwakeSource = try extract(
             switches,
-            from: "private final class KeepAwakeManager",
+            from: "final class KeepAwakeManager",
             to: "enum KeepAwakePreferences"
         )
 
@@ -1793,13 +1793,10 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(snapshotPolicy.contains(".hideWindows"))
         XCTAssertTrue(keepAwakeSource.contains("DispatchWorkItem"))
         XCTAssertTrue(keepAwakeSource.contains("DispatchQueue.global(qos: .utility).asyncAfter"))
-        XCTAssertTrue(keepAwakeSource.contains("!Self.isSafeSelfTest"))
         XCTAssertTrue(keepAwakeSource.contains("CommandLine.arguments.contains(\"--self-test-safe\")"))
-        XCTAssertTrue(keepAwakeSource.contains("guard systemResult == kIOReturnSuccess, displayResult == kIOReturnSuccess else"))
-        XCTAssertTrue(keepAwakeSource.contains("releaseAssertions(createdAssertionIDs)"))
-        XCTAssertTrue(keepAwakeSource.contains("powerAssertionFailureMessage(systemResult: systemResult, displayResult: displayResult)"))
-        XCTAssertTrue(switches.contains("lid-closed sleep did not change"))
-        XCTAssertTrue(switches.contains("AutomationPermission.deniedMessage(for: result, target: \"System Events\")"))
+        XCTAssertTrue(keepAwakeSource.contains("if !isActive"))
+        XCTAssertTrue(keepAwakeSource.contains("lidController.setDisabled(wantsLid, until: expirationDate)"))
+        XCTAssertFalse(keepAwakeSource.contains("with administrator privileges"))
         XCTAssertFalse(
             keepAwakeSource.contains("Timer.scheduledTimer"),
             "Keep Awake expiration should not depend on a run loop when actions run off the main thread"

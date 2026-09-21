@@ -27,6 +27,38 @@ final class DoNotDisturbBehaviorTests: XCTestCase {
         }
     }
 
+    func testOpeningDashboardNeverRunsShortcuts() throws {
+        let fake = FakeDNDExecutor()
+        let defaults = InMemoryUserDefaults()
+        let subject = DoNotDisturbShortcuts(executor: fake, defaults: defaults)
+        XCTAssertNil(subject.verifySetup())
+        let runsAfterSetup = fake.runCount
+        for _ in 0..<10 { XCTAssertTrue(subject.snapshot().isAvailable) }
+        XCTAssertEqual(fake.runCount, runsAfterSetup)
+        let relaunched = DoNotDisturbShortcuts(executor: fake, defaults: defaults)
+        XCTAssertTrue(relaunched.snapshot().isAvailable)
+        XCTAssertEqual(relaunched.snapshot().subtitle, "Checked when used")
+        XCTAssertEqual(fake.runCount, runsAfterSetup)
+        XCTAssertFalse(relaunched.snapshot(force: true).isOn)
+        XCTAssertEqual(fake.runCount, runsAfterSetup + 1, "Explicit preflight still reads the real state")
+    }
+
+    @MainActor
+    func testApplicationActivationDoesNotRunAnExpiredDNDShortcut() async throws {
+        let fake = FakeDNDExecutor()
+        let defaults = InMemoryUserDefaults()
+        let backend = DoNotDisturbShortcuts(executor: fake, defaults: defaults)
+        XCTAssertNil(backend.verifySetup())
+        defaults.set(["doNotDisturb", "keepAwake"], forKey: "switch.enabledKinds")
+        defaults.set(2, forKey: "switch.customizationDefaultsVersion")
+        defaults.set(Date().addingTimeInterval(-60), forKey: "switch.doNotDisturb.endDate")
+        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: DoNotDisturbSwitch(shortcuts: backend)), defaults: defaults, enableRuntimeServices: false)
+        let before = fake.runCount
+        store.handleRuntimeContextChange(isApplicationActivation: true)
+        for _ in 0..<100 where store.isRefreshing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(fake.runCount, before)
+    }
+
     func testInstallationRejectsLegacyAmbiguousAndInvalidIdentifiers() {
         let fake = FakeDNDExecutor()
         let listing = fake.listing
@@ -228,6 +260,8 @@ private final class FakeDNDExecutor: DNDShortcutExecuting, @unchecked Sendable {
     let onID = "00000000-0000-0000-0000-000000000001"
     let offID = "00000000-0000-0000-0000-000000000002"
     private let lock = NSLock()
+    private var storedRuns = 0
+    var runCount: Int { lock.withLock { storedRuns } }
     private var storedFocus = ""
     private var storedWrites: [Bool] = []
     var focus: String { get { lock.withLock { storedFocus } } set { lock.withLock { storedFocus = newValue } } }
@@ -244,6 +278,7 @@ private final class FakeDNDExecutor: DNDShortcutExecuting, @unchecked Sendable {
     func list() throws -> String { listing }
     func run(identifier: String, readOnly: Bool) throws -> String {
         try lock.withLock {
+            storedRuns += 1
             let role: DNDShortcut = identifier == onID ? .enable : .disable
             if readOnly && failRead { throw DNDShortcutError("Do Not Disturb status unavailable.") }
             if !readOnly {

@@ -526,187 +526,146 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
     }
 }
 
-private final class KeepAwakeManager {
+protocol KeepAwakeAsserting: Sendable {
+    func create() -> (ids: [IOPMAssertionID], error: String?)
+    func release(_ ids: [IOPMAssertionID])
+}
+
+struct SystemKeepAwakeAssertions: KeepAwakeAsserting {
+    func create() -> (ids: [IOPMAssertionID], error: String?) {
+        var ids: [IOPMAssertionID] = []
+        for type in [kIOPMAssertionTypePreventUserIdleSystemSleep, kIOPMAssertionTypeNoDisplaySleep] {
+            var id = IOPMAssertionID(0)
+            let result = IOPMAssertionCreateWithName(type as CFString, IOPMAssertionLevel(kIOPMAssertionLevelOn), "Mac Switch Keep Awake" as CFString, &id)
+            guard result == kIOReturnSuccess else {
+                release(ids)
+                return ([], "Could not create the system or display sleep assertion.")
+            }
+            ids.append(id)
+        }
+        return (ids, nil)
+    }
+    func release(_ ids: [IOPMAssertionID]) { ids.forEach { IOPMAssertionRelease($0) } }
+}
+
+final class KeepAwakeManager: @unchecked Sendable {
     private let stateLock = NSLock()
+    private let operationLock = NSRecursiveLock()
+    private let assertions: any KeepAwakeAsserting
+    private let lidController: any LidSleepControlling
+    private let lidPreference: @Sendable () -> Bool
+    private let didRestoreLegacy: @Sendable () -> Void
+    private var legacyRecoveryPending: Bool
     private var assertionIDs: [IOPMAssertionID] = []
     private var expirationWorkItem: DispatchWorkItem?
     private var endDate: Date?
+    private var ownsLidLease = false
     var onExpired: (() -> Void)?
 
-    init() {
-        if KeepAwakePreferences.managedDisableSleep, !Self.isSafeSelfTest {
-            DispatchQueue.global(qos: .utility).async {
-                if KeepAwakePreferences.setSleepDisabled(false) == nil {
-                    KeepAwakePreferences.managedDisableSleep = false
-                }
-            }
-        }
-    }
-
-    private static var isSafeSelfTest: Bool {
-        CommandLine.arguments.contains("--self-test-safe")
+    init(
+        assertions: any KeepAwakeAsserting = SystemKeepAwakeAssertions(),
+        lidController: any LidSleepControlling = SleepHelperClient.shared,
+        lidPreference: @escaping @Sendable () -> Bool = { KeepAwakePreferences.keepAwakeWhenLidClosed },
+        legacyRecoveryPending: Bool = KeepAwakePreferences.managedDisableSleep,
+        didRestoreLegacy: @escaping @Sendable () -> Void = { KeepAwakePreferences.managedDisableSleep = false }
+    ) {
+        self.assertions = assertions
+        self.lidController = lidController
+        self.lidPreference = lidPreference
+        self.legacyRecoveryPending = legacyRecoveryPending && !CommandLine.arguments.contains("--self-test-safe")
+        self.didRestoreLegacy = didRestoreLegacy
     }
 
     deinit {
-        disable()
+        // Safe diagnostics only read state; they must not restore another process's session.
+        if !CommandLine.arguments.contains("--self-test-safe") { _ = disable() }
     }
 
-    var isActive: Bool {
-        stateLock.lock()
-        let active = !assertionIDs.isEmpty
-        stateLock.unlock()
-        return active
-    }
+    var isActive: Bool { stateLock.withLock { !assertionIDs.isEmpty } }
 
     func subtitle(defaultDuration: KeepAwakeDuration) -> String {
-        let state = currentState()
-        guard state.isActive else {
-            return defaultDuration.dashboardSubtitle
+        stateLock.withLock {
+            guard !assertionIDs.isEmpty else { return defaultDuration.dashboardSubtitle }
+            if ownsLidLease { return "Disable Sleep Enabled" }
+            guard let endDate else { return "Active indefinitely" }
+            let components = Calendar.current.dateComponents([.hour, .minute], from: endDate)
+            return "Active until \(TimeOfDay(hour: components.hour ?? 0, minute: components.minute ?? 0).display)"
         }
-        if KeepAwakePreferences.managedDisableSleep {
-            return "Disable Sleep Enabled"
-        }
-        guard let endDate = state.endDate else {
-            return "Active indefinitely"
-        }
-        return "Active until \(timeDisplay(for: endDate))"
     }
 
-    func setEnabled(_ enabled: Bool, duration: TimeInterval?, endingAt endDate: Date? = nil) -> String? {
-        if enabled {
-            let expirationDate = endDate ?? duration.map { Date().addingTimeInterval($0) }
-            let restoreError = disable()
-            if let expirationDate, expirationDate <= Date() { return restoreError }
-            let reason = "Mac Switch Keep Awake" as CFString
-            var systemID = IOPMAssertionID(0)
-            var displayID = IOPMAssertionID(0)
-            let systemResult = IOPMAssertionCreateWithName(
-                kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
-                IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                reason,
-                &systemID
-            )
-            let displayResult = IOPMAssertionCreateWithName(
-                kIOPMAssertionTypeNoDisplaySleep as CFString,
-                IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                reason,
-                &displayID
-            )
-            var createdAssertionIDs: [IOPMAssertionID] = []
-            if systemResult == kIOReturnSuccess { createdAssertionIDs.append(systemID) }
-            if displayResult == kIOReturnSuccess { createdAssertionIDs.append(displayID) }
-
-            guard systemResult == kIOReturnSuccess, displayResult == kIOReturnSuccess else {
-                releaseAssertions(createdAssertionIDs)
-                return powerAssertionFailureMessage(systemResult: systemResult, displayResult: displayResult)
-            }
-            replaceAssertions(createdAssertionIDs)
-
-            var disableSleepError: String?
-            if KeepAwakePreferences.keepAwakeWhenLidClosed,
-               !KeepAwakePreferences.sleepDisabled {
-                disableSleepError = KeepAwakePreferences.setSleepDisabled(true)
-                if disableSleepError == nil {
-                    KeepAwakePreferences.managedDisableSleep = true
-                }
-            }
-
-            if let expirationDate {
-                // Authorization may take longer than the remaining session. Never extend it.
-                guard expirationDate > Date() else { return disable() ?? disableSleepError ?? restoreError }
-                scheduleExpiration(at: expirationDate)
-            } else {
-                clearExpiration()
-            }
-            if let disableSleepError {
-                return "Keep Awake is active, but could not disable lid-closed sleep: \(disableSleepError)"
-            }
-            return restoreError.map { "Keep Awake is active, but could not restore the previous disable-sleep state first: \($0)" }
-        } else {
-            return disable()
+    func setEnabled(_ enabled: Bool, duration: TimeInterval?, endingAt deadline: Date? = nil) -> String? {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        guard enabled else { return disable() }
+        let expirationDate = deadline ?? duration.map { Date().addingTimeInterval($0) }
+        if let expirationDate, expirationDate <= Date() { return disable() }
+        clearExpiration()
+        // A timer change must not tear down assertions or release/reacquire privileged access.
+        if !isActive {
+            let result = assertions.create()
+            guard result.error == nil else { return result.error }
+            stateLock.withLock { assertionIDs = result.ids }
         }
+        var error: String?
+        if legacyRecoveryPending {
+            error = lidController.restoreLegacySetting()
+            if error == nil { legacyRecoveryPending = false; didRestoreLegacy() }
+        }
+        let wantsLid = lidPreference()
+        if error == nil, wantsLid || stateLock.withLock({ ownsLidLease }) {
+            error = lidController.setDisabled(wantsLid, until: expirationDate)
+            if error == nil { stateLock.withLock { ownsLidLease = wantsLid } }
+        }
+        if let expirationDate {
+            guard expirationDate > Date() else { return disable() ?? error }
+            scheduleExpiration(at: expirationDate)
+        }
+        if let error { return "Keep Awake is active, but lid-closed mode could not be updated: \(error)" }
+        return nil
     }
 
     @discardableResult
     private func disable() -> String? {
-        let ids = takeAssertionsAndCancelExpiration()
-        ids.forEach { IOPMAssertionRelease($0) }
-        if KeepAwakePreferences.managedDisableSleep {
-            if let error = KeepAwakePreferences.setSleepDisabled(false) {
-                return error
-            }
-            KeepAwakePreferences.managedDisableSleep = false
+        operationLock.lock()
+        defer { operationLock.unlock() }
+        clearExpiration()
+        let ids = stateLock.withLock { let ids = assertionIDs; assertionIDs.removeAll(); return ids }
+        assertions.release(ids)
+        if stateLock.withLock({ ownsLidLease }) {
+            if let error = lidController.setDisabled(false, until: nil) { return error }
+            stateLock.withLock { ownsLidLease = false }
+        }
+        if legacyRecoveryPending {
+            if let error = lidController.restoreLegacySetting() { return error }
+            legacyRecoveryPending = false
+            didRestoreLegacy()
         }
         return nil
     }
 
-    private func currentState() -> (isActive: Bool, endDate: Date?) {
-        stateLock.lock()
-        let state = (!assertionIDs.isEmpty, endDate)
-        stateLock.unlock()
-        return state
-    }
-
-    private func replaceAssertions(_ ids: [IOPMAssertionID]) {
-        stateLock.lock()
-        assertionIDs = ids
-        stateLock.unlock()
-    }
-
     private func scheduleExpiration(at deadline: Date) {
-        let duration = max(0, deadline.timeIntervalSinceNow)
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
+            self.operationLock.lock()
+            defer { self.operationLock.unlock() }
+            guard self.stateLock.withLock({ self.endDate == deadline }) else { return }
             _ = self.disable()
             self.onExpired?()
         }
-        stateLock.lock()
-        expirationWorkItem?.cancel()
-        expirationWorkItem = workItem
-        endDate = deadline
-        stateLock.unlock()
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + duration, execute: workItem)
+        stateLock.withLock {
+            expirationWorkItem?.cancel()
+            expirationWorkItem = workItem
+            endDate = deadline
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + max(0, deadline.timeIntervalSinceNow), execute: workItem)
     }
 
     private func clearExpiration() {
-        stateLock.lock()
-        expirationWorkItem?.cancel()
-        expirationWorkItem = nil
-        endDate = nil
-        stateLock.unlock()
-    }
-
-    private func takeAssertionsAndCancelExpiration() -> [IOPMAssertionID] {
-        stateLock.lock()
-        expirationWorkItem?.cancel()
-        expirationWorkItem = nil
-        endDate = nil
-        let ids = assertionIDs
-        assertionIDs.removeAll()
-        stateLock.unlock()
-        return ids
-    }
-
-    private func releaseAssertions(_ ids: [IOPMAssertionID]) {
-        ids.forEach { IOPMAssertionRelease($0) }
-    }
-
-    private func powerAssertionFailureMessage(systemResult: IOReturn, displayResult: IOReturn) -> String {
-        var failures: [String] = []
-        if systemResult != kIOReturnSuccess {
-            failures.append("system sleep")
+        stateLock.withLock {
+            expirationWorkItem?.cancel()
+            expirationWorkItem = nil
+            endDate = nil
         }
-        if displayResult != kIOReturnSuccess {
-            failures.append("display sleep")
-        }
-        let target = failures.isEmpty ? "power" : failures.joined(separator: " and ")
-        return "Could not create the \(target) assertion."
-    }
-
-    private func timeDisplay(for date: Date) -> String {
-        let components = Calendar.current.dateComponents([.hour, .minute], from: date)
-        guard let hour = components.hour, let minute = components.minute else { return "" }
-        return TimeOfDay(hour: hour, minute: minute).display
     }
 }
 
@@ -719,7 +678,7 @@ enum KeepAwakePreferences {
         set { UserDefaults.standard.set(newValue, forKey: keepAwakeWhenLidClosedKey) }
     }
 
-    fileprivate static var managedDisableSleep: Bool {
+    static var managedDisableSleep: Bool {
         get { UserDefaults.standard.bool(forKey: managedDisableSleepKey) }
         set { UserDefaults.standard.set(newValue, forKey: managedDisableSleepKey) }
     }
@@ -737,22 +696,7 @@ enum KeepAwakePreferences {
         return false
     }
 
-    fileprivate static func setSleepDisabled(_ disabled: Bool) -> String? {
-        let value = disabled ? 1 : 0
-        let script = """
-        do shell script "/usr/bin/pmset -a disablesleep \(value)" with administrator privileges
-        """
-        let result = ProcessRunner.run("/usr/bin/osascript", ["-e", script], timeout: 120)
-        if result.status == 0 {
-            return waitForSystemSwitchCondition(timeout: 1.5, { sleepDisabled == disabled })
-                ? nil
-                : "macOS accepted the request, but lid-closed sleep did not change."
-        }
-        if let automationError = AutomationPermission.deniedMessage(for: result, target: "System Events") {
-            return automationError
-        }
-        return ProcessRunner.failureMessage(for: result, fallback: "Could not update disable sleep.")
-    }
+
 }
 
 private struct StageManagerSwitch {

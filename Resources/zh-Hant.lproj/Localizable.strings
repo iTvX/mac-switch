@@ -219,3 +219,10 @@
 "Keep Awake duration" = "保持喚醒時長";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "直接在選單列的保持喚醒項目中選擇時長與闔蓋行為。";
 "Lid-closed mode may request administrator permission when activated." = "啟用闔蓋不休眠時可能需要管理員授權。";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "操作時確認狀態";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "在登入項目中授權保持喚醒一次，之後更改設定無需再次輸入密碼。";
+"Authorize Keep Awake" = "授權保持喚醒";
+"Keep Awake access is ready" = "保持喚醒權限已就緒";
+"Apply to current session" = "套用至目前階段";
