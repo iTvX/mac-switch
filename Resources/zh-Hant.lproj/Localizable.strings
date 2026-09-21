@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "兩個捷徑均已安裝。請驗證設定以繼續。";
 "Add both shortcuts, then return here to verify setup." = "加入兩個捷徑後，返回此處驗證設定。";
 "Control Do Not Disturb in the background with two installed shortcuts." = "透過兩個已安裝的捷徑在背景控制勿擾模式。";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "保持喚醒選項";
+"Choose duration and lid-closed behavior" = "選擇時長與闔蓋行為";
+"Keep Awake duration" = "保持喚醒時長";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "直接在選單列的保持喚醒項目中選擇時長與闔蓋行為。";
+"Lid-closed mode may request administrator permission when activated." = "啟用闔蓋不休眠時可能需要管理員授權。";

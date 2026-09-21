@@ -151,6 +151,8 @@ struct DashboardView: View {
                 .zIndex(39)
 
                 DashboardRowQuickMenu(
+                    kind: kind,
+                    store: store,
                     hideDisabledReason: hideFromMenuDisabledReason(for: kind),
                     configure: {
                         closeQuickMenu()
@@ -161,7 +163,7 @@ struct DashboardView: View {
                         store.setEnabled(kind, false)
                     }
                 )
-                .position(quickMenuPosition(for: rowFrame))
+                .position(quickMenuPosition(for: rowFrame, kind: kind))
                 .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
                 .zIndex(40)
             }
@@ -189,9 +191,10 @@ struct DashboardView: View {
         }
     }
 
-    private func quickMenuPosition(for rowFrame: CGRect) -> CGPoint {
-        let halfWidth = DashboardRowQuickMenu.width / 2
-        let halfHeight = DashboardRowQuickMenu.approximateHeight / 2
+    private func quickMenuPosition(for rowFrame: CGRect, kind: SwitchKind) -> CGPoint {
+        let size = DashboardRowQuickMenu.size(for: kind)
+        let halfWidth = size.width / 2
+        let halfHeight = size.height / 2
         let x = min(
             panelSize.width - halfWidth - 10,
             max(halfWidth + 10, rowFrame.maxX - halfWidth - 4)
@@ -891,7 +894,12 @@ private struct ControlRow: View {
 
             HStack(spacing: 9) {
                 if kind == .keepAwake {
-                    KeepAwakeDurationMenu(store: store)
+                    KeepAwakeDurationMenu(store: store) {
+                        withAnimation(.snappy(duration: 0.16)) {
+                            quickMenuOpeningEventNumber = NSApp.currentEvent?.eventNumber
+                            quickMenuKind = isQuickMenuPresented ? nil : .keepAwake
+                        }
+                    }
                 } else if kind == .doNotDisturb {
                     DoNotDisturbDurationMenu(store: store)
                 }
@@ -1052,15 +1060,22 @@ private struct DashboardSwitchButton: View {
 }
 
 private struct DashboardRowQuickMenu: View {
-    static let width: CGFloat = 154
-    static let approximateHeight: CGFloat = 84
+    static func size(for kind: SwitchKind) -> CGSize {
+        kind == .keepAwake ? CGSize(width: 268, height: 266) : CGSize(width: 154, height: 84)
+    }
 
+    let kind: SwitchKind
+    @ObservedObject var store: SwitchStore
     let hideDisabledReason: String?
     let configure: () -> Void
     let hideFromMenu: () -> Void
 
     var body: some View {
         VStack(spacing: 3) {
+            if kind == .keepAwake {
+                KeepAwakeQuickOptions(store: store)
+                Divider().padding(.horizontal, 7)
+            }
             DashboardQuickMenuButton(
                 symbol: "slider.horizontal.3",
                 title: "Configure",
@@ -1083,7 +1098,7 @@ private struct DashboardRowQuickMenu: View {
             )
         }
         .padding(6)
-        .frame(width: Self.width)
+        .frame(width: Self.size(for: kind).width)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1358,50 +1373,76 @@ private struct SwitchGlyph: View {
 
 private struct KeepAwakeDurationMenu: View {
     @ObservedObject var store: SwitchStore
-    @State private var keepAwakeWhenLidClosed = KeepAwakePreferences.keepAwakeWhenLidClosed
+    let openOptions: () -> Void
 
     var body: some View {
-        Menu {
-            Button {
-                store.setKeepAwakeDuration(.indefinitely)
-            } label: {
-                Text(LocalizedStringKey(KeepAwakeDuration.indefinitely.menuTitle))
+        Button(action: openOptions) {
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(store.keepAwakeDuration == .indefinitely ? "∞" : store.keepAwakeDuration.compactDashboardTitle)
+                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .bold))
             }
-
-            Divider()
-
-            Toggle("Keep awake when the lid is closed", isOn: Binding(
-                get: { keepAwakeWhenLidClosed },
-                set: { value, _ in
-                    keepAwakeWhenLidClosed = value
-                    KeepAwakePreferences.keepAwakeWhenLidClosed = value
-                    if store.snapshots[.keepAwake]?.isOn == true {
-                        store.set(.keepAwake, enabled: true)
-                    } else {
-                        store.refreshAsync(.keepAwake)
-                    }
-                }
-            ))
-
-            Divider()
-
-            ForEach(KeepAwakeDuration.allCases.filter { $0 != .indefinitely }) { duration in
-                Button {
-                    store.setKeepAwakeDuration(duration)
-                } label: {
-                    Text(LocalizedStringKey(duration.menuTitle))
-                }
-            }
-        } label: {
-            DurationMenuLabel(title: store.keepAwakeDuration.compactDashboardTitle)
+            .foregroundStyle(store.snapshots[.keepAwake]?.isOn == true ? Color.accentColor : .secondary)
+            .frame(width: 62, height: 25)
+            .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
         .disabled(store.isActionBusy(.keepAwake))
         .opacity(store.isActionBusy(.keepAwake) ? 0.55 : 1)
-        .onAppear {
-            keepAwakeWhenLidClosed = KeepAwakePreferences.keepAwakeWhenLidClosed
+        .accessibilityLabel(Text("Keep Awake options"))
+        .accessibilityValue(Text(LocalizedStringKey(store.keepAwakeDuration.menuTitle)))
+        .help("Choose duration and lid-closed behavior")
+    }
+}
+
+private struct KeepAwakeQuickOptions: View {
+    @ObservedObject var store: SwitchStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Keep Awake duration")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
+                ForEach(KeepAwakeDuration.allCases) { duration in
+                    Button {
+                        store.setKeepAwakeDuration(duration)
+                    } label: {
+                        HStack(spacing: 3) {
+                            if store.keepAwakeDuration == duration {
+                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                            }
+                            Text(duration == .indefinitely ? "∞" : duration.compactDashboardTitle)
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 27)
+                        .foregroundStyle(store.keepAwakeDuration == duration ? Color.accentColor : .primary)
+                        .background(store.keepAwakeDuration == duration ? Color.accentColor.opacity(0.16) : DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(Text(LocalizedStringKey(duration.menuTitle)))
+                    .accessibilityAddTraits(store.keepAwakeDuration == duration ? .isSelected : [])
+                    .help(Text(LocalizedStringKey(duration.menuTitle)))
+                }
+            }
+            Toggle("Keep awake when the lid is closed", isOn: Binding(
+                get: { store.keepAwakeWhenLidClosed },
+                set: { value, _ in store.setKeepAwakeWhenLidClosed(value) }
+            ))
+            .toggleStyle(.checkbox)
+            .font(.system(size: 12))
+            .fixedSize(horizontal: false, vertical: true)
+            .help("Lid-closed mode may request administrator permission when activated.")
         }
+        .padding(7)
+        .disabled(store.isActionBusy(.keepAwake))
     }
 }
 
@@ -4984,7 +5025,6 @@ private struct ShortcutInstallRow: View {
 
 private struct KeepAwakePreferencesPanel: View {
     @ObservedObject var store: SwitchStore
-    @State private var keepAwakeWhenLidClosed = KeepAwakePreferences.keepAwakeWhenLidClosed
     @State private var sleepDisabled = false
     @State private var sleepStatusLoading = false
     @State private var pendingSleepStatusRefresh = false
@@ -4994,7 +5034,7 @@ private struct KeepAwakePreferencesPanel: View {
             StatusSummaryRow(
                 symbol: "cup.and.saucer.fill",
                 title: store.snapshots[.keepAwake]?.isOn == true ? "Keep Awake active" : "Keep Awake ready",
-                message: keepAwakeWhenLidClosed
+                message: store.keepAwakeWhenLidClosed
                     ? sleepStatusMessage
                     : "Keep Awake prevents idle sleep for the selected duration."
             )
@@ -5017,16 +5057,8 @@ private struct KeepAwakePreferencesPanel: View {
             Divider()
 
             Toggle("Keep awake when the lid is closed", isOn: Binding(
-                get: { keepAwakeWhenLidClosed },
-                set: { value, _ in
-                    keepAwakeWhenLidClosed = value
-                    KeepAwakePreferences.keepAwakeWhenLidClosed = value
-                    if store.snapshots[.keepAwake]?.isOn == true {
-                        store.set(.keepAwake, enabled: true)
-                    } else {
-                        store.refreshAsync(.keepAwake)
-                    }
-                }
+                get: { store.keepAwakeWhenLidClosed },
+                set: { value, _ in store.setKeepAwakeWhenLidClosed(value) }
             ))
             .disabled(store.isActionBusy(.keepAwake))
 
@@ -5058,7 +5090,6 @@ private struct KeepAwakePreferencesPanel: View {
             }
         }
         .onAppear {
-            keepAwakeWhenLidClosed = KeepAwakePreferences.keepAwakeWhenLidClosed
             refreshSleepStatus()
         }
     }
@@ -6716,7 +6747,7 @@ private extension SwitchKind {
         case .darkMode:
             return "Use the Dark Mode options panel to choose manual, custom, or sunrise/sunset scheduling."
         case .keepAwake:
-            return "Use the Keep Awake options panel to choose duration and lid-closed behavior."
+            return "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar."
         case .screenSaver:
             return "Starts the system screen saver immediately from the dashboard action button."
         case .bluetoothAudio:

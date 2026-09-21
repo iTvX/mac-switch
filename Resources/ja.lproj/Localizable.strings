@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "両方のショートカットがインストール済みです。設定を確認してください。";
 "Add both shortcuts, then return here to verify setup." = "両方のショートカットを追加してから、ここに戻って設定を確認してください。";
 "Control Do Not Disturb in the background with two installed shortcuts." = "インストールした2つのショートカットで、おやすみモードをバックグラウンドで操作します。";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "スリープ防止のオプション";
+"Choose duration and lid-closed behavior" = "時間と蓋を閉じたときの動作を選択";
+"Keep Awake duration" = "スリープ防止の時間";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "メニューバーのスリープ防止の行で、時間と蓋を閉じたときの動作を直接選択できます。";
+"Lid-closed mode may request administrator permission when activated." = "蓋を閉じたまま使用するモードの有効化には、管理者の許可が必要な場合があります。";

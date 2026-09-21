@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "两个快捷指令均已安装。请验证设置以继续。";
 "Add both shortcuts, then return here to verify setup." = "添加两个快捷指令后，返回此处验证设置。";
 "Control Do Not Disturb in the background with two installed shortcuts." = "通过两个已安装的快捷指令在后台控制勿扰模式。";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "保持唤醒选项";
+"Choose duration and lid-closed behavior" = "选择时长与合盖行为";
+"Keep Awake duration" = "保持唤醒时长";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "直接在菜单栏的保持唤醒一行选择时长与合盖行为。";
+"Lid-closed mode may request administrator permission when activated." = "启用合盖不休眠时可能需要管理员授权。";

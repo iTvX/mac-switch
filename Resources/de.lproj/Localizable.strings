@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "Beide Kurzbefehle sind installiert. Prüfe die Einrichtung, um fortzufahren.";
 "Add both shortcuts, then return here to verify setup." = "Füge beide Kurzbefehle hinzu und kehre zur Prüfung hierher zurück.";
 "Control Do Not Disturb in the background with two installed shortcuts." = "Steuere „Nicht stören“ im Hintergrund mit zwei installierten Kurzbefehlen.";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "Optionen zum Wachhalten";
+"Choose duration and lid-closed behavior" = "Dauer und Verhalten bei geschlossenem Deckel wählen";
+"Keep Awake duration" = "Dauer des Wachhaltens";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Wähle die Dauer und das Verhalten bei geschlossenem Deckel direkt in der Zeile zum Wachhalten in der Menüleiste.";
+"Lid-closed mode may request administrator permission when activated." = "Beim Aktivieren des Modus mit geschlossenem Deckel kann eine Administratorfreigabe erforderlich sein.";
