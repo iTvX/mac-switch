@@ -738,15 +738,9 @@ final class SwitchStore: ObservableObject {
 
     @Published var snapshots: [SwitchKind: SwitchSnapshot] = [:]
 
-    @Published var keepAwakeDuration: KeepAwakeDuration {
-        didSet {
-            defaults.set(keepAwakeDuration.rawValue, forKey: DefaultsKey.keepAwakeDuration)
-            refresh(.keepAwake)
-            if snapshots[.keepAwake]?.isOn == true {
-                set(.keepAwake, enabled: true)
-            }
-        }
-    }
+    @Published private(set) var keepAwakeDuration: KeepAwakeDuration
+    @Published private(set) var keepAwakeWhenLidClosed: Bool
+    private var pendingKeepAwakeLidChange: (previousValue: Bool, endDate: Date?)?
 
     @Published var doNotDisturbDuration: DoNotDisturbDuration {
         didSet {
@@ -926,6 +920,7 @@ final class SwitchStore: ObservableObject {
 
         let durationRaw = defaults.string(forKey: DefaultsKey.keepAwakeDuration)
         keepAwakeDuration = durationRaw.flatMap(KeepAwakeDuration.init(rawValue:)) ?? .indefinitely
+        keepAwakeWhenLidClosed = defaults.bool(forKey: KeepAwakePreferences.keepAwakeWhenLidClosedKey)
 
         let doNotDisturbDurationRaw = defaults.string(forKey: DefaultsKey.doNotDisturbDuration)
         doNotDisturbDuration = doNotDisturbDurationRaw.flatMap(DoNotDisturbDuration.init(rawValue:)) ?? .indefinitely
@@ -1018,13 +1013,32 @@ final class SwitchStore: ObservableObject {
     }
 
     func setKeepAwakeDuration(_ duration: KeepAwakeDuration) {
-        guard keepAwakeDuration != duration else { return }
+        guard !isActionBusy(.keepAwake), keepAwakeDuration != duration else { return }
         keepAwakeDuration = duration
+        defaults.set(duration.rawValue, forKey: DefaultsKey.keepAwakeDuration)
         if snapshots[.keepAwake]?.isOn == true {
             set(.keepAwake, enabled: true)
         } else {
             refreshAsync(.keepAwake)
         }
+    }
+
+    func setKeepAwakeWhenLidClosed(_ enabled: Bool) {
+        guard !isActionBusy(.keepAwake), keepAwakeWhenLidClosed != enabled else { return }
+        let previousValue = keepAwakeWhenLidClosed
+        keepAwakeWhenLidClosed = enabled
+        defaults.set(enabled, forKey: KeepAwakePreferences.keepAwakeWhenLidClosedKey)
+        guard snapshots[.keepAwake]?.isOn == true else {
+            refreshAsync(.keepAwake)
+            return
+        }
+        let endDate = defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date
+        if let endDate, endDate <= Date() {
+            set(.keepAwake, enabled: false)
+            return
+        }
+        pendingKeepAwakeLidChange = (previousValue, endDate)
+        restoreKeepAwake(duration: endDate.map { max(0, $0.timeIntervalSinceNow) }, endDate: endDate)
     }
 
     func move(_ source: SwitchKind, before target: SwitchKind) {
@@ -1907,6 +1921,21 @@ final class SwitchStore: ObservableObject {
                 snapshot: result.snapshot,
                 restoredEndDate: restoredEndDate
             )
+            if let change = pendingKeepAwakeLidChange {
+                pendingKeepAwakeLidChange = nil
+                if result.snapshot.isOn {
+                    // A lid-only change must preserve a finite or indefinite session.
+                    if let endDate = change.endDate {
+                        defaults.set(endDate, forKey: DefaultsKey.keepAwakeEndDate)
+                    } else {
+                        defaults.removeObject(forKey: DefaultsKey.keepAwakeEndDate)
+                    }
+                }
+                if result.error != nil {
+                    keepAwakeWhenLidClosed = change.previousValue
+                    defaults.set(change.previousValue, forKey: KeepAwakePreferences.keepAwakeWhenLidClosedKey)
+                }
+            }
         }
         var snapshot = decoratedSnapshot(result.snapshot, for: kind)
         let failureTitle = Self.operationFailureTitle(for: kind, enabled: enabled)

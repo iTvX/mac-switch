@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "Ambos atajos están instalados. Verifica la configuración para continuar.";
 "Add both shortcuts, then return here to verify setup." = "Añade ambos atajos y vuelve aquí para verificar la configuración.";
 "Control Do Not Disturb in the background with two installed shortcuts." = "Controla No molestar en segundo plano con dos atajos instalados.";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "Opciones para mantener activo";
+"Choose duration and lid-closed behavior" = "Elegir duración y comportamiento con la tapa cerrada";
+"Keep Awake duration" = "Duración para mantener activo";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Elige la duración y el comportamiento con la tapa cerrada directamente desde la fila para mantener activo en la barra de menús.";
+"Lid-closed mode may request administrator permission when activated." = "El modo con la tapa cerrada puede solicitar permiso de administrador al activarse.";

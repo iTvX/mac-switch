@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "Les deux raccourcis sont installés. Vérifiez la configuration pour continuer.";
 "Add both shortcuts, then return here to verify setup." = "Ajoutez les deux raccourcis, puis revenez ici pour vérifier la configuration.";
 "Control Do Not Disturb in the background with two installed shortcuts." = "Contrôlez Ne pas déranger en arrière-plan avec deux raccourcis installés.";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "Options de maintien en éveil";
+"Choose duration and lid-closed behavior" = "Choisir la durée et le comportement du capot fermé";
+"Keep Awake duration" = "Durée du maintien en éveil";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Choisissez la durée et le comportement du capot fermé directement dans la ligne de maintien en éveil de la barre de menus.";
+"Lid-closed mode may request administrator permission when activated." = "Le mode capot fermé peut demander une autorisation administrateur lors de son activation.";

@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "Entrambi i comandi rapidi sono installati. Verifica la configurazione per continuare.";
 "Add both shortcuts, then return here to verify setup." = "Aggiungi entrambi i comandi rapidi, poi torna qui per verificare la configurazione.";
 "Control Do Not Disturb in the background with two installed shortcuts." = "Controlla Non disturbare in background con due comandi rapidi installati.";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "Opzioni per mantenere attivo";
+"Choose duration and lid-closed behavior" = "Scegli durata e comportamento a coperchio chiuso";
+"Keep Awake duration" = "Durata del mantenimento attivo";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Scegli durata e comportamento a coperchio chiuso direttamente dalla voce per mantenere attivo nella barra dei menu.";
+"Lid-closed mode may request administrator permission when activated." = "La modalità a coperchio chiuso potrebbe richiedere il permesso di amministratore durante l’attivazione.";

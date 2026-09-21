@@ -47,6 +47,8 @@ Software Update checks are included for official builds distributed through the 
 
 Choose which switches appear in the menu, hide what you do not use, and drag visible menu items directly in the dashboard to match your workflow. Preferences include General, Customize, and About panels, with per-switch options where a control needs extra setup.
 
+Keep Awake has a timer button directly in its dashboard row. Click it, or right-click the row, to select a duration and toggle **Keep awake when the lid is closed**. The selected duration is marked, and the same settings stay synchronized with Customize. Changing the lid option during a running session preserves its deadline; changing the duration restarts the timer with that duration. Lid-closed operation retains the existing macOS administrator authorization requirement.
+
 ## Permissions
 
 Mac Switch only asks for macOS permissions needed by the features you use:

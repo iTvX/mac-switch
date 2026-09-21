@@ -696,7 +696,7 @@ private final class KeepAwakeManager {
 }
 
 enum KeepAwakePreferences {
-    private static let keepAwakeWhenLidClosedKey = "switch.keepAwake.keepAwakeWhenLidClosed"
+    static let keepAwakeWhenLidClosedKey = "switch.keepAwake.keepAwakeWhenLidClosed"
     private static let managedDisableSleepKey = "switch.keepAwake.managedDisableSleep"
 
     static var keepAwakeWhenLidClosed: Bool {

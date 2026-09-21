@@ -212,3 +212,10 @@
 "Both shortcuts are installed. Verify setup to continue." = "Both shortcuts are installed. Verify setup to continue.";
 "Add both shortcuts, then return here to verify setup." = "Add both shortcuts, then return here to verify setup.";
 "Control Do Not Disturb in the background with two installed shortcuts." = "Control Do Not Disturb in the background with two installed shortcuts.";
+
+/* Keep Awake quick options */
+"Keep Awake options" = "Keep Awake options";
+"Choose duration and lid-closed behavior" = "Choose duration and lid-closed behavior";
+"Keep Awake duration" = "Keep Awake duration";
+"Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar.";
+"Lid-closed mode may request administrator permission when activated." = "Lid-closed mode may request administrator permission when activated.";
