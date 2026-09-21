@@ -43,6 +43,22 @@ final class DoNotDisturbBehaviorTests: XCTestCase {
         XCTAssertEqual(fake.runCount, runsAfterSetup + 1, "Explicit preflight still reads the real state")
     }
 
+    @MainActor
+    func testApplicationActivationDoesNotRunAnExpiredDNDShortcut() async throws {
+        let fake = FakeDNDExecutor()
+        let defaults = InMemoryUserDefaults()
+        let backend = DoNotDisturbShortcuts(executor: fake, defaults: defaults)
+        XCTAssertNil(backend.verifySetup())
+        defaults.set(["doNotDisturb", "keepAwake"], forKey: "switch.enabledKinds")
+        defaults.set(2, forKey: "switch.customizationDefaultsVersion")
+        defaults.set(Date().addingTimeInterval(-60), forKey: "switch.doNotDisturb.endDate")
+        let store = SwitchStore(controller: SystemSwitchController(doNotDisturb: DoNotDisturbSwitch(shortcuts: backend)), defaults: defaults, enableRuntimeServices: false)
+        let before = fake.runCount
+        store.handleRuntimeContextChange(isApplicationActivation: true)
+        for _ in 0..<100 where store.isRefreshing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(fake.runCount, before)
+    }
+
     func testInstallationRejectsLegacyAmbiguousAndInvalidIdentifiers() {
         let fake = FakeDNDExecutor()
         let listing = fake.listing

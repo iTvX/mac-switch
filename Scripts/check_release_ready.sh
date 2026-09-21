@@ -73,7 +73,7 @@ fi
 
 if [[ -x "$APP_PATH/Contents/Helpers/MacSwitchSleepHelper" ]] \
     && [[ -f "$APP_PATH/Contents/Library/LaunchDaemons/com.maxyu.macswitch.sleep-helper.plist" ]] \
-    && codesign --verify --strict -R 'identifier "com.maxyu.macswitch.sleep-helper" and anchor apple generic' "$APP_PATH/Contents/Helpers/MacSwitchSleepHelper" >/dev/null 2>&1; then
+    && codesign --verify --strict -R '=identifier "com.maxyu.macswitch.sleep-helper" and anchor apple generic' "$APP_PATH/Contents/Helpers/MacSwitchSleepHelper" >/dev/null 2>&1; then
     pass "Signed Keep Awake helper is bundled"
 else
     fail "Keep Awake helper is missing or incorrectly signed."

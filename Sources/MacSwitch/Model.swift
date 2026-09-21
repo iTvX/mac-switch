@@ -2172,19 +2172,20 @@ final class SwitchStore: ObservableObject {
     private func observeRuntimeNotification(_ name: Notification.Name, center: NotificationCenter) {
         let token = center.addObserver(forName: name, object: nil, queue: nil) { [weak self] _ in
             Task { @MainActor [weak self] in
-                self?.handleRuntimeContextChange()
+                self?.handleRuntimeContextChange(isApplicationActivation: name == NSApplication.didBecomeActiveNotification)
             }
         }
         runtimeNotificationObservers.append((center, token))
     }
 
-    private func handleRuntimeContextChange() {
+    func handleRuntimeContextChange(isApplicationActivation: Bool = false) {
         if darkModeScheduleMode == .sunriseSunset {
             sunScheduleProvider.requestLocationIfStale()
             darkModeLocationStatus = sunScheduleProvider.statusText
         }
         reconcileDarkModeSchedule()
-        enforceDoNotDisturbExpirationAsync()
+        // The expiry timer and wake/clock notifications own timed DND actions, not menu activation.
+        if !isApplicationActivation { enforceDoNotDisturbExpirationAsync() }
         if enabledKinds.contains(.doNotDisturb) {
             refreshAsync(.doNotDisturb)
         }
