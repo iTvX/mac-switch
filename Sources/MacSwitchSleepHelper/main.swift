@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import MachO
 import SleepHelperCore
 
 struct HelperFailure: LocalizedError {
@@ -84,6 +85,16 @@ do {
     let listener = NSXPCListener(machServiceName: SleepHelperIdentity.serviceIdentifier)
     listener.delegate = server
     server.start()
+    var pathSize: UInt32 = 0
+    _ = _NSGetExecutablePath(nil, &pathSize)
+    var pathBuffer = [CChar](repeating: 0, count: Int(pathSize))
+    guard _NSGetExecutablePath(&pathBuffer, &pathSize) == 0 else {
+        throw HelperFailure(message: "Could not locate the sleep helper executable.")
+    }
+    let executable = URL(fileURLWithPath: String(cString: pathBuffer)).resolvingSymlinksInPath()
+    let app = executable.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let watchedURLs = app.pathExtension == "app" ? [executable, app] : [executable]
+    let replacementMonitor = try ExecutableReplacementMonitor(urls: watchedURLs) { server.stopForUpdate() }
     listener.resume()
-    RunLoop.current.run()
+    withExtendedLifetime((server, listener, replacementMonitor)) { dispatchMain() }
 } catch { exit(1) }
