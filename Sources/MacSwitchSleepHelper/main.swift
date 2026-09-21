@@ -30,10 +30,7 @@ struct SystemSleepPower: SleepPowerControlling {
     }
 
     func isSleepDisabled() throws -> Bool {
-        for line in try run(["-g", "live"]).split(separator: "\n") {
-            let fields = line.split(whereSeparator: \.isWhitespace)
-            if fields.first == "SleepDisabled", fields.count == 2, ["0", "1"].contains(fields[1]) { return fields[1] == "1" }
-        }
+        if let disabled = SleepPowerState.parse(try run(["-g", "live"])) { return disabled }
         throw HelperFailure(message: "macOS did not report its sleep setting.")
     }
 

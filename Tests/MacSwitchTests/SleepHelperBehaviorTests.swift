@@ -5,6 +5,23 @@ import SleepHelperCore
 @testable import MacSwitch
 
 final class SleepHelperBehaviorTests: XCTestCase {
+    func testFreshSystemWithoutOptionalSleepSettingIsOff() {
+        XCTAssertEqual(SleepPowerState.parse("Currently in use:\n sleep 1\n displaysleep 10\n"), false)
+        XCTAssertEqual(SleepPowerState.parse("System-wide power settings:\n DestroyFVKeyOnStandby 0\nCurrently in use:\n sleep 1\n"), false)
+    }
+
+    func testExplicitSleepStateIsStrictAndInvalidOutputIsUnknown() {
+        XCTAssertEqual(SleepPowerState.parse("System-wide power settings:\n SleepDisabled 1\nCurrently in use:\n sleep 1"), true)
+        XCTAssertEqual(SleepPowerState.parse("System-wide power settings:\n SleepDisabled 0\nCurrently in use:\n sleep 1"), false)
+        for output in ["", "unavailable", "System-wide power settings:\n SleepDisabled maybe\nCurrently in use:", "System-wide power settings:\n SleepDisabled 1 extra"] {
+            XCTAssertNil(SleepPowerState.parse(output))
+        }
+    }
+
+    func testLiveProcessNamesCannotBeMistakenForSystemSleepPolicy() {
+        XCTAssertEqual(SleepPowerState.parse("Currently in use:\n sleep 1 (sleep prevented by\n SleepDisabled 1\n)"), false)
+    }
+
     func testLeaseUpdatesDoNotTogglePowerAndDisconnectRestoresIt() throws {
         let power = FakeSleepPower()
         let journal = FakeSleepRecovery()
