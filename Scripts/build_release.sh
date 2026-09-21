@@ -178,6 +178,20 @@ for arch in "${BUILD_ARCHS[@]}"; do
     lipo "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" -verify_arch "$arch" >/dev/null
 done
 
+HELPER_PATH="$APP_PATH/Contents/Helpers/MacSwitchSleepHelper"
+mkdir -p "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Library/LaunchDaemons"
+HELPER_INPUTS=()
+for arch in "${BUILD_ARCHS[@]}"; do
+    HELPER_INPUTS+=(".build/$arch-apple-macosx/release/MacSwitchSleepHelper")
+done
+lipo -create "${HELPER_INPUTS[@]}" -output "$HELPER_PATH"
+cp Resources/LaunchDaemons/*.plist "$APP_PATH/Contents/Library/LaunchDaemons/"
+run_codesign --force --options runtime --timestamp --identifier com.maxyu.macswitch.sleep-helper --sign "$IDENTITY" "$HELPER_PATH"
+for arch in "${BUILD_ARCHS[@]}"; do
+    lipo "$HELPER_PATH" -verify_arch "$arch" >/dev/null
+done
+
+
 SPARKLE_SOURCE=".build/${BUILD_ARCHS[0]}-apple-macosx/release/Sparkle.framework"
 SPARKLE_DEST="$FRAMEWORKS_DIR/Sparkle.framework"
 if [[ ! -d "$SPARKLE_SOURCE" ]]; then

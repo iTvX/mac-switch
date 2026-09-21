@@ -219,3 +219,10 @@
 "Keep Awake duration" = "Dauer des Wachhaltens";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Wähle die Dauer und das Verhalten bei geschlossenem Deckel direkt in der Zeile zum Wachhalten in der Menüleiste.";
 "Lid-closed mode may request administrator permission when activated." = "Beim Aktivieren des Modus mit geschlossenem Deckel kann eine Administratorfreigabe erforderlich sein.";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "Status bei Verwendung prüfen";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "Erlaube das Wachhalten einmal in den Anmeldeobjekten. Spätere Änderungen benötigen kein Passwort.";
+"Authorize Keep Awake" = "Wachhalten erlauben";
+"Keep Awake access is ready" = "Zugriff zum Wachhalten bereit";
+"Apply to current session" = "Auf aktuelle Sitzung anwenden";

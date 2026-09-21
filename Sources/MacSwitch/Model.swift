@@ -1023,6 +1023,11 @@ final class SwitchStore: ObservableObject {
         }
     }
 
+    func retryKeepAwakeLidSetup() {
+        guard !isActionBusy(.keepAwake), snapshots[.keepAwake]?.isOn == true else { return }
+        restoreKeepAwake(endDate: defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date)
+    }
+
     func setKeepAwakeWhenLidClosed(_ enabled: Bool) {
         guard !isActionBusy(.keepAwake), keepAwakeWhenLidClosed != enabled else { return }
         let previousValue = keepAwakeWhenLidClosed

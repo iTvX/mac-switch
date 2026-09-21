@@ -8,12 +8,15 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "MacSwitch", targets: ["MacSwitch"])
+        .executable(name: "MacSwitch", targets: ["MacSwitch"]),
+        .executable(name: "MacSwitchSleepHelper", targets: ["MacSwitchSleepHelper"])
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6")
     ],
     targets: [
+        .target(name: "SleepHelperCore", path: "Sources/SleepHelperCore", linkerSettings: [.linkedFramework("Security")]),
+        .executableTarget(name: "MacSwitchSleepHelper", dependencies: ["SleepHelperCore"], path: "Sources/MacSwitchSleepHelper"),
         .target(
             name: "CSystemNotify",
             path: "Sources/CSystemNotify",
@@ -23,6 +26,7 @@ let package = Package(
             name: "MacSwitch",
             dependencies: [
                 "CSystemNotify",
+                "SleepHelperCore",
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Sources/MacSwitch",
@@ -42,7 +46,7 @@ let package = Package(
         ),
         .testTarget(
             name: "MacSwitchTests",
-            dependencies: ["MacSwitch"],
+            dependencies: ["MacSwitch", "SleepHelperCore"],
             path: "Tests/MacSwitchTests"
         )
     ],

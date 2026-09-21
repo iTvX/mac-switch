@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 enum DashboardLayout {
@@ -1059,7 +1060,7 @@ private struct DashboardSwitchButton: View {
     }
 }
 
-private struct DashboardRowQuickMenu: View {
+struct DashboardRowQuickMenu: View {
     static func size(for kind: SwitchKind) -> CGSize {
         kind == .keepAwake ? CGSize(width: 268, height: 266) : CGSize(width: 154, height: 84)
     }
@@ -1093,6 +1094,7 @@ private struct DashboardRowQuickMenu: View {
                 symbol: "eye.slash",
                 title: "Hide from Menu",
                 subtitle: hideDisabledReason,
+                reservesSubtitle: kind == .keepAwake,
                 isDisabled: hideDisabledReason != nil,
                 action: hideFromMenu
             )
@@ -1116,6 +1118,7 @@ private struct DashboardQuickMenuButton: View {
     let symbol: String
     let title: String
     let subtitle: String?
+    var reservesSubtitle = false
     let isDisabled: Bool
     let action: () -> Void
     @State private var isHovering = false
@@ -1138,8 +1141,8 @@ private struct DashboardQuickMenuButton: View {
                         .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.62) : .primary)
                         .lineLimit(1)
 
-                    if let subtitle {
-                        Text(verbatim: L10n.localizedResource(subtitle, locale: locale))
+                    if subtitle != nil || reservesSubtitle {
+                        Text(verbatim: L10n.localizedResource(subtitle ?? " ", locale: locale))
                             .font(.system(size: 10.2, weight: .medium))
                             .foregroundStyle(DashboardColors.subtleText.opacity(isDisabled ? 0.62 : 0.86))
                             .lineLimit(1)
@@ -1414,9 +1417,10 @@ private struct KeepAwakeQuickOptions: View {
                         store.setKeepAwakeDuration(duration)
                     } label: {
                         HStack(spacing: 3) {
-                            if store.keepAwakeDuration == duration {
-                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
-                            }
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 9, weight: .bold))
+                                .frame(width: 10)
+                                .opacity(store.keepAwakeDuration == duration ? 1 : 0)
                             Text(duration == .indefinitely ? "∞" : duration.compactDashboardTitle)
                                 .font(.system(size: 12, weight: .semibold))
                         }
@@ -1427,6 +1431,7 @@ private struct KeepAwakeQuickOptions: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .allowsHitTesting(!store.isActionBusy(.keepAwake))
                     .accessibilityLabel(Text(LocalizedStringKey(duration.menuTitle)))
                     .accessibilityAddTraits(store.keepAwakeDuration == duration ? .isSelected : [])
                     .help(Text(LocalizedStringKey(duration.menuTitle)))
@@ -1439,10 +1444,11 @@ private struct KeepAwakeQuickOptions: View {
             .toggleStyle(.checkbox)
             .font(.system(size: 12))
             .fixedSize(horizontal: false, vertical: true)
-            .help("Lid-closed mode may request administrator permission when activated.")
+            .allowsHitTesting(!store.isActionBusy(.keepAwake))
+            .help("Authorize Keep Awake once in Login Items. Later changes do not request your password.")
         }
         .padding(7)
-        .disabled(store.isActionBusy(.keepAwake))
+        .transaction { $0.animation = nil }
     }
 }
 
@@ -4972,7 +4978,7 @@ private struct DoNotDisturbPreferencesPanel: View {
             let backend = DoNotDisturbShortcuts.shared
             let verificationError = verify ? backend.verifySetup() : nil
             let updated = backend.installation(force: force)
-            let snapshot = updated.isVerified ? backend.snapshot(force: true) : nil
+            let snapshot = updated.isVerified ? backend.snapshot(force: verify) : nil
             DispatchQueue.main.async {
                 installation = updated
                 isRefreshing = false
@@ -5026,6 +5032,9 @@ private struct ShortcutInstallRow: View {
 private struct KeepAwakePreferencesPanel: View {
     @ObservedObject var store: SwitchStore
     @State private var sleepDisabled = false
+    @State private var helperReady = false
+    @State private var authorizing = false
+    @State private var authorizationError: String?
     @State private var sleepStatusLoading = false
     @State private var pendingSleepStatusRefresh = false
 
@@ -5062,10 +5071,28 @@ private struct KeepAwakePreferencesPanel: View {
             ))
             .disabled(store.isActionBusy(.keepAwake))
 
-            Text("Disables system sleep with administrator permission while Keep Awake is active. Keep your Mac plugged in when using this.")
+            Text("Authorize Keep Awake once in Login Items. Later changes do not request your password.")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            HStack {
+                if helperReady {
+                    Label("Keep Awake access is ready", systemImage: "checkmark.shield")
+                        .font(.system(size: 12))
+                    if store.snapshots[.keepAwake]?.isOn == true {
+                        Button("Apply to current session") { store.retryKeepAwakeLidSetup() }
+                            .disabled(store.isActionBusy(.keepAwake))
+                    }
+                } else {
+                    Button("Authorize Keep Awake") { authorizeHelper() }
+                        .disabled(authorizing || store.isActionBusy(.keepAwake))
+                    if authorizing { ProgressView().controlSize(.small) }
+                }
+            }
+            if let authorizationError {
+                Text(LocalizedStringKey(authorizationError)).font(.system(size: 12)).foregroundStyle(.orange)
+            }
 
             HStack(spacing: 10) {
                 Button {
@@ -5089,8 +5116,22 @@ private struct KeepAwakePreferencesPanel: View {
                 .buttonStyle(.bordered)
             }
         }
-        .onAppear {
+        .onAppear { refreshSleepStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshSleepStatus()
+        }
+    }
+
+    private func authorizeHelper() {
+        authorizing = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let error = SleepHelperClient.shared.authorize()
+            DispatchQueue.main.async {
+                authorizing = false
+                authorizationError = error
+                if error == SleepHelperClient.approvalMessage { SMAppService.openSystemSettingsLoginItems() }
+                refreshSleepStatus()
+            }
         }
     }
 
@@ -5102,8 +5143,11 @@ private struct KeepAwakePreferencesPanel: View {
         sleepStatusLoading = true
         DispatchQueue.global(qos: .utility).async {
             let disabled = KeepAwakePreferences.sleepDisabled
+            let ready = SleepHelperClient.shared.isReady
             DispatchQueue.main.async {
                 sleepDisabled = disabled
+                helperReady = ready
+                if ready { authorizationError = nil }
                 let shouldRefreshAgain = pendingSleepStatusRefresh
                 pendingSleepStatusRefresh = false
                 sleepStatusLoading = false
@@ -5120,7 +5164,7 @@ private struct KeepAwakePreferencesPanel: View {
         }
         return sleepDisabled
             ? "System sleep is disabled while Keep Awake is active."
-            : "Lid-closed mode may request administrator permission when activated."
+            : "Authorize Keep Awake once in Login Items. Later changes do not request your password."
     }
 }
 

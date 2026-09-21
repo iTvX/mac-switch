@@ -163,7 +163,15 @@ final class DoNotDisturbShortcuts: @unchecked Sendable {
 
     func snapshot(force: Bool = false) -> SwitchSnapshot {
         queue.sync {
-            if !force, let cachedSnapshot, Date().timeIntervalSince(cachedSnapshot.0) < 1 { return cachedSnapshot.1 }
+            if !force {
+                do { _ = try readyInstallation(force: false) }
+                catch { return Self.unavailable(error.localizedDescription) }
+                // Opening the dashboard must not run a shortcut (or show its system activity UI).
+                // Toggle/Mode preflight always uses a fresh observation before acting.
+                var snapshot = cachedSnapshot?.1 ?? Self.observed(false)
+                if snapshot.isAvailable { snapshot.subtitle = "Checked when used" }
+                return snapshot
+            }
             let snapshot: SwitchSnapshot
             do {
                 let installation = try readyInstallation(force: force)

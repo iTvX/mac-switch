@@ -47,7 +47,7 @@ Software Update checks are included for official builds distributed through the 
 
 Choose which switches appear in the menu, hide what you do not use, and drag visible menu items directly in the dashboard to match your workflow. Preferences include General, Customize, and About panels, with per-switch options where a control needs extra setup.
 
-Keep Awake has a timer button directly in its dashboard row. Click it, or right-click the row, to select a duration and toggle **Keep awake when the lid is closed**. The selected duration is marked, and the same settings stay synchronized with Customize. Changing the lid option during a running session preserves its deadline; changing the duration restarts the timer with that duration. Lid-closed operation retains the existing macOS administrator authorization requirement.
+Keep Awake has a timer button directly in its dashboard row. Click it, or right-click the row, to select a duration and toggle **Keep awake when the lid is closed**. The selected duration is marked, and the same settings stay synchronized with Customize. Changing the lid option during a running session preserves its deadline; changing the duration restarts the timer with that duration. Lid-closed operation uses a bundled signed helper. Authorize it once in System Settings > General > Login Items & Extensions; subsequent changes do not prompt for a password. The helper restores the original sleep policy when the session ends, the app disconnects, or a timed session expires. It accepts only the signed Mac Switch app and exposes only the sleep operation.
 
 ## Permissions
 
@@ -58,7 +58,7 @@ Mac Switch only asks for macOS permissions needed by the features you use:
 - Bluetooth: paired audio device listing and connection.
 - Location: sunrise/sunset Dark Mode scheduling.
 
-Do Not Disturb uses two bundled, signed Apple Shortcuts. In Customize > Do Not Disturb, install **Mac Switch DND Enable** and **Mac Switch DND Disable**, then choose **Verify Setup** once with Focus off. Verification briefly enables DND and restores it to off; subsequent actions run in the background. The helpers read Current Focus and explicitly return its name, so state checks do not depend on shared Focus Status. Mode activation and restoration use fresh observations, including when DND was already on. Other active Focus modes are left unchanged. Reinstalling or renaming the helpers requires setup again. Legacy custom DND shortcuts are no longer used.
+Do Not Disturb uses two bundled, signed Apple Shortcuts. In Customize > Do Not Disturb, install **Mac Switch DND Enable** and **Mac Switch DND Disable**, then choose **Verify Setup** once with Focus off. Verification briefly enables DND and restores it to off; subsequent actions run in the background. The helpers read Current Focus and explicitly return its name, so state checks do not depend on shared Focus Status. Opening the dashboard shows the last confirmed DND state without executing a shortcut. Toggle preflight, Mode activation, and restoration use fresh observations, including when DND was already on. Other active Focus modes are left unchanged. Reinstalling or renaming the helpers requires setup again. Legacy custom DND shortcuts are no longer used.
 
 ## Official Releases
 

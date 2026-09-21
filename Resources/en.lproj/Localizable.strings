@@ -219,3 +219,10 @@
 "Keep Awake duration" = "Keep Awake duration";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar.";
 "Lid-closed mode may request administrator permission when activated." = "Lid-closed mode may request administrator permission when activated.";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "Checked when used";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "Authorize Keep Awake once in Login Items. Later changes do not request your password.";
+"Authorize Keep Awake" = "Authorize Keep Awake";
+"Keep Awake access is ready" = "Keep Awake access is ready";
+"Apply to current session" = "Apply to current session";

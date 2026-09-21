@@ -219,3 +219,10 @@
 "Keep Awake duration" = "スリープ防止の時間";
 "Choose duration and lid-closed behavior directly from the Keep Awake row in the menu bar." = "メニューバーのスリープ防止の行で、時間と蓋を閉じたときの動作を直接選択できます。";
 "Lid-closed mode may request administrator permission when activated." = "蓋を閉じたまま使用するモードの有効化には、管理者の許可が必要な場合があります。";
+
+/* Quiet dashboard and one-time Keep Awake access */
+"Checked when used" = "操作時に状態を確認";
+"Authorize Keep Awake once in Login Items. Later changes do not request your password." = "ログイン項目で一度許可すると、以降の変更でパスワードは不要です。";
+"Authorize Keep Awake" = "スリープ防止を許可";
+"Keep Awake access is ready" = "スリープ防止の許可済み";
+"Apply to current session" = "現在のセッションに適用";
