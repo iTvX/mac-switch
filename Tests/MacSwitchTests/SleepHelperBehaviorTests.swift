@@ -147,9 +147,9 @@ final class SleepHelperBehaviorTests: XCTestCase {
         let manager = KeepAwakeManager(assertions: assertions, lidController: lid, lidPreference: { false }, legacyRecoveryPending: true, didRestoreLegacy: {})
         XCTAssertFalse(manager.isActive)
         XCTAssertTrue(lid.requests.isEmpty)
-        XCTAssertTrue(lid.registrationPolicies.isEmpty)
+        XCTAssertEqual(lid.restorations, 0)
         XCTAssertNil(manager.setEnabled(false, duration: nil))
-        XCTAssertEqual(lid.registrationPolicies, [false], "Stopping must never start an authorization flow")
+        XCTAssertEqual(lid.restorations, 1)
     }
 
     func testStaleExpirationDoesNotStopARescheduledSession() throws {
@@ -192,9 +192,9 @@ private final class FakeAwakeAssertions: KeepAwakeAsserting, @unchecked Sendable
 }
 private final class FakeLidController: LidSleepControlling, @unchecked Sendable {
     var requests: [Bool] = []
-    var registrationPolicies: [Bool] = []
+    var restorations = 0
     func setDisabled(_ disabled: Bool, until deadline: Date?) -> String? { requests.append(disabled); return nil }
-    func restoreLegacySetting(allowRegistration: Bool) -> String? { registrationPolicies.append(allowRegistration); return nil }
+    func restoreLegacySetting() -> String? { restorations += 1; return nil }
 }
 private final class LidPreference: @unchecked Sendable {
     var value: Bool

@@ -608,7 +608,7 @@ final class KeepAwakeManager: @unchecked Sendable {
         }
         var error: String?
         if legacyRecoveryPending {
-            error = lidController.restoreLegacySetting(allowRegistration: true)
+            error = lidController.restoreLegacySetting()
             if error == nil { legacyRecoveryPending = false; didRestoreLegacy() }
         }
         let wantsLid = lidPreference()
@@ -636,7 +636,7 @@ final class KeepAwakeManager: @unchecked Sendable {
             stateLock.withLock { ownsLidLease = false }
         }
         if legacyRecoveryPending {
-            if let error = lidController.restoreLegacySetting(allowRegistration: false) { return error }
+            if let error = lidController.restoreLegacySetting() { return error }
             legacyRecoveryPending = false
             didRestoreLegacy()
         }

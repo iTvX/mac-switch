@@ -4,7 +4,7 @@ import SleepHelperCore
 
 protocol LidSleepControlling: Sendable {
     func setDisabled(_ disabled: Bool, until deadline: Date?) -> String?
-    func restoreLegacySetting(allowRegistration: Bool) -> String?
+    func restoreLegacySetting() -> String?
 }
 
 final class SleepHelperClient: LidSleepControlling, @unchecked Sendable {
@@ -36,14 +36,14 @@ final class SleepHelperClient: LidSleepControlling, @unchecked Sendable {
 
     func setDisabled(_ disabled: Bool, until deadline: Date?) -> String? {
         queue.sync {
-            if let error = prepare(allowRegistration: disabled) { return error }
+            if let error = prepare(allowRegistration: false) { return error }
             return request { $0.setLidSleepDisabled(disabled, until: deadline, reply: $1) }
         }
     }
 
-    func restoreLegacySetting(allowRegistration: Bool) -> String? {
+    func restoreLegacySetting() -> String? {
         queue.sync {
-            if let error = prepare(allowRegistration: allowRegistration) { return error }
+            if let error = prepare(allowRegistration: false) { return error }
             return request { $0.restoreLegacySleepSetting(reply: $1) }
         }
     }
