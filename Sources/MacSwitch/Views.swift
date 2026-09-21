@@ -1429,6 +1429,7 @@ private struct KeepAwakeQuickOptions: View {
                         .foregroundStyle(store.keepAwakeDuration == duration ? Color.accentColor : .primary)
                         .background(store.keepAwakeDuration == duration ? Color.accentColor.opacity(0.16) : DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
                         .contentShape(Rectangle())
+                        .animation(.easeOut(duration: 0.12), value: store.keepAwakeDuration == duration)
                     }
                     .buttonStyle(.plain)
                     .allowsHitTesting(!store.isActionBusy(.keepAwake))
