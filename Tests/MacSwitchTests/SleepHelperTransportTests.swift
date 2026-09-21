@@ -60,6 +60,18 @@ final class SleepHelperTransportTests: XCTestCase, @unchecked Sendable {
         withExtendedLifetime(server) {}
     }
 
+    func testAtomicAppReplacementNotifiesTheHelper() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let app = directory.appendingPathComponent("Example.app")
+        try FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let replaced = expectation(description: "App replacement observed")
+        let monitor = try ExecutableReplacementMonitor(urls: [app]) { replaced.fulfill() }
+        try FileManager.default.moveItem(at: app, to: directory.appendingPathComponent("old.app"))
+        await fulfillment(of: [replaced], timeout: 3)
+        withExtendedLifetime(monitor) {}
+    }
+
     private func currentProcessRequirement() throws -> String {
         var dynamic: SecCode?, code: SecStaticCode?, requirement: SecRequirement?, text: CFString?
         XCTAssertEqual(SecCodeCopySelf([], &dynamic), errSecSuccess)

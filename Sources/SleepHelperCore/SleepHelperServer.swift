@@ -47,6 +47,13 @@ public final class SleepHelperServer: NSObject, NSXPCListenerDelegate, @unchecke
         }
     }
 
+    public func stopForUpdate() {
+        queue.async {
+            do { try self.coordinator.shutdown(); exit(0) }
+            catch { exit(1) }
+        }
+    }
+
     func scheduleRecoveryOrExpiration() {
         timer?.cancel()
         timer = nil
