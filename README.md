@@ -49,6 +49,8 @@ Choose which switches appear in the menu, hide what you do not use, and drag vis
 
 Keep Awake has a timer button directly in its dashboard row. Click it, or right-click the row, to select a duration and toggle **Keep awake when the lid is closed**. The selected duration is marked, and the same settings stay synchronized with Customize. Changing the lid option during a running session preserves its deadline; changing the duration restarts the timer with that duration. Lid-closed operation uses a bundled signed helper. Choose **Authorize Keep Awake** in Customize > Keep Awake, then approve it once in System Settings > General > Login Items & Extensions; subsequent changes do not prompt for a password. The helper restores the original sleep policy when the session ends, the app disconnects, or a timed session expires. It accepts only the signed Mac Switch app and exposes only the sleep operation.
 
+Night Shift follows the macOS model: like Control Center, the dashboard switch makes a temporary change that lasts until the next scheduled time, and the row shows when that is, such as **On until 07:00** or **Off until sunset**. Choose **Always On** in Customize > Night Shift to keep it on with the native macOS schedule, including a short daily reset at a time you pick. Turn on **Keep the switch as set** to make the switch itself persistent: on sets the macOS schedule to Always On, off sets it to Off, and turning the option off restores your previous schedule. Modes hold Night Shift through scheduled times and restore the exact schedule they replaced. The panel also shows what last changed Night Shift, such as the macOS schedule or Control Center.
+
 ## Permissions
 
 Mac Switch only asks for macOS permissions needed by the features you use:

@@ -116,6 +116,47 @@ final class ModeBehaviorTests: XCTestCase {
         XCTAssertFalse(store.enabledModeIDs.contains(modeID))
     }
 
+    func testNightShiftModeHoldsStateAndRestoresTheCapturedSchedule() async throws {
+        let defaults = InMemoryUserDefaults()
+        let point = NightShiftRestorePoint(
+            enabled: false,
+            mode: .sunsetToSunrise,
+            schedule: .defaultSchedule,
+            followsSchedule: true,
+            overrideExpiry: nil
+        )
+        let controller = FakeSystemSwitchController(states: [.nightShift: false], nightShiftPoint: point)
+        let store = SwitchStore(
+            controller: controller,
+            defaults: defaults,
+            enableRuntimeServices: false
+        )
+        let modeID = store.createCustomMode()
+        var mode = try XCTUnwrap(store.customModes.first { $0.id == modeID })
+        mode.items = [SwitchModeItem(kind: .nightShift, targetIsOn: false)]
+        store.updateCustomMode(mode)
+        store.toggleMode(mode)
+
+        try await waitUntil { store.isModeActive(modeID) && store.activeModeOperationID == nil }
+        // Already off, but a sunset during the Mode would turn it on, so the Mode still holds it.
+        XCTAssertEqual(controller.nightShiftActions, [.hold(false)])
+        let persisted = try XCTUnwrap(defaults.data(forKey: "switch.modes.activeSessions"))
+        let sessions = try JSONDecoder().decode([ActiveSwitchModeSession].self, from: persisted)
+        XCTAssertEqual(sessions.first?.originalNightShift, point)
+
+        store.toggleMode(mode)
+        try await waitUntil { !store.isModeActive(modeID) && store.activeModeOperationID == nil }
+        XCTAssertEqual(controller.nightShiftActions, [.hold(false), .restore(point)])
+        XCTAssertNil(store.lastError)
+    }
+
+    func testSessionsSavedBeforeNightShiftRestorePointsStillDecode() throws {
+        let legacy = Data(#"[{"modeID":"custom.legacy","rawOriginalStates":{"nightShift":true}}]"#.utf8)
+        let sessions = try JSONDecoder().decode([ActiveSwitchModeSession].self, from: legacy)
+        XCTAssertEqual(sessions.first?.originalState(for: .nightShift), true)
+        XCTAssertNil(sessions.first?.originalNightShift)
+    }
+
     func testModeLocalizationCoversEverySupportedLanguage() {
         let languages = AppLanguage.allCases.filter { $0 != .system }
 
@@ -161,15 +202,45 @@ final class ModeBehaviorTests: XCTestCase {
 }
 
 private final class FakeSystemSwitchController: SystemSwitchControlling, @unchecked Sendable {
+    enum NightShiftAction: Equatable {
+        case hold(Bool)
+        case restore(NightShiftRestorePoint)
+    }
+
     var onExternalChange: (@Sendable (SwitchKind) -> Void)?
 
     private let lock = NSLock()
     private var states: [SwitchKind: Bool]
     private let failures: [SwitchKind: Bool]
+    private let nightShiftPoint: NightShiftRestorePoint?
+    private var recordedNightShiftActions: [NightShiftAction] = []
 
-    init(states: [SwitchKind: Bool], failures: [SwitchKind: Bool] = [:]) {
+    init(
+        states: [SwitchKind: Bool],
+        failures: [SwitchKind: Bool] = [:],
+        nightShiftPoint: NightShiftRestorePoint? = nil
+    ) {
         self.states = states
         self.failures = failures
+        self.nightShiftPoint = nightShiftPoint
+    }
+
+    var nightShiftActions: [NightShiftAction] {
+        lock.withLock { recordedNightShiftActions }
+    }
+
+    func captureNightShiftRestorePoint() -> NightShiftRestorePoint? {
+        nightShiftPoint
+    }
+
+    func holdNightShift(_ enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        lock.withLock { recordedNightShiftActions.append(.hold(enabled)) }
+        return set(.nightShift, enabled: enabled, keepAwakeDuration: keepAwakeDuration)
+    }
+
+    func restoreNightShift(_ point: NightShiftRestorePoint, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        lock.withLock { recordedNightShiftActions.append(.restore(point)) }
+        return set(.nightShift, enabled: point.enabled, keepAwakeDuration: keepAwakeDuration)
     }
 
     func state(for kind: SwitchKind) -> Bool {

@@ -188,17 +188,20 @@ struct ActiveSwitchModeSession: Codable, Equatable, Sendable {
     private let rawOriginalStates: [String: Bool]
     let originalKeepAwakeEndDate: Date?
     let originalDoNotDisturbEndDate: Date?
+    let originalNightShift: NightShiftRestorePoint?
 
     init(
         modeID: SwitchModeID,
         originalStates: [SwitchKind: Bool],
         originalKeepAwakeEndDate: Date? = nil,
-        originalDoNotDisturbEndDate: Date? = nil
+        originalDoNotDisturbEndDate: Date? = nil,
+        originalNightShift: NightShiftRestorePoint? = nil
     ) {
         self.modeID = modeID
         self.rawOriginalStates = Dictionary(uniqueKeysWithValues: originalStates.map { ($0.key.rawValue, $0.value) })
         self.originalKeepAwakeEndDate = originalKeepAwakeEndDate
         self.originalDoNotDisturbEndDate = originalDoNotDisturbEndDate
+        self.originalNightShift = originalNightShift
     }
 
     var originalKinds: [SwitchKind] {
@@ -838,6 +841,14 @@ final class SwitchStore: ObservableObject {
         let targetIsOn: Bool
         let endDate: Date?
         let forcesIndefiniteDuration: Bool
+        var nightShift: NightShiftModeAction? = nil
+    }
+
+    // A temporary Night Shift change ends at the next scheduled time, so Modes hold the state
+    // through the schedule and restore the exact schedule they replaced.
+    private enum NightShiftModeAction: Sendable {
+        case hold
+        case restore(NightShiftRestorePoint)
     }
 
     private struct ModeStepFailure: Sendable {
@@ -1322,66 +1333,97 @@ final class SwitchStore: ObservableObject {
         beginModeOperation(mode.id, reserving: kinds)
         captureFreshModeSnapshots(for: kinds) { [weak self] captured in
             guard let self, self.activeModeOperationID == mode.id else { return }
+            let capturesNightShift = captured[.nightShift]?.isAvailable == true
+            self.captureNightShiftRestorePoint(if: capturesNightShift) { [weak self] nightShiftPoint in
+                guard let self, self.activeModeOperationID == mode.id else { return }
+                self.startMode(mode, items: items, kinds: kinds, captured: captured, nightShiftPoint: nightShiftPoint)
+            }
+        }
+    }
 
-            let availableItems = items.filter { captured[$0.kind]?.isAvailable == true }
-            let skipped = items.filter { captured[$0.kind]?.isAvailable != true }
-            guard !availableItems.isEmpty else {
+    private func captureNightShiftRestorePoint(
+        if needed: Bool,
+        completion: @escaping @MainActor @Sendable (NightShiftRestorePoint?) -> Void
+    ) {
+        guard needed else {
+            completion(nil)
+            return
+        }
+        let controller = self.controller
+        actionQueue.async {
+            let point = controller.captureNightShiftRestorePoint()
+            Task { @MainActor in
+                completion(point)
+            }
+        }
+    }
+
+    private func startMode(
+        _ mode: SwitchModeDefinition,
+        items: [SwitchModeItem],
+        kinds: Set<SwitchKind>,
+        captured: [SwitchKind: SwitchSnapshot],
+        nightShiftPoint: NightShiftRestorePoint?
+    ) {
+        let availableItems = items.filter { captured[$0.kind]?.isAvailable == true }
+        let skipped = items.filter { captured[$0.kind]?.isAvailable != true }
+        guard !availableItems.isEmpty else {
+            self.finishModeOperation(mode.id, reservedKinds: kinds)
+            self.reportModeError(self.modeText(.unavailableToStart, mode.title))
+            return
+        }
+
+        let originalStates = Dictionary(uniqueKeysWithValues: availableItems.compactMap { item -> (SwitchKind, Bool)? in
+            guard let snapshot = captured[item.kind] else { return nil }
+            return (item.kind, snapshot.isOn)
+        })
+        let session = ActiveSwitchModeSession(
+            modeID: mode.id,
+            originalStates: originalStates,
+            originalKeepAwakeEndDate: originalStates[.keepAwake] == true
+                ? self.defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date
+                : nil,
+            originalDoNotDisturbEndDate: originalStates[.doNotDisturb] == true
+                ? self.defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date
+                : nil,
+            originalNightShift: originalStates[.nightShift] == nil ? nil : nightShiftPoint
+        )
+        self.activeModeSessions[mode.id] = session
+        self.clearModeError()
+
+        let steps = availableItems.compactMap { item in
+            self.activationStep(for: item, snapshot: captured[item.kind] ?? .off, session: session)
+        }
+        self.runModeSteps(steps, stopOnFailure: true) { [weak self] failures in
+            guard let self, self.activeModeOperationID == mode.id else { return }
+            guard !failures.isEmpty else {
                 self.finishModeOperation(mode.id, reservedKinds: kinds)
-                self.reportModeError(self.modeText(.unavailableToStart, mode.title))
+                if !skipped.isEmpty {
+                    let skippedTitles = skipped.map { self.switchTitle($0.kind) }.joined(separator: ", ")
+                    self.reportModeError(self.modeText(.skippedUnavailable, mode.title, skippedTitles))
+                }
                 return
             }
 
-            let originalStates = Dictionary(uniqueKeysWithValues: availableItems.compactMap { item -> (SwitchKind, Bool)? in
-                guard let snapshot = captured[item.kind] else { return nil }
-                return (item.kind, snapshot.isOn)
-            })
-            let session = ActiveSwitchModeSession(
-                modeID: mode.id,
-                originalStates: originalStates,
-                originalKeepAwakeEndDate: originalStates[.keepAwake] == true
-                    ? self.defaults.object(forKey: DefaultsKey.keepAwakeEndDate) as? Date
-                    : nil,
-                originalDoNotDisturbEndDate: originalStates[.doNotDisturb] == true
-                    ? self.defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date
-                    : nil
-            )
-            self.activeModeSessions[mode.id] = session
-            self.clearModeError()
-
-            let steps = availableItems.compactMap { item in
-                self.activationStep(for: item, snapshot: captured[item.kind] ?? .off, session: session)
-            }
-            self.runModeSteps(steps, stopOnFailure: true) { [weak self] failures in
+            let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)
+            self.runModeSteps(rollback.steps, stopOnFailure: false) { [weak self] rollbackFailures in
                 guard let self, self.activeModeOperationID == mode.id else { return }
-                guard !failures.isEmpty else {
-                    self.finishModeOperation(mode.id, reservedKinds: kinds)
-                    if !skipped.isEmpty {
-                        let skippedTitles = skipped.map { self.switchTitle($0.kind) }.joined(separator: ", ")
-                        self.reportModeError(self.modeText(.skippedUnavailable, mode.title, skippedTitles))
-                    }
-                    return
+                let allRollbackFailures = rollback.failures + rollbackFailures
+                if allRollbackFailures.isEmpty {
+                    self.activeModeSessions.removeValue(forKey: mode.id)
+                    self.reportModeError(self.modeText(
+                        .startFailedRestored,
+                        mode.title,
+                        self.modeFailureDescription(failures)
+                    ))
+                } else {
+                    self.reportModeError(self.modeText(
+                        .startPartialRestoreFailed,
+                        mode.title,
+                        self.modeFailureDescription(failures + allRollbackFailures)
+                    ))
                 }
-
-                let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)
-                self.runModeSteps(rollback.steps, stopOnFailure: false) { [weak self] rollbackFailures in
-                    guard let self, self.activeModeOperationID == mode.id else { return }
-                    let allRollbackFailures = rollback.failures + rollbackFailures
-                    if allRollbackFailures.isEmpty {
-                        self.activeModeSessions.removeValue(forKey: mode.id)
-                        self.reportModeError(self.modeText(
-                            .startFailedRestored,
-                            mode.title,
-                            self.modeFailureDescription(failures)
-                        ))
-                    } else {
-                        self.reportModeError(self.modeText(
-                            .startPartialRestoreFailed,
-                            mode.title,
-                            self.modeFailureDescription(failures + allRollbackFailures)
-                        ))
-                    }
-                    self.finishModeOperation(mode.id, reservedKinds: kinds)
-                }
+                self.finishModeOperation(mode.id, reservedKinds: kinds)
             }
         }
     }
@@ -1538,6 +1580,16 @@ final class SwitchStore: ObservableObject {
         snapshot: SwitchSnapshot,
         session: ActiveSwitchModeSession
     ) -> ModeStep? {
+        if item.kind == .nightShift, session.originalNightShift != nil {
+            // Hold even when already there, or the next scheduled time would change it mid-Mode.
+            return ModeStep(
+                kind: .nightShift,
+                targetIsOn: item.targetIsOn,
+                endDate: nil,
+                forcesIndefiniteDuration: false,
+                nightShift: .hold
+            )
+        }
         let hadFiniteDuration: Bool
         switch item.kind {
         case .keepAwake:
@@ -1568,6 +1620,16 @@ final class SwitchStore: ObservableObject {
             guard let target = session.restorationState(for: kind, at: date) else { continue }
             guard let snapshot = currentSnapshots[kind], snapshot.isAvailable else {
                 failures.append(ModeStepFailure(kind: kind, message: "unavailable"))
+                continue
+            }
+            if kind == .nightShift, let point = session.originalNightShift {
+                steps.append(ModeStep(
+                    kind: kind,
+                    targetIsOn: point.enabled,
+                    endDate: nil,
+                    forcesIndefiniteDuration: false,
+                    nightShift: .restore(point)
+                ))
                 continue
             }
             let endDate = session.restorationEndDate(for: kind, at: date)
@@ -1629,6 +1691,14 @@ final class SwitchStore: ObservableObject {
         let duration = keepAwakeDuration
         let controller = self.controller
         let operation: @Sendable () -> SwitchOperationResult = {
+            switch step.nightShift {
+            case .hold:
+                return controller.holdNightShift(step.targetIsOn, keepAwakeDuration: duration)
+            case .restore(let point):
+                return controller.restoreNightShift(point, keepAwakeDuration: duration)
+            case nil:
+                break
+            }
             if step.kind == .keepAwake, step.targetIsOn {
                 let requestedDuration = step.endDate.map { max(1, $0.timeIntervalSinceNow) }
                 return controller.setKeepAwake(
@@ -1645,9 +1715,16 @@ final class SwitchStore: ObservableObject {
             self.applyModeDurationPersistence(for: step, result: result)
 
             let failureMessage: String?
+            let restoresNightShift: Bool
+            if case .restore = step.nightShift {
+                restoresNightShift = true
+            } else {
+                restoresNightShift = false
+            }
             if let error = result.error {
                 failureMessage = error
-            } else if result.snapshot.isOn != step.targetIsOn {
+            } else if !restoresNightShift, result.snapshot.isOn != step.targetIsOn {
+                // A restored Night Shift follows its schedule, which may differ from the captured state.
                 failureMessage = self.modeText(.macOSDidNotReachState)
             } else {
                 failureMessage = nil

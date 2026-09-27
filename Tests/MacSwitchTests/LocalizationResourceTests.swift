@@ -89,6 +89,49 @@ final class LocalizationResourceTests: XCTestCase {
         }
     }
 
+    func testEveryShippedLanguageLocalizesNightShiftScheduleSemantics() throws {
+        let english = try strings(in: "en", named: "Localizable")
+        var expectedKeys: Set<String> = Set(L10n.runtimeTemplates).union([
+            "Always on",
+            "Always On",
+            "On until sunrise",
+            "Off until sunset",
+            "Daily reset",
+            "Keep the switch as set",
+            "Last change",
+            "Night Shift stays on around the clock."
+        ])
+        for cause in [
+            NightShiftChangeCause.macSwitch, .schedule, .overrideEnded, .manualElsewhere,
+            .scheduleSettings, .sunSchedulePermission, .availability
+        ] {
+            expectedKeys.insert(cause.description(enabled: true))
+            expectedKeys.insert(cause.description(enabled: false))
+        }
+        XCTAssertTrue(expectedKeys.isSubset(of: english.keys), "English is missing Night Shift copy")
+
+        for locale in localeFolders where locale != "en" {
+            let localized = try strings(in: locale, named: "Localizable")
+            for key in expectedKeys {
+                let value = try XCTUnwrap(localized[key], "\(locale) is missing \(key)")
+                XCTAssertNotEqual(value, key, "\(locale) did not translate \(key)")
+                XCTAssertEqual(value.contains("%@"), key.contains("%@"), "\(locale) changed the placeholder in \(key)")
+            }
+        }
+    }
+
+    func testNightShiftSubtitlesMatchTheMostSpecificTemplate() throws {
+        XCTAssertEqual(L10n.runtimeTemplateMatch(for: "On until tomorrow 07:00")?.template, "On until tomorrow %@")
+        XCTAssertEqual(L10n.runtimeTemplateMatch(for: "On until tomorrow 07:00")?.argument, "07:00")
+        XCTAssertEqual(L10n.runtimeTemplateMatch(for: "Off until 22:00")?.template, "Off until %@")
+        XCTAssertNil(L10n.runtimeTemplateMatch(for: "Active until 10:00"))
+
+        let catalog = try strings(in: "zh-Hans", named: "Localizable")
+        let match = try XCTUnwrap(L10n.runtimeTemplateMatch(for: "Off until tomorrow 05:00"))
+        let template = try XCTUnwrap(catalog[match.template])
+        XCTAssertEqual(template.replacingOccurrences(of: "%@", with: match.argument), "关闭至明天 05:00")
+    }
+
     func testCompositeHandoffErrorsLocalizeWithoutChangingTheRoutingMessage() throws {
         let source = "Enable \"Handoff\" failed: Handoff settings could not be refreshed. No changes were made."
         let catalog = try strings(in: "zh-Hans", named: "Localizable")

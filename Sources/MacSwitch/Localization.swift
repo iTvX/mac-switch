@@ -175,7 +175,33 @@ enum L10n {
             let prefix = bundle.localizedString(forKey: "Custom", value: "Custom", table: nil)
             return "\(prefix) \(key.dropFirst("Custom ".count))"
         }
+        if let (template, argument) = runtimeTemplateMatch(for: key) {
+            let localizedTemplate = bundle.localizedString(forKey: template, value: template, table: nil)
+            return localizedTemplate.replacingOccurrences(of: "%@", with: argument)
+        }
         return key
+    }
+
+    // Runtime subtitles that embed a time. More specific templates come first.
+    static let runtimeTemplates = [
+        "On until tomorrow %@",
+        "Off until tomorrow %@",
+        "On until %@",
+        "Off until %@"
+    ]
+
+    static func runtimeTemplateMatch(for key: String) -> (template: String, argument: String)? {
+        for template in runtimeTemplates {
+            let parts = template.components(separatedBy: "%@")
+            guard parts.count == 2,
+                  key.count > parts[0].count + parts[1].count,
+                  key.hasPrefix(parts[0]),
+                  key.hasSuffix(parts[1])
+            else { continue }
+            let argument = key.dropFirst(parts[0].count).dropLast(parts[1].count)
+            return (template, String(argument))
+        }
+        return nil
     }
 
     static func localizedRuntimeMessage(_ message: String, locale: Locale) -> String {
