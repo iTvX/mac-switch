@@ -307,6 +307,34 @@ enum RegressionDiagnostics {
             NightShiftStatePolicy.mutations(toReach: false, from: state(active: true, enabled: true)) == [.setEnabled(false)],
             "Night Shift disables the effect without disabling future schedules"
         )
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let evening = calendar.date(from: DateComponents(year: 2026, month: 9, day: 27, hour: 23)) ?? Date()
+        var scheduled = state(active: true, enabled: true)
+        scheduled.scheduleMode = .custom
+        reporter.check(
+            NightShiftSchedulePlanner.subtitle(for: scheduled, now: evening, calendar: calendar) == "On until tomorrow 07:00",
+            "Night Shift shows when macOS will end the current state"
+        )
+        scheduled.schedule = NightShiftAlwaysOn.schedule(resumingAt: NightShiftAlwaysOn.defaultResumeTime)
+        reporter.check(
+            NightShiftSchedulePreset.current(mode: .custom, schedule: scheduled.schedule) == .alwaysOn &&
+                NightShiftSchedulePlanner.subtitle(for: scheduled, now: evening, calendar: calendar) == "Always on",
+            "Night Shift recognizes the native Always On schedule"
+        )
+        let morning = calendar.date(byAdding: .hour, value: 10, to: evening) ?? evening
+        let restorePoint = NightShiftRestorePoint(
+            enabled: true,
+            mode: .custom,
+            schedule: .defaultSchedule,
+            followsSchedule: true,
+            overrideExpiry: nil
+        )
+        reporter.check(
+            !restorePoint.desiredState(sunTimes: nil, at: morning, calendar: calendar),
+            "Night Shift Mode restore follows the schedule instead of a stale state"
+        )
     }
 
     private static func checkHandoffStatePolicy(_ reporter: inout SelfTestReporter) {
