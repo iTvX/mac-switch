@@ -96,7 +96,8 @@ final class LocalizationResourceTests: XCTestCase {
             "Always On",
             "On until sunrise",
             "Off until sunset",
-            "Daily reset",
+            "The switch stays as you set it, whatever the schedule.",
+            "Like Control Center, a change lasts until the next scheduled time.",
             "Keep the switch as set",
             "Last change",
             "Night Shift stays on around the clock."

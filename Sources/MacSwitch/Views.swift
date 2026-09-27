@@ -5256,8 +5256,6 @@ private struct NightShiftPreferencesPanel: View {
     @State private var preset: NightShiftSchedulePreset = .off
     @State private var customSchedule = NightShiftScheduleState.defaultSchedule
     @State private var customScheduleHasChanges = false
-    @State private var resumeTime = NightShiftAlwaysOn.defaultResumeTime
-    @State private var resumeTimeHasChanges = false
     @State private var keepsSwitchState = false
     @State private var currentStatus: String?
     @State private var lastChange: NightShiftChangeRecord?
@@ -5332,25 +5330,6 @@ private struct NightShiftPreferencesPanel: View {
                     }
                 }
 
-                if preset == .alwaysOn {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TimeOfDayPickerRow(label: "Daily reset", time: resumeTimeBinding, labelWidth: 86)
-
-                        Text("macOS briefly fades Night Shift out and back in around this time each day.")
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        Button {
-                            applyPreset(.alwaysOn)
-                        } label: {
-                            Label("Apply Reset Time", systemImage: "checkmark.circle")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!resumeTimeHasChanges || isBusy)
-                    }
-                }
-
                 Divider()
 
                 Toggle("Keep the switch as set", isOn: Binding(
@@ -5420,10 +5399,8 @@ private struct NightShiftPreferencesPanel: View {
         }
     }
 
-    private static let keepsStateExplanation =
-        "Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule."
-    private static let followsScheduleExplanation =
-        "The switch works like Control Center: a change lasts until the next scheduled time."
+    private static let keepsStateExplanation = "The switch stays as you set it, whatever the schedule."
+    private static let followsScheduleExplanation = "Like Control Center, a change lasts until the next scheduled time."
 
     private static func isFailure(_ message: String) -> Bool {
         message.hasPrefix("Could not") || message.contains("not available") ||
@@ -5463,14 +5440,9 @@ private struct NightShiftPreferencesPanel: View {
         preset = value
         statusText = "Updating Night Shift schedule..."
         let requestedSchedule = customSchedule
-        let requestedResumeTime = resumeTime
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let error = NightShiftPreferences.applySchedule(
-                value,
-                customSchedule: requestedSchedule,
-                resumeTime: requestedResumeTime
-            )
+            let error = NightShiftPreferences.applySchedule(value, customSchedule: requestedSchedule)
             let latest = NightShiftPanelState.load()
             DispatchQueue.main.async {
                 finishUpdate(latest, error: error, success: Self.scheduleStatusText(for: value))
@@ -5522,9 +5494,7 @@ private struct NightShiftPreferencesPanel: View {
         preset = NightShiftSchedulePreset.current(mode: state.scheduleMode, schedule: state.schedule)
         currentStatus = latest.subtitle
         customSchedule = preset == .alwaysOn ? latest.restoredCustomSchedule : state.schedule
-        resumeTime = preset == .alwaysOn ? state.schedule.start : latest.alwaysOnResumeTime
         customScheduleHasChanges = false
-        resumeTimeHasChanges = false
     }
 
     private static func scheduleStatusText(for preset: NightShiftSchedulePreset) -> String {
@@ -5559,23 +5529,12 @@ private struct NightShiftPreferencesPanel: View {
             }
         )
     }
-
-    private var resumeTimeBinding: Binding<TimeOfDay> {
-        Binding(
-            get: { resumeTime },
-            set: { value, _ in
-                resumeTime = value
-                resumeTimeHasChanges = true
-            }
-        )
-    }
 }
 
 private struct NightShiftPanelState: Sendable {
     var state: NightShiftState?
     var subtitle: String?
     var keepsSwitchState: Bool
-    var alwaysOnResumeTime: TimeOfDay
     var restoredCustomSchedule: NightShiftScheduleState
     var lastChange: NightShiftChangeRecord?
 
@@ -5585,7 +5544,6 @@ private struct NightShiftPanelState: Sendable {
             state: state,
             subtitle: state.flatMap(NightShiftPreferences.subtitle(for:)),
             keepsSwitchState: NightShiftPreferences.keepsSwitchState,
-            alwaysOnResumeTime: NightShiftPreferences.alwaysOnResumeTime,
             restoredCustomSchedule: NightShiftPreferences.restoredCustomSchedule,
             lastChange: NightShiftPreferences.lastChange
         )
@@ -5595,12 +5553,11 @@ private struct NightShiftPanelState: Sendable {
 private struct TimeOfDayPickerRow: View {
     let label: String
     @Binding var time: TimeOfDay
-    var labelWidth: CGFloat = 46
 
     var body: some View {
         HStack(spacing: 10) {
             Text(LocalizedStringKey(label))
-                .frame(width: labelWidth, alignment: .trailing)
+                .frame(width: 46, alignment: .trailing)
             Stepper(value: Binding(
                 get: { time.hour },
                 set: { value, _ in time = TimeOfDay(hour: min(max(value, 0), 23), minute: time.minute) }

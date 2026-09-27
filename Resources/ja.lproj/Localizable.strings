@@ -234,12 +234,7 @@
 "On until sunrise" = "日の出までオン";
 "Off until sunset" = "日の入りまでオフ";
 "Always On" = "常にオン";
-"Daily reset" = "毎日のリセット";
-"macOS briefly fades Night Shift out and back in around this time each day." = "macOSは毎日この時刻の前後に、Night Shiftを一時的にフェードアウトしてから再びオンにします。";
-"Apply Reset Time" = "リセット時刻を適用";
 "Keep the switch as set" = "スイッチの設定を維持";
-"Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule." = "Night ShiftをオンにするとmacOSのスケジュールが「常にオン」に、オフにするとスケジュールが「オフ」になります。このオプションをオフにすると以前のスケジュールに戻ります。";
-"The switch works like Control Center: a change lasts until the next scheduled time." = "スイッチはコントロールセンターと同じように動作します。変更は次のスケジュール時刻まで続きます。";
 "Last change" = "最後の変更";
 "External-display results vary by hardware." = "外部ディスプレイでの結果はハードウェアによって異なります。";
 "From" = "開始";
@@ -268,3 +263,5 @@
 "Enabled, but macOS is not applying Night Shift" = "有効ですが、macOSがNight Shiftを適用していません";
 "Could not restore Night Shift after an earlier Mac Switch version disabled it." = "以前のバージョンのMac Switchが無効にしたNight Shiftを復元できませんでした。";
 "macOS accepted the repair request, but Night Shift did not become available." = "macOSは修復要求を受け入れましたが、Night Shiftは使用可能になりませんでした。";
+"The switch stays as you set it, whatever the schedule." = "スイッチはスケジュールに関係なく設定したままになります。";
+"Like Control Center, a change lasts until the next scheduled time." = "コントロールセンターと同じく、変更は次のスケジュール時刻まで続きます。";
