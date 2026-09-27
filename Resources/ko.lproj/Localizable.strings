@@ -234,12 +234,7 @@
 "On until sunrise" = "일출까지 켬";
 "Off until sunset" = "일몰까지 끔";
 "Always On" = "항상 켬";
-"Daily reset" = "매일 재설정";
-"macOS briefly fades Night Shift out and back in around this time each day." = "macOS는 매일 이 시간 전후로 Night Shift를 잠시 흐리게 껐다가 다시 켭니다.";
-"Apply Reset Time" = "재설정 시간 적용";
 "Keep the switch as set" = "스위치 설정 유지";
-"Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule." = "Night Shift를 켜면 macOS 일정이 '항상 켬'으로, 끄면 일정이 '끔'으로 설정됩니다. 이 옵션을 끄면 이전 일정이 복원됩니다.";
-"The switch works like Control Center: a change lasts until the next scheduled time." = "스위치는 제어 센터처럼 동작합니다. 변경 사항은 다음 예정된 시간까지 유지됩니다.";
 "Last change" = "마지막 변경";
 "External-display results vary by hardware." = "외부 디스플레이에서의 결과는 하드웨어에 따라 다릅니다.";
 "From" = "시작";
@@ -268,3 +263,5 @@
 "Enabled, but macOS is not applying Night Shift" = "켜져 있지만 macOS가 Night Shift를 적용하지 않고 있습니다";
 "Could not restore Night Shift after an earlier Mac Switch version disabled it." = "이전 버전의 Mac Switch가 끈 Night Shift를 복원할 수 없습니다.";
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS가 복구 요청을 수락했지만 Night Shift를 사용할 수 없습니다.";
+"The switch stays as you set it, whatever the schedule." = "스위치는 일정과 관계없이 설정한 상태로 유지됩니다.";
+"Like Control Center, a change lasts until the next scheduled time." = "제어 센터처럼 변경 사항은 다음 예정된 시간까지 유지됩니다.";

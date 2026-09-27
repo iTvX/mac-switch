@@ -234,12 +234,7 @@
 "On until sunrise" = "On until sunrise";
 "Off until sunset" = "Off until sunset";
 "Always On" = "Always On";
-"Daily reset" = "Daily reset";
-"macOS briefly fades Night Shift out and back in around this time each day." = "macOS briefly fades Night Shift out and back in around this time each day.";
-"Apply Reset Time" = "Apply Reset Time";
 "Keep the switch as set" = "Keep the switch as set";
-"Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule." = "Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule.";
-"The switch works like Control Center: a change lasts until the next scheduled time." = "The switch works like Control Center: a change lasts until the next scheduled time.";
 "Last change" = "Last change";
 "External-display results vary by hardware." = "External-display results vary by hardware.";
 "From" = "From";
@@ -268,3 +263,5 @@
 "Enabled, but macOS is not applying Night Shift" = "Enabled, but macOS is not applying Night Shift";
 "Could not restore Night Shift after an earlier Mac Switch version disabled it." = "Could not restore Night Shift after an earlier Mac Switch version disabled it.";
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS accepted the repair request, but Night Shift did not become available.";
+"The switch stays as you set it, whatever the schedule." = "The switch stays as you set it, whatever the schedule.";
+"Like Control Center, a change lasts until the next scheduled time." = "Like Control Center, a change lasts until the next scheduled time.";

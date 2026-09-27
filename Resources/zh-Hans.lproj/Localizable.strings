@@ -234,12 +234,7 @@
 "On until sunrise" = "开启至日出";
 "Off until sunset" = "关闭至日落";
 "Always On" = "始终开启";
-"Daily reset" = "每日重置";
-"macOS briefly fades Night Shift out and back in around this time each day." = "macOS 每天会在此时间前后短暂淡出并重新开启夜览。";
-"Apply Reset Time" = "应用重置时间";
 "Keep the switch as set" = "保持开关设置";
-"Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule." = "开启夜览时会把 macOS 计划设为“始终开启”，关闭时会把计划设为“关闭”。关闭此选项会恢复你之前的计划。";
-"The switch works like Control Center: a change lasts until the next scheduled time." = "开关的行为与控制中心相同：更改会持续到下一个计划时间。";
 "Last change" = "上次更改";
 "External-display results vary by hardware." = "外接显示器的效果因硬件而异。";
 "From" = "从";
@@ -268,3 +263,5 @@
 "Enabled, but macOS is not applying Night Shift" = "已开启，但 macOS 未应用夜览";
 "Could not restore Night Shift after an earlier Mac Switch version disabled it." = "早期版本的 Mac Switch 停用了夜览，无法恢复。";
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS 已接受修复请求，但夜览仍不可用。";
+"The switch stays as you set it, whatever the schedule." = "开关会保持你的设置，不受计划影响。";
+"Like Control Center, a change lasts until the next scheduled time." = "与控制中心一样，更改会持续到下一个计划时间。";

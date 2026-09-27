@@ -234,12 +234,7 @@
 "On until sunrise" = "Activado hasta el amanecer";
 "Off until sunset" = "Desactivado hasta el atardecer";
 "Always On" = "Siempre activado";
-"Daily reset" = "Restablecimiento diario";
-"macOS briefly fades Night Shift out and back in around this time each day." = "macOS atenúa brevemente Night Shift y lo vuelve a activar alrededor de esta hora cada día.";
-"Apply Reset Time" = "Aplicar hora";
 "Keep the switch as set" = "Mantener el interruptor como está";
-"Turning Night Shift on sets the macOS schedule to Always On, and turning it off sets the schedule to Off. Turning this option off restores your previous schedule." = "Al activar Night Shift, el horario de macOS pasa a Siempre activado; al desactivarlo, el horario pasa a Desactivado. Desactivar esta opción restaura tu horario anterior.";
-"The switch works like Control Center: a change lasts until the next scheduled time." = "El interruptor funciona como el Centro de control: un cambio dura hasta la siguiente hora programada.";
 "Last change" = "Último cambio";
 "External-display results vary by hardware." = "Los resultados en pantallas externas varían según el hardware.";
 "From" = "Desde";
@@ -268,3 +263,5 @@
 "Enabled, but macOS is not applying Night Shift" = "Activado, pero macOS no está aplicando Night Shift";
 "Could not restore Night Shift after an earlier Mac Switch version disabled it." = "No se pudo restaurar Night Shift después de que una versión anterior de Mac Switch lo desactivara.";
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS aceptó la reparación, pero Night Shift no quedó disponible.";
+"The switch stays as you set it, whatever the schedule." = "El interruptor se queda como lo dejes, sea cual sea el horario.";
+"Like Control Center, a change lasts until the next scheduled time." = "Como en el Centro de control, un cambio dura hasta la siguiente hora programada.";

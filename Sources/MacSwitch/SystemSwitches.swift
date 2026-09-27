@@ -884,6 +884,7 @@ protocol NightShiftClientProtocol: AnyObject, Sendable {
     func readState() -> NightShiftState?
     func setActive(_ active: Bool) -> Bool
     func setEnabled(_ enabled: Bool) -> Bool
+    func setEnabledForSession(_ enabled: Bool) -> Bool
     func setScheduleMode(_ mode: NightShiftScheduleMode) -> Bool
     func setSchedule(_ schedule: NightShiftScheduleState) -> Bool
 }
@@ -923,6 +924,7 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
     private typealias GetFloatFunction = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<Float>) -> ObjCBool
     private typealias GetBoolFunction = @convention(c) (AnyObject, Selector) -> ObjCBool
     private typealias SetBoolFunction = @convention(c) (AnyObject, Selector, ObjCBool) -> ObjCBool
+    private typealias SetEnabledWithOptionFunction = @convention(c) (AnyObject, Selector, ObjCBool, Int32) -> ObjCBool
     private typealias SetModeFunction = @convention(c) (AnyObject, Selector, Int32) -> ObjCBool
     private typealias SetScheduleFunction = @convention(c) (AnyObject, Selector, UnsafeRawPointer) -> ObjCBool
     private typealias SetStatusBlockFunction = @convention(c) (AnyObject, Selector, StatusNotificationBlock?) -> Void
@@ -1039,6 +1041,17 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
 
     func setEnabled(_ enabled: Bool) -> Bool {
         callBooleanMethod("setEnabled:", value: enabled)
+    }
+
+    // Option 1 is a session override: corebrightnessd schedules no transitions while it is set
+    // and clears it after 30 minutes of display sleep.
+    func setEnabledForSession(_ enabled: Bool) -> Bool {
+        callLock.lock()
+        defer { callLock.unlock() }
+        guard let client,
+              let function = method(client, "setEnabled:withOption:", as: SetEnabledWithOptionFunction.self)
+        else { return false }
+        return function(client, NSSelectorFromString("setEnabled:withOption:"), ObjCBool(enabled), 1).boolValue
     }
 
     func setScheduleMode(_ mode: NightShiftScheduleMode) -> Bool {
@@ -1172,6 +1185,8 @@ final class NightShiftSwitch: @unchecked Sendable {
     private let observationLock = NSLock()
     private let observationQueue = DispatchQueue(label: "com.maxyu.macswitch.night-shift-observation", qos: .utility)
     private var observedState: NightShiftState?
+    private var wakeObserver: NSObjectProtocol?
+    private var appliedSessionOverride = false
     private var localMutationDepth = 0
     private var localMutationGraceEnd: Date?
     private let localMutationGrace: TimeInterval = 3
@@ -1193,6 +1208,7 @@ final class NightShiftSwitch: @unchecked Sendable {
             guard let self else { return }
             let initial = self.client.readState()
             self.observationLock.withLock { self.observedState = initial }
+            self.reconcileAlwaysOn()
         }
         client.onStatusChange = { [weak self] in
             guard let self else {
@@ -1201,7 +1217,18 @@ final class NightShiftSwitch: @unchecked Sendable {
             }
             self.observationQueue.async {
                 self.recordObservedChange()
+                self.reconcileAlwaysOn()
                 DispatchQueue.main.async(execute: handler)
+            }
+        }
+        // macOS drops the session override after a long display sleep; restore it on wake.
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.screensDidWakeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.observationQueue.asyncAfter(deadline: .now() + 2) { [weak self] in
+                self?.reconcileAlwaysOn()
             }
         }
     }
@@ -1212,10 +1239,6 @@ final class NightShiftSwitch: @unchecked Sendable {
 
     var keepsSwitchState: Bool {
         defaults.bool(forKey: NightShiftPreferenceKey.keepsSwitchState)
-    }
-
-    var alwaysOnResumeTime: TimeOfDay {
-        decoded(TimeOfDay.self, forKey: NightShiftPreferenceKey.alwaysOnResumeTime) ?? NightShiftAlwaysOn.defaultResumeTime
     }
 
     private(set) var scheduleBackup: NightShiftScheduleBackup? {
@@ -1314,8 +1337,7 @@ final class NightShiftSwitch: @unchecked Sendable {
             guard state.isAvailable else { return Self.notSupportedMessage }
             nightShiftLogger.notice("Hold enabled=\(enabled, privacy: .public) from \(state.logDescription, privacy: .public)")
             if enabled {
-                let resumeTime = NightShiftAlwaysOn.isActive(state) ? state.schedule.start : alwaysOnResumeTime
-                return applyAlwaysOn(resumingAt: resumeTime)
+                return applyAlwaysOn()
             }
             if state.scheduleMode != .off {
                 let error = updateSchedule(mode: .off, schedule: nil, from: state)
@@ -1325,11 +1347,7 @@ final class NightShiftSwitch: @unchecked Sendable {
         }
     }
 
-    func applySchedule(
-        _ preset: NightShiftSchedulePreset,
-        customSchedule: NightShiftScheduleState,
-        resumeTime: TimeOfDay
-    ) -> String? {
+    func applySchedule(_ preset: NightShiftSchedulePreset, customSchedule: NightShiftScheduleState) -> String? {
         operationLock.withLock {
             guard let state = currentState, state.isAvailable else { return Self.notAvailableMessage }
             nightShiftLogger.notice(
@@ -1340,8 +1358,7 @@ final class NightShiftSwitch: @unchecked Sendable {
                 if !NightShiftAlwaysOn.isActive(state) {
                     saveScheduleBackupIfNeeded(from: state)
                 }
-                encode(resumeTime, forKey: NightShiftPreferenceKey.alwaysOnResumeTime)
-                return applyAlwaysOn(resumingAt: resumeTime)
+                return applyAlwaysOn()
             }
 
             let mode: NightShiftScheduleMode
@@ -1405,21 +1422,76 @@ final class NightShiftSwitch: @unchecked Sendable {
             }
             guard let restored = currentState else { return Self.notAvailableMessage }
             let desired = point.desiredState(sunTimes: restored.sunTimes, at: now(), calendar: calendar())
-            guard !NightShiftStatePolicy.reached(desired, state: restored) else { return nil }
-            return setTemporarilyEnabled(desired)
+            if !NightShiftStatePolicy.reached(desired, state: restored) {
+                let error = setTemporarilyEnabled(desired)
+                if let error { return error }
+            }
+            reconcileAlwaysOn()
+            return nil
         }
     }
 
-    private func applyAlwaysOn(resumingAt time: TimeOfDay) -> String? {
+    /// Always On is a full-day custom schedule, which macOS still wraps around once a day by
+    /// fading out for a few minutes. While Always On is on, a session override keeps it on with
+    /// no scheduled transitions at all, so there is nothing to notice. Once the schedule is no
+    /// longer Always On, the override Mac Switch applied hands control back to the schedule.
+    func reconcileAlwaysOn() {
+        operationLock.withLock {
+            guard let state = currentState, state.isAvailable else { return }
+            let appliedByMacSwitch = observationLock.withLock { () -> Bool in
+                if state.override != .onForSession {
+                    appliedSessionOverride = false
+                }
+                return appliedSessionOverride
+            }
+            guard NightShiftAlwaysOn.isActive(state) else {
+                if appliedByMacSwitch {
+                    releaseSessionOverride(from: state)
+                }
+                return
+            }
+            guard NightShiftStatePolicy.reached(true, state: state),
+                  state.override == NightShiftOverride.none || state.override == .onUntilNextTransition
+            else { return }
+            let applied = performLocalMutation { client.setEnabledForSession(true) }
+            observationLock.withLock { appliedSessionOverride = applied }
+            nightShiftLogger.notice("Always On session override applied=\(applied, privacy: .public)")
+        }
+    }
+
+    // A transition-bound change to the state the schedule implies ends exactly like the schedule.
+    private func releaseSessionOverride(from state: NightShiftState) {
+        guard state.override?.isSessionBound == true,
+              let scheduled = NightShiftSchedulePlanner.scheduledState(
+                  mode: state.scheduleMode,
+                  schedule: state.schedule,
+                  sunTimes: state.sunTimes,
+                  at: now(),
+                  calendar: calendar()
+              )
+        else { return }
+        let released = performLocalMutation {
+            client.setEnabled(scheduled) && waitForState { $0.override?.isSessionBound != true }
+        }
+        observationLock.withLock { appliedSessionOverride = false }
+        nightShiftLogger.notice("Session override released=\(released, privacy: .public) enabled=\(scheduled, privacy: .public)")
+    }
+
+    private func applyAlwaysOn() -> String? {
         guard let state = currentState, state.isAvailable else { return Self.notAvailableMessage }
-        let target = NightShiftAlwaysOn.schedule(resumingAt: time)
-        if state.scheduleMode != .custom || state.schedule != target {
+        // Keep an existing full-day schedule; the wrap-around time is an implementation detail.
+        if !NightShiftAlwaysOn.isActive(state) {
+            let target = NightShiftAlwaysOn.schedule(resumingAt: NightShiftAlwaysOn.defaultResumeTime)
             let error = updateSchedule(mode: .custom, schedule: target, from: state)
             if let error { return error }
         }
         guard let updated = currentState else { return Self.notAvailableMessage }
-        guard !NightShiftStatePolicy.reached(true, state: updated) else { return nil }
-        return setTemporarilyEnabled(true)
+        if !NightShiftStatePolicy.reached(true, state: updated) {
+            let error = setTemporarilyEnabled(true)
+            if let error { return error }
+        }
+        reconcileAlwaysOn()
+        return nil
     }
 
     private func updateSchedule(
@@ -1437,6 +1509,10 @@ final class NightShiftSwitch: @unchecked Sendable {
             }
             let reached = waitForState {
                 $0.scheduleMode == mode && (schedule == nil || $0.schedule == schedule)
+            }
+            // A mode change clears overrides in corebrightnessd; a new schedule in the same mode does not.
+            if reached, let updated = currentState, !NightShiftAlwaysOn.isActive(updated) {
+                releaseSessionOverride(from: updated)
             }
             if let final = currentState {
                 nightShiftLogger.notice("Schedule now \(final.logDescription, privacy: .public)")
@@ -1534,10 +1610,6 @@ enum NightShiftPreferences {
         NightShiftSwitch.shared.keepsSwitchState
     }
 
-    static var alwaysOnResumeTime: TimeOfDay {
-        NightShiftSwitch.shared.alwaysOnResumeTime
-    }
-
     static var restoredCustomSchedule: NightShiftScheduleState {
         NightShiftSwitch.shared.restoredCustomSchedule
     }
@@ -1550,12 +1622,8 @@ enum NightShiftPreferences {
         NightShiftSwitch.shared.subtitle(for: state)
     }
 
-    static func applySchedule(
-        _ preset: NightShiftSchedulePreset,
-        customSchedule: NightShiftScheduleState,
-        resumeTime: TimeOfDay
-    ) -> String? {
-        NightShiftSwitch.shared.applySchedule(preset, customSchedule: customSchedule, resumeTime: resumeTime)
+    static func applySchedule(_ preset: NightShiftSchedulePreset, customSchedule: NightShiftScheduleState) -> String? {
+        NightShiftSwitch.shared.applySchedule(preset, customSchedule: customSchedule)
     }
 
     static func setKeepsSwitchState(_ keep: Bool) -> String? {

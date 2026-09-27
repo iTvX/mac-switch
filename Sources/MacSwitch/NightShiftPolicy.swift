@@ -68,7 +68,7 @@ enum NightShiftSchedulePreset: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Always On is the native macOS way to keep Night Shift on: a custom schedule that covers
-/// the whole day except one minute. macOS fades out and back in around that minute daily.
+/// the whole day except one minute. An empty gap would mean a night of zero length (always off).
 enum NightShiftAlwaysOn {
     static let defaultResumeTime = TimeOfDay(hour: 5, minute: 0)
 
@@ -354,7 +354,6 @@ enum NightShiftChangeClassifier {
 
 enum NightShiftPreferenceKey {
     static let keepsSwitchState = "nightShift.keepsSwitchState"
-    static let alwaysOnResumeTime = "nightShift.alwaysOnResumeTime"
     static let scheduleBackup = "nightShift.scheduleBackup"
     static let lastChange = "nightShift.lastChange"
 }
