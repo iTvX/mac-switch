@@ -53,7 +53,7 @@ final class NightShiftBehaviorTests: XCTestCase {
         )
         let nightShift = makeSwitch(client)
 
-        XCTAssertNil(nightShift.applySchedule(.sunsetToSunrise, customSchedule: custom, resumeTime: .init(hour: 5, minute: 0)))
+        XCTAssertNil(nightShift.applySchedule(.sunsetToSunrise, customSchedule: custom))
         XCTAssertEqual(client.operations, [.setScheduleMode(.sunsetToSunrise)])
         XCTAssertEqual(client.state?.schedule, custom)
 
@@ -62,7 +62,7 @@ final class NightShiftBehaviorTests: XCTestCase {
             start: TimeOfDay(hour: 22, minute: 0),
             end: TimeOfDay(hour: 6, minute: 45)
         )
-        XCTAssertNil(nightShift.applySchedule(.custom, customSchedule: updated, resumeTime: .init(hour: 5, minute: 0)))
+        XCTAssertNil(nightShift.applySchedule(.custom, customSchedule: updated))
         XCTAssertEqual(client.operations, [.setSchedule(updated), .setScheduleMode(.custom)])
         XCTAssertEqual(client.state?.scheduleMode, .custom)
         XCTAssertEqual(client.state?.schedule, updated)
@@ -139,18 +139,91 @@ final class NightShiftBehaviorTests: XCTestCase {
             clock: clock
         )
         let nightShift = makeSwitch(client, clock: clock)
-        let resume = TimeOfDay(hour: 4, minute: 30)
 
-        XCTAssertNil(nightShift.applySchedule(.alwaysOn, customSchedule: previous, resumeTime: resume))
-        XCTAssertEqual(client.state?.schedule, NightShiftAlwaysOn.schedule(resumingAt: resume))
+        XCTAssertNil(nightShift.applySchedule(.alwaysOn, customSchedule: previous))
+        XCTAssertEqual(client.state?.schedule, NightShiftAlwaysOn.schedule(resumingAt: NightShiftAlwaysOn.defaultResumeTime))
         XCTAssertEqual(client.state?.enabled, true)
-        XCTAssertEqual(nightShift.alwaysOnResumeTime, resume)
         XCTAssertEqual(nightShift.restoredCustomSchedule, previous)
 
-        XCTAssertNil(nightShift.applySchedule(.sunsetToSunrise, customSchedule: previous, resumeTime: resume))
+        XCTAssertNil(nightShift.applySchedule(.sunsetToSunrise, customSchedule: previous))
         XCTAssertEqual(client.state?.scheduleMode, .sunsetToSunrise)
         XCTAssertEqual(client.state?.schedule, previous)
         XCTAssertNil(nightShift.scheduleBackup)
+    }
+
+    func testAlwaysOnKeepsAnExistingFullDaySchedule() {
+        let existing = NightShiftAlwaysOn.schedule(resumingAt: .init(hour: 3, minute: 30))
+        let client = FakeNightShiftClient(
+            state: makeState(active: true, enabled: true, mode: .custom, schedule: existing),
+            clock: TestClock(date(hour: 14))
+        )
+        let nightShift = makeSwitch(client)
+
+        XCTAssertNil(nightShift.applySchedule(.alwaysOn, customSchedule: .defaultSchedule))
+        XCTAssertFalse(client.operations.contains(.setSchedule(NightShiftAlwaysOn.schedule(resumingAt: NightShiftAlwaysOn.defaultResumeTime))))
+        XCTAssertEqual(client.state?.schedule, existing)
+    }
+
+    func testAlwaysOnUsesASessionOverrideSoTheDailyWrapIsInvisible() {
+        let clock = TestClock(date(hour: 14))
+        let client = FakeNightShiftClient(
+            state: makeState(active: true, enabled: false, mode: .sunsetToSunrise),
+            clock: clock
+        )
+        let nightShift = makeSwitch(client, clock: clock)
+
+        XCTAssertNil(nightShift.applySchedule(.alwaysOn, customSchedule: .defaultSchedule))
+        XCTAssertEqual(client.operations.last, .setEnabledForSession(true))
+        XCTAssertEqual(client.state?.override, .onForSession)
+        XCTAssertEqual(nightShift.snapshot().subtitle, "Always on")
+
+        // macOS drops the session override after a long display sleep; Mac Switch reapplies it.
+        client.state?.override = NightShiftOverride.none
+        nightShift.reconcileAlwaysOn()
+        XCTAssertEqual(client.state?.override, .onForSession)
+    }
+
+    func testAlwaysOnNeverTurnsNightShiftBackOnAfterTheUserTurnsItOff() {
+        var state = makeState(active: true, enabled: false, mode: .custom, schedule: NightShiftAlwaysOn.schedule(resumingAt: NightShiftAlwaysOn.defaultResumeTime))
+        state.override = .offUntilNextTransition
+        let client = FakeNightShiftClient(state: state, clock: TestClock(date(hour: 14)))
+        let nightShift = makeSwitch(client)
+
+        nightShift.reconcileAlwaysOn()
+        XCTAssertEqual(client.operations, [])
+
+        client.state?.enabled = true
+        client.state?.override = nil
+        nightShift.reconcileAlwaysOn()
+        XCTAssertEqual(client.operations, [], "An unreadable override must not be overwritten")
+    }
+
+    func testLeavingAlwaysOnHandsControlBackToTheSchedule() {
+        let clock = TestClock(date(hour: 14))
+        let client = FakeNightShiftClient(
+            state: makeState(active: true, enabled: false, mode: .custom, schedule: .defaultSchedule),
+            clock: clock
+        )
+        let nightShift = makeSwitch(client, clock: clock)
+        XCTAssertNil(nightShift.applySchedule(.alwaysOn, customSchedule: .defaultSchedule))
+        XCTAssertEqual(client.state?.override, .onForSession)
+
+        // Same custom mode, so only releasing the session override lets 22:00-07:00 turn it off at 14:00.
+        XCTAssertNil(nightShift.applySchedule(.custom, customSchedule: .defaultSchedule))
+        XCTAssertEqual(client.state?.schedule, .defaultSchedule)
+        XCTAssertEqual(client.state?.enabled, false)
+        XCTAssertEqual(client.state?.override, .offUntilNextTransition)
+    }
+
+    func testASessionOverrideSetElsewhereIsLeftAlone() {
+        var state = makeState(active: true, enabled: true, mode: .custom, schedule: .defaultSchedule)
+        state.override = .onForSession
+        let client = FakeNightShiftClient(state: state, clock: TestClock(date(hour: 14)))
+        let nightShift = makeSwitch(client)
+
+        nightShift.reconcileAlwaysOn()
+        XCTAssertEqual(client.operations, [])
+        XCTAssertEqual(client.state?.enabled, true)
     }
 
     func testKeepingTheSwitchStateHoldsItThroughTheScheduleAndRestoresTheSchedule() {
@@ -383,6 +456,7 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
     enum Operation: Equatable {
         case setActive(Bool)
         case setEnabled(Bool)
+        case setEnabledForSession(Bool)
         case setScheduleMode(NightShiftScheduleMode)
         case setSchedule(NightShiftScheduleState)
     }
@@ -423,6 +497,14 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
                 ? NightShiftOverride.none
                 : (enabled ? .onUntilNextTransition : .offUntilNextTransition)
         }
+        onStatusChange?()
+        return true
+    }
+
+    func setEnabledForSession(_ enabled: Bool) -> Bool {
+        operations.append(.setEnabledForSession(enabled))
+        state?.enabled = enabled
+        state?.override = enabled ? .onForSession : .offForSession
         onStatusChange?()
         return true
     }
