@@ -282,9 +282,24 @@ protocol SystemSwitchControlling: AnyObject, Sendable {
     func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult
     func prepareForTermination()
+    func captureNightShiftRestorePoint() -> NightShiftRestorePoint?
+    func holdNightShift(_ enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult
+    func restoreNightShift(_ point: NightShiftRestorePoint, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult
 }
 
 extension SystemSwitchControlling {
+    func captureNightShiftRestorePoint() -> NightShiftRestorePoint? {
+        nil
+    }
+
+    func holdNightShift(_ enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        set(.nightShift, enabled: enabled, keepAwakeDuration: keepAwakeDuration)
+    }
+
+    func restoreNightShift(_ point: NightShiftRestorePoint, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        set(.nightShift, enabled: point.enabled, keepAwakeDuration: keepAwakeDuration)
+    }
+
     func setKeepAwake(endingAt endDate: Date?, defaultDuration: KeepAwakeDuration) -> SwitchOperationResult {
         let remaining = endDate?.timeIntervalSinceNow
         return setKeepAwake(enabled: remaining.map { $0 > 0 } ?? true, duration: remaining, defaultDuration: defaultDuration)
@@ -515,6 +530,20 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
 
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult {
         xcodeClean.perform(progress: progress)
+    }
+
+    func captureNightShiftRestorePoint() -> NightShiftRestorePoint? {
+        nightShift.captureRestorePoint()
+    }
+
+    func holdNightShift(_ enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error = nightShift.hold(enabled)
+        return SwitchOperationResult(snapshot: snapshot(for: .nightShift, keepAwakeDuration: keepAwakeDuration), error: error)
+    }
+
+    func restoreNightShift(_ point: NightShiftRestorePoint, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error = nightShift.restore(point)
+        return SwitchOperationResult(snapshot: snapshot(for: .nightShift, keepAwakeDuration: keepAwakeDuration), error: error)
     }
 
     func prepareForTermination() {
@@ -788,7 +817,7 @@ enum NightShiftScheduleMode: Int32, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct NightShiftScheduleState: Equatable, Sendable {
+struct NightShiftScheduleState: Codable, Equatable, Sendable {
     var start: TimeOfDay
     var end: TimeOfDay
 
@@ -809,9 +838,18 @@ struct NightShiftState: Equatable, Sendable {
     var supported: Bool
     var strength: Float?
     var correlatedColorTemperature: Float?
+    var override: NightShiftOverride? = nil
+    var sunTimes: NightShiftSunTimes? = nil
 
     var isAvailable: Bool {
         available && supported
+    }
+
+    var logDescription: String {
+        let overrideValue = override.map { String($0.rawValue) } ?? "?"
+        return "enabled=\(enabled) active=\(active) mode=\(scheduleMode?.rawValue ?? -1) " +
+            "schedule=\(schedule.start.display)-\(schedule.end.display) override=\(overrideValue) " +
+            "available=\(isAvailable) sunPermitted=\(sunSchedulePermitted) flags=\(disableFlags)"
     }
 }
 
@@ -889,6 +927,7 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
     private typealias SetScheduleFunction = @convention(c) (AnyObject, Selector, UnsafeRawPointer) -> ObjCBool
     private typealias SetStatusBlockFunction = @convention(c) (AnyObject, Selector, StatusNotificationBlock?) -> Void
     private typealias VoidFunction = @convention(c) (AnyObject, Selector) -> Void
+    private typealias CopyPropertyFunction = @convention(c) (AnyObject, Selector, NSString) -> Unmanaged<AnyObject>?
 
     // CoreBrightness writes a 40-byte private C struct. A larger raw buffer avoids
     // depending on Swift's trailing-padding rules while keeping field offsets explicit.
@@ -963,6 +1002,9 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
             ) ?? NightShiftScheduleState.defaultSchedule.end
         )
 
+        let status = copySystemProperty(client, key: "CBBlueReductionStatus") as? [String: Any]
+        let sunSchedule = copySystemProperty(client, key: "BlueLightSunSchedule") as? [String: Any]
+
         return NightShiftState(
             active: readBoolean(from: buffer, offset: StatusOffset.active),
             enabled: readBoolean(from: buffer, offset: StatusOffset.enabled),
@@ -973,8 +1015,22 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
             available: readBoolean(from: buffer, offset: StatusOffset.available),
             supported: readSupported(client),
             strength: readFloat(client, selectorName: "getStrength:"),
-            correlatedColorTemperature: readFloat(client, selectorName: "getCCT:")
+            correlatedColorTemperature: readFloat(client, selectorName: "getCCT:"),
+            override: (status?["BlueLightReductionAlgoOverride"] as? NSNumber)
+                .flatMap { NightShiftOverride(rawValue: $0.intValue) },
+            sunTimes: sunSchedule.flatMap(NightShiftSunTimes.init(dictionary:))
         )
+    }
+
+    // The override and sun times are not part of the status struct; the client's
+    // BrightnessSystemClient returns the daemon's status dictionary read-only.
+    private func copySystemProperty(_ client: NSObject, key: String) -> Any? {
+        guard let ivar = class_getInstanceVariable(type(of: client), "bsc"),
+              let systemClient = object_getIvar(client, ivar) as? NSObject,
+              let function = method(systemClient, "copyPropertyForKey:", as: CopyPropertyFunction.self)
+        else { return nil }
+        return function(systemClient, NSSelectorFromString("copyPropertyForKey:"), key as NSString)?
+            .takeRetainedValue()
     }
 
     func setActive(_ active: Bool) -> Bool {
@@ -1102,18 +1158,77 @@ private final class NightShiftCoreBrightnessClient: NightShiftClientProtocol, @u
 final class NightShiftSwitch: @unchecked Sendable {
     static let shared = NightShiftSwitch(client: NightShiftCoreBrightnessClient.shared)
 
-    private let client: any NightShiftClientProtocol
+    private static let notAvailableMessage = "Night Shift is not available on this device."
+    private static let notSupportedMessage = "Night Shift is not supported by the current Mac or display."
+    private static let scheduleUpdateFailedMessage = "Could not update Night Shift schedule."
+    private static let scheduleUnchangedMessage = "macOS accepted the request, but the Night Shift schedule did not change."
 
-    init(client: any NightShiftClientProtocol) {
+    private let client: any NightShiftClientProtocol
+    private let defaults: UserDefaults
+    private let now: @Sendable () -> Date
+    private let calendar: @Sendable () -> Calendar
+    // Panel and dashboard requests arrive on different queues; each is a multi-step transaction.
+    private let operationLock = NSRecursiveLock()
+    private let observationLock = NSLock()
+    private let observationQueue = DispatchQueue(label: "com.maxyu.macswitch.night-shift-observation", qos: .utility)
+    private var observedState: NightShiftState?
+    private var localMutationDepth = 0
+    private var localMutationGraceEnd: Date?
+    private let localMutationGrace: TimeInterval = 3
+
+    init(
+        client: any NightShiftClientProtocol,
+        defaults: UserDefaults = .standard,
+        now: @escaping @Sendable () -> Date = { Date() },
+        calendar: @escaping @Sendable () -> Calendar = { Calendar.current }
+    ) {
         self.client = client
+        self.defaults = defaults
+        self.now = now
+        self.calendar = calendar
     }
 
     func observeStatusChanges(_ handler: @escaping @Sendable () -> Void) {
-        client.onStatusChange = handler
+        observationQueue.async { [weak self] in
+            guard let self else { return }
+            let initial = self.client.readState()
+            self.observationLock.withLock { self.observedState = initial }
+        }
+        client.onStatusChange = { [weak self] in
+            guard let self else {
+                DispatchQueue.main.async(execute: handler)
+                return
+            }
+            self.observationQueue.async {
+                self.recordObservedChange()
+                DispatchQueue.main.async(execute: handler)
+            }
+        }
     }
 
     var currentState: NightShiftState? {
         client.readState()
+    }
+
+    var keepsSwitchState: Bool {
+        defaults.bool(forKey: NightShiftPreferenceKey.keepsSwitchState)
+    }
+
+    var alwaysOnResumeTime: TimeOfDay {
+        decoded(TimeOfDay.self, forKey: NightShiftPreferenceKey.alwaysOnResumeTime) ?? NightShiftAlwaysOn.defaultResumeTime
+    }
+
+    private(set) var scheduleBackup: NightShiftScheduleBackup? {
+        get { decoded(NightShiftScheduleBackup.self, forKey: NightShiftPreferenceKey.scheduleBackup) }
+        set { encode(newValue, forKey: NightShiftPreferenceKey.scheduleBackup) }
+    }
+
+    var lastChange: NightShiftChangeRecord? {
+        decoded(NightShiftChangeRecord.self, forKey: NightShiftPreferenceKey.lastChange)
+    }
+
+    func subtitle(for state: NightShiftState) -> String? {
+        NightShiftSchedulePlanner.subtitle(for: state, now: now(), calendar: calendar())
     }
 
     func snapshot() -> SwitchSnapshot {
@@ -1131,65 +1246,263 @@ final class NightShiftSwitch: @unchecked Sendable {
         return SwitchSnapshot(
             isOn: state.isAvailable && state.enabled,
             isAvailable: state.isAvailable,
-            subtitle: state.isAvailable ? subtitle(for: state) : nil,
+            subtitle: subtitle(for: state),
             warning: warning
         )
     }
 
+    /// The dashboard switch. By default it behaves like Control Center: macOS keeps the change
+    /// until the next scheduled time. With "Keep the switch as set", the schedule itself changes.
     func setEnabled(_ enabled: Bool) -> String? {
-        guard let initial = currentState else { return "Night Shift is not available on this device." }
-        guard initial.isAvailable else { return "Night Shift is not supported by the current Mac or display." }
+        operationLock.withLock {
+            guard keepsSwitchState else { return setTemporarilyEnabled(enabled) }
+            guard let state = currentState else { return Self.notAvailableMessage }
+            guard state.isAvailable else { return Self.notSupportedMessage }
+            saveScheduleBackupIfNeeded(from: state)
+            return hold(enabled)
+        }
+    }
 
-        nightShiftLogger.info(
-            "Request enabled=\(enabled, privacy: .public), active=\(initial.active, privacy: .public), currentEnabled=\(initial.enabled, privacy: .public), mode=\(initial.scheduleMode?.rawValue ?? -1, privacy: .public)"
+    /// Changes Night Shift the way Control Center does; macOS ends the change at the next scheduled time.
+    func setTemporarilyEnabled(_ enabled: Bool) -> String? {
+        operationLock.withLock {
+            guard let initial = currentState else { return Self.notAvailableMessage }
+            guard initial.isAvailable else { return Self.notSupportedMessage }
+
+            nightShiftLogger.notice(
+                "Request enabled=\(enabled, privacy: .public) from \(initial.logDescription, privacy: .public)"
+            )
+
+            return performLocalMutation {
+                for mutation in NightShiftStatePolicy.mutations(toReach: enabled, from: initial) {
+                    switch mutation {
+                    case .setActive(let active):
+                        // Versions through 1.1.1 used setActive(false) as the off switch.
+                        // Repair that master state only when the user explicitly turns Night Shift on.
+                        guard client.setActive(active) else {
+                            nightShiftLogger.error("Could not restore Night Shift active state")
+                            return "Could not restore Night Shift after an earlier Mac Switch version disabled it."
+                        }
+                        guard waitForState({ $0.active == active }) else {
+                            return "macOS accepted the repair request, but Night Shift did not become available."
+                        }
+                    case .setEnabled(let target):
+                        guard client.setEnabled(target) else {
+                            nightShiftLogger.error("setEnabled returned false for target=\(target, privacy: .public)")
+                            return "Could not toggle Night Shift."
+                        }
+                    }
+                }
+
+                guard waitForState({ NightShiftStatePolicy.reached(enabled, state: $0) }) else {
+                    nightShiftLogger.error("Night Shift did not reach enabled=\(enabled, privacy: .public)")
+                    return "macOS accepted the request, but Night Shift did not change."
+                }
+                if let final = currentState {
+                    nightShiftLogger.notice("Reached \(final.logDescription, privacy: .public)")
+                }
+                return nil
+            }
+        }
+    }
+
+    /// Keeps Night Shift on or off across scheduled times by changing the macOS schedule:
+    /// Always On for on, Off for off. Callers own restoring the previous schedule.
+    func hold(_ enabled: Bool) -> String? {
+        operationLock.withLock {
+            guard let state = currentState else { return Self.notAvailableMessage }
+            guard state.isAvailable else { return Self.notSupportedMessage }
+            nightShiftLogger.notice("Hold enabled=\(enabled, privacy: .public) from \(state.logDescription, privacy: .public)")
+            if enabled {
+                let resumeTime = NightShiftAlwaysOn.isActive(state) ? state.schedule.start : alwaysOnResumeTime
+                return applyAlwaysOn(resumingAt: resumeTime)
+            }
+            if state.scheduleMode != .off {
+                let error = updateSchedule(mode: .off, schedule: nil, from: state)
+                if let error { return error }
+            }
+            return setTemporarilyEnabled(false)
+        }
+    }
+
+    func applySchedule(
+        _ preset: NightShiftSchedulePreset,
+        customSchedule: NightShiftScheduleState,
+        resumeTime: TimeOfDay
+    ) -> String? {
+        operationLock.withLock {
+            guard let state = currentState, state.isAvailable else { return Self.notAvailableMessage }
+            nightShiftLogger.notice(
+                "Request schedule preset=\(preset.rawValue, privacy: .public) from \(state.logDescription, privacy: .public)"
+            )
+
+            if preset == .alwaysOn {
+                if !NightShiftAlwaysOn.isActive(state) {
+                    saveScheduleBackupIfNeeded(from: state)
+                }
+                encode(resumeTime, forKey: NightShiftPreferenceKey.alwaysOnResumeTime)
+                return applyAlwaysOn(resumingAt: resumeTime)
+            }
+
+            let mode: NightShiftScheduleMode
+            let times: NightShiftScheduleState?
+            switch preset {
+            case .custom:
+                mode = .custom
+                times = customSchedule
+            case .off, .sunsetToSunrise:
+                mode = preset == .off ? .off : .sunsetToSunrise
+                // macOS also uses the stored times with the schedule off, so leave Always On completely.
+                times = NightShiftAlwaysOn.matches(state.schedule) ? restoredCustomSchedule : nil
+            case .alwaysOn:
+                return nil
+            }
+            // An explicit schedule choice replaces the one saved for "Keep the switch as set".
+            scheduleBackup = nil
+            return updateSchedule(mode: mode, schedule: times, from: state)
+        }
+    }
+
+    /// The custom times to show or restore when leaving Always On.
+    var restoredCustomSchedule: NightShiftScheduleState {
+        guard let saved = scheduleBackup?.schedule, !NightShiftAlwaysOn.matches(saved) else {
+            return .defaultSchedule
+        }
+        return saved
+    }
+
+    func setKeepsSwitchState(_ keep: Bool) -> String? {
+        operationLock.withLock {
+            defaults.set(keep, forKey: NightShiftPreferenceKey.keepsSwitchState)
+            nightShiftLogger.notice("Keep switch state=\(keep, privacy: .public)")
+            guard let state = currentState, state.isAvailable else { return nil }
+            if keep {
+                saveScheduleBackupIfNeeded(from: state)
+                return hold(state.enabled)
+            }
+            return restoreScheduleBackup(from: state)
+        }
+    }
+
+    func captureRestorePoint() -> NightShiftRestorePoint? {
+        guard let state = currentState else { return nil }
+        return NightShiftRestorePoint(state: state, now: now(), calendar: calendar())
+    }
+
+    /// Restores the schedule a Mode replaced, then the on/off state that schedule implies now.
+    func restore(_ point: NightShiftRestorePoint) -> String? {
+        operationLock.withLock {
+            guard let state = currentState else { return Self.notAvailableMessage }
+            guard state.isAvailable else { return Self.notSupportedMessage }
+            guard let mode = point.mode else { return setTemporarilyEnabled(point.enabled) }
+            nightShiftLogger.notice(
+                "Restore mode=\(point.modeRawValue, privacy: .public) enabled=\(point.enabled, privacy: .public) followsSchedule=\(point.followsSchedule, privacy: .public) from \(state.logDescription, privacy: .public)"
+            )
+
+            if state.scheduleMode != mode || state.schedule != point.schedule {
+                let error = updateSchedule(mode: mode, schedule: point.schedule, from: state)
+                if let error { return error }
+            }
+            guard let restored = currentState else { return Self.notAvailableMessage }
+            let desired = point.desiredState(sunTimes: restored.sunTimes, at: now(), calendar: calendar())
+            guard !NightShiftStatePolicy.reached(desired, state: restored) else { return nil }
+            return setTemporarilyEnabled(desired)
+        }
+    }
+
+    private func applyAlwaysOn(resumingAt time: TimeOfDay) -> String? {
+        guard let state = currentState, state.isAvailable else { return Self.notAvailableMessage }
+        let target = NightShiftAlwaysOn.schedule(resumingAt: time)
+        if state.scheduleMode != .custom || state.schedule != target {
+            let error = updateSchedule(mode: .custom, schedule: target, from: state)
+            if let error { return error }
+        }
+        guard let updated = currentState else { return Self.notAvailableMessage }
+        guard !NightShiftStatePolicy.reached(true, state: updated) else { return nil }
+        return setTemporarilyEnabled(true)
+    }
+
+    private func updateSchedule(
+        mode: NightShiftScheduleMode,
+        schedule: NightShiftScheduleState?,
+        from state: NightShiftState
+    ) -> String? {
+        performLocalMutation {
+            if let schedule, schedule != state.schedule, !client.setSchedule(schedule) {
+                return Self.scheduleUpdateFailedMessage
+            }
+            // Changing the mode also clears any temporary override in corebrightnessd.
+            if state.scheduleMode != mode, !client.setScheduleMode(mode) {
+                return Self.scheduleUpdateFailedMessage
+            }
+            let reached = waitForState {
+                $0.scheduleMode == mode && (schedule == nil || $0.schedule == schedule)
+            }
+            if let final = currentState {
+                nightShiftLogger.notice("Schedule now \(final.logDescription, privacy: .public)")
+            }
+            return reached ? nil : Self.scheduleUnchangedMessage
+        }
+    }
+
+    private func saveScheduleBackupIfNeeded(from state: NightShiftState) {
+        guard scheduleBackup == nil, let mode = state.scheduleMode else { return }
+        scheduleBackup = NightShiftScheduleBackup(mode: mode, schedule: state.schedule)
+    }
+
+    private func restoreScheduleBackup(from state: NightShiftState) -> String? {
+        guard let backup = scheduleBackup else { return nil }
+        scheduleBackup = nil
+        // Only undo schedules Mac Switch applied; a schedule changed elsewhere is the user's newer choice.
+        guard NightShiftAlwaysOn.isActive(state) || state.scheduleMode == .off else {
+            nightShiftLogger.notice("Kept schedule changed outside Mac Switch: \(state.logDescription, privacy: .public)")
+            return nil
+        }
+        guard state.scheduleMode != backup.mode || state.schedule != backup.schedule else { return nil }
+        return updateSchedule(mode: backup.mode, schedule: backup.schedule, from: state)
+    }
+
+    private func recordObservedChange() {
+        guard let latest = client.readState() else { return }
+        let (previous, initiatedByMacSwitch) = observationLock.withLock {
+            let local = localMutationDepth > 0 || localMutationGraceEnd.map { $0 >= now() } == true
+            return (observedState, local)
+        }
+        guard let previous else {
+            observationLock.withLock { observedState = latest }
+            return
+        }
+        // Temporary overrides end before the effect finishes fading, so keep the earlier
+        // state until a visible change arrives in order to attribute it correctly.
+        guard let cause = NightShiftChangeClassifier.cause(
+            from: previous,
+            to: latest,
+            initiatedByMacSwitch: initiatedByMacSwitch
+        ) else { return }
+        observationLock.withLock { observedState = latest }
+        let record = NightShiftChangeRecord(
+            date: now(),
+            cause: cause,
+            enabled: latest.enabled,
+            modeRawValue: latest.scheduleMode?.rawValue
         )
+        encode(record, forKey: NightShiftPreferenceKey.lastChange)
+        nightShiftLogger.notice(
+            "Changed cause=\(cause.rawValue, privacy: .public) from \(previous.logDescription, privacy: .public) to \(latest.logDescription, privacy: .public)"
+        )
+    }
 
-        for mutation in NightShiftStatePolicy.mutations(toReach: enabled, from: initial) {
-            switch mutation {
-            case .setActive(let active):
-                // Versions through 1.1.1 used setActive(false) as the off switch.
-                // Repair that master state only when the user explicitly turns Night Shift on.
-                guard client.setActive(active) else {
-                    nightShiftLogger.error("Could not restore Night Shift active state")
-                    return "Could not restore Night Shift after an earlier Mac Switch version disabled it."
-                }
-                guard waitForState({ $0.active == active }) else {
-                    return "macOS accepted the repair request, but Night Shift did not become available."
-                }
-            case .setEnabled(let target):
-                guard client.setEnabled(target) else {
-                    nightShiftLogger.error("setEnabled returned false for target=\(target, privacy: .public)")
-                    return "Could not toggle Night Shift."
+    private func performLocalMutation<T>(_ body: () -> T) -> T {
+        observationLock.withLock { localMutationDepth += 1 }
+        defer {
+            observationLock.withLock {
+                localMutationDepth -= 1
+                if localMutationDepth == 0 {
+                    localMutationGraceEnd = now().addingTimeInterval(localMutationGrace)
                 }
             }
         }
-
-        guard waitForState({ NightShiftStatePolicy.reached(enabled, state: $0) }) else {
-            nightShiftLogger.error("Night Shift did not reach enabled=\(enabled, privacy: .public)")
-            return "macOS accepted the request, but Night Shift did not change."
-        }
-        if let final = currentState {
-            nightShiftLogger.info(
-                "Reached enabled=\(final.enabled, privacy: .public), active=\(final.active, privacy: .public), flags=\(final.disableFlags, privacy: .public)"
-            )
-        }
-        return nil
-    }
-
-    func setScheduleMode(_ mode: NightShiftScheduleMode, customSchedule: NightShiftScheduleState) -> String? {
-        guard let state = currentState, state.isAvailable else {
-            return "Night Shift is not available on this device."
-        }
-        nightShiftLogger.info("Request schedule mode=\(mode.rawValue, privacy: .public)")
-        if mode == .custom, !client.setSchedule(customSchedule) {
-            return "Could not update Night Shift schedule."
-        }
-        guard client.setScheduleMode(mode) else {
-            return "Could not update Night Shift schedule."
-        }
-        return waitForState {
-            $0.scheduleMode == mode && (mode != .custom || $0.schedule == customSchedule)
-        } ? nil : "macOS accepted the request, but the Night Shift schedule did not change."
+        return body()
     }
 
     private func waitForState(_ condition: (NightShiftState) -> Bool) -> Bool {
@@ -1199,14 +1512,15 @@ final class NightShiftSwitch: @unchecked Sendable {
         }
     }
 
-    private func subtitle(for state: NightShiftState) -> String? {
-        switch state.scheduleMode {
-        case .sunsetToSunrise:
-            return "Sunset to sunrise"
-        case .custom:
-            return "Custom \(state.schedule.start.display)-\(state.schedule.end.display)"
-        case .off, .none:
-            return nil
+    private func decoded<T: Decodable>(_ type: T.Type, forKey key: String) -> T? {
+        defaults.data(forKey: key).flatMap { try? JSONDecoder().decode(type, from: $0) }
+    }
+
+    private func encode<T: Encodable>(_ value: T?, forKey key: String) {
+        if let value, let data = try? JSONEncoder().encode(value) {
+            defaults.set(data, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
         }
     }
 }
@@ -1216,10 +1530,37 @@ enum NightShiftPreferences {
         NightShiftSwitch.shared.currentState
     }
 
-    static func setScheduleMode(_ mode: NightShiftScheduleMode, customSchedule: NightShiftScheduleState) -> String? {
-        NightShiftSwitch.shared.setScheduleMode(mode, customSchedule: customSchedule)
+    static var keepsSwitchState: Bool {
+        NightShiftSwitch.shared.keepsSwitchState
     }
 
+    static var alwaysOnResumeTime: TimeOfDay {
+        NightShiftSwitch.shared.alwaysOnResumeTime
+    }
+
+    static var restoredCustomSchedule: NightShiftScheduleState {
+        NightShiftSwitch.shared.restoredCustomSchedule
+    }
+
+    static var lastChange: NightShiftChangeRecord? {
+        NightShiftSwitch.shared.lastChange
+    }
+
+    static func subtitle(for state: NightShiftState) -> String? {
+        NightShiftSwitch.shared.subtitle(for: state)
+    }
+
+    static func applySchedule(
+        _ preset: NightShiftSchedulePreset,
+        customSchedule: NightShiftScheduleState,
+        resumeTime: TimeOfDay
+    ) -> String? {
+        NightShiftSwitch.shared.applySchedule(preset, customSchedule: customSchedule, resumeTime: resumeTime)
+    }
+
+    static func setKeepsSwitchState(_ keep: Bool) -> String? {
+        NightShiftSwitch.shared.setKeepsSwitchState(keep)
+    }
 }
 
 private struct TrueToneSwitch {
