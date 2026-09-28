@@ -740,6 +740,7 @@ final class SwitchStore: ObservableObject {
     }
 
     @Published var snapshots: [SwitchKind: SwitchSnapshot] = [:]
+    lazy var nightShiftSettings = NightShiftSettingsModel(store: self)
 
     @Published private(set) var keepAwakeDuration: KeepAwakeDuration
     @Published private(set) var keepAwakeWhenLidClosed: Bool
@@ -1158,6 +1159,30 @@ final class SwitchStore: ObservableObject {
 
     func cancelStartAtLoginApproval() {
         updateStartAtLoginIfNeeded(false)
+    }
+
+    /// Reserve Night Shift just like a switch action so menu settings, shortcuts and Modes cannot race.
+    @discardableResult
+    func performNightShiftSettingsUpdate(
+        _ operation: @escaping @Sendable () -> (NightShiftPanelState, String?),
+        completion: @escaping @MainActor @Sendable (NightShiftPanelState, String?) -> Void
+    ) -> Bool {
+        guard !isCustomizationBusy(.nightShift) else { return false }
+        actionsInProgress.insert(.nightShift)
+        invalidatePendingSnapshot(for: .nightShift)
+        let controller = controller
+        let duration = keepAwakeDuration
+        actionQueue.async { [weak self] in
+            let (state, error) = operation()
+            let snapshot = controller.snapshot(for: .nightShift, keepAwakeDuration: duration)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.actionsInProgress.remove(.nightShift)
+                self.snapshots[.nightShift] = self.decoratedSnapshot(snapshot, for: .nightShift)
+                completion(state, error)
+            }
+        }
+        return true
     }
 
     func isActionBusy(_ kind: SwitchKind) -> Bool {

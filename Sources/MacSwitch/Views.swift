@@ -155,6 +155,7 @@ struct DashboardView: View {
                     kind: kind,
                     store: store,
                     hideDisabledReason: hideFromMenuDisabledReason(for: kind),
+                    availableHeight: panelSize.height - 20,
                     configure: {
                         closeQuickMenu()
                         openSettingsDetail(for: kind)
@@ -193,7 +194,7 @@ struct DashboardView: View {
     }
 
     private func quickMenuPosition(for rowFrame: CGRect, kind: SwitchKind) -> CGPoint {
-        let size = DashboardRowQuickMenu.size(for: kind)
+        let size = DashboardRowQuickMenu.size(for: kind, availableHeight: panelSize.height - 20)
         let halfWidth = size.width / 2
         let halfHeight = size.height / 2
         let x = min(
@@ -901,6 +902,13 @@ private struct ControlRow: View {
                             quickMenuKind = isQuickMenuPresented ? nil : .keepAwake
                         }
                     }
+                } else if kind == .nightShift {
+                    NightShiftOptionsButton(store: store) {
+                        withAnimation(.snappy(duration: 0.16)) {
+                            quickMenuOpeningEventNumber = NSApp.currentEvent?.eventNumber
+                            quickMenuKind = isQuickMenuPresented ? nil : .nightShift
+                        }
+                    }
                 } else if kind == .doNotDisturb {
                     DoNotDisturbDurationMenu(store: store)
                 }
@@ -1061,13 +1069,18 @@ private struct DashboardSwitchButton: View {
 }
 
 struct DashboardRowQuickMenu: View {
-    static func size(for kind: SwitchKind) -> CGSize {
-        kind == .keepAwake ? CGSize(width: 268, height: 266) : CGSize(width: 154, height: 84)
+    static func size(for kind: SwitchKind, availableHeight: CGFloat = DashboardLayout.maxHeight - 20) -> CGSize {
+        switch kind {
+        case .keepAwake: return CGSize(width: 268, height: 266)
+        case .nightShift: return CGSize(width: 292, height: min(418, availableHeight))
+        default: return CGSize(width: 154, height: 84)
+        }
     }
 
     let kind: SwitchKind
     @ObservedObject var store: SwitchStore
     let hideDisabledReason: String?
+    var availableHeight: CGFloat = DashboardLayout.maxHeight - 20
     let configure: () -> Void
     let hideFromMenu: () -> Void
 
@@ -1075,6 +1088,15 @@ struct DashboardRowQuickMenu: View {
         VStack(spacing: 3) {
             if kind == .keepAwake {
                 KeepAwakeQuickOptions(store: store)
+                Divider().padding(.horizontal, 7)
+            } else if kind == .nightShift {
+                ScrollView {
+                    NightShiftQuickOptions(store: store, model: store.nightShiftSettings)
+                        // Keep the option grid still when a system scrollbar appears for custom times.
+                        .frame(width: Self.size(for: kind).width - 30)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity)
                 Divider().padding(.horizontal, 7)
             }
             DashboardQuickMenuButton(
@@ -1094,13 +1116,14 @@ struct DashboardRowQuickMenu: View {
                 symbol: "eye.slash",
                 title: "Hide from Menu",
                 subtitle: hideDisabledReason,
-                reservesSubtitle: kind == .keepAwake,
+                reservesSubtitle: kind == .keepAwake || kind == .nightShift,
                 isDisabled: hideDisabledReason != nil,
                 action: hideFromMenu
             )
         }
         .padding(6)
-        .frame(width: Self.size(for: kind).width)
+        .frame(width: Self.size(for: kind).width,
+               height: kind == .nightShift ? Self.size(for: kind, availableHeight: availableHeight).height : nil)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -5252,159 +5275,59 @@ private struct DarkModePreferencesPanel: View {
 
 private struct NightShiftPreferencesPanel: View {
     @ObservedObject var store: SwitchStore
-    @Environment(\.locale) private var locale
-    @State private var preset: NightShiftSchedulePreset = .off
-    @State private var customSchedule = NightShiftScheduleState.defaultSchedule
-    @State private var customScheduleHasChanges = false
-    @State private var keepsSwitchState = false
-    @State private var currentStatus: String?
-    @State private var lastChange: NightShiftChangeRecord?
-    @State private var nightShiftSupported: Bool?
-    @State private var isRefreshingNightShift = false
-    @State private var pendingNightShiftRefresh = false
-    @State private var isUpdatingNightShift = false
-    @State private var statusText: String?
 
-    private var isBusy: Bool {
-        isRefreshingNightShift || isUpdatingNightShift || store.isActionBusy(.nightShift)
+    var body: some View {
+        NightShiftSettingsPanel(store: store, model: store.nightShiftSettings)
     }
+}
+
+private struct NightShiftSettingsPanel: View {
+    @ObservedObject var store: SwitchStore
+    @ObservedObject var model: NightShiftSettingsModel
+    @Environment(\.locale) private var locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if isRefreshingNightShift && nightShiftSupported == nil {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Checking Night Shift support...")
-                        .font(.system(size: 13.5, weight: .medium))
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
-            } else if nightShiftSupported == false {
-                RecoveryNotice(
-                    symbol: "lightbulb.fill",
-                    title: "Night Shift is not available",
-                    message: "The current Mac or display did not report Night Shift support."
-                ) {
-                    reportOpenResult(
-                        SystemSettingsLinks.openDisplays(),
-                        store: store,
-                        failureMessage: "Could not open Displays settings."
-                    )
-                }
-            } else {
-                if let currentStatus {
+            if model.isSupported == true {
+                if let currentStatus = model.currentStatus {
                     Label {
                         Text(verbatim: L10n.localizedResource(currentStatus, locale: locale))
-                    } icon: {
-                        Image(systemName: "clock")
-                    }
+                    } icon: { Image(systemName: "clock") }
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                 }
-
-                Picker("Schedule", selection: Binding(
-                    get: { preset },
-                    set: { value, _ in applyPreset(value) }
-                )) {
-                    ForEach(NightShiftSchedulePreset.allCases) { preset in
-                        Text(LocalizedStringKey(preset.title)).tag(preset)
-                    }
-                }
-                .pickerStyle(.menu)
-                .disabled(isBusy)
-
-                if preset == .custom {
-                    VStack(alignment: .leading, spacing: 10) {
-                        TimeOfDayPickerRow(label: "From", time: customStartBinding)
-                        TimeOfDayPickerRow(label: "To", time: customEndBinding)
-
-                        Button {
-                            applyPreset(.custom)
-                        } label: {
-                            Label("Apply Custom Schedule", systemImage: "checkmark.circle")
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(!customScheduleHasChanges || isBusy)
-                    }
-                }
-
-                Divider()
-
-                Toggle("Keep the switch as set", isOn: Binding(
-                    get: { keepsSwitchState },
-                    set: { value, _ in updateKeepsSwitchState(value) }
-                ))
-                .disabled(isBusy)
-
-                Text(LocalizedStringKey(keepsSwitchState ? Self.keepsStateExplanation : Self.followsScheduleExplanation))
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                if let lastChange {
+                NightShiftScheduleControls(model: model, isBusy: model.isBusy, compact: false)
+                if let lastChange = model.lastChange {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Last change")
-                            .font(.system(size: 12.5, weight: .semibold))
+                        Text("Last change").font(.system(size: 12.5, weight: .semibold))
                         Text(verbatim: lastChangeDescription(lastChange))
-                            .font(.system(size: 12.5))
-                            .foregroundStyle(.secondary)
+                            .font(.system(size: 12.5)).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-
-                Label(
-                    "External-display results vary by hardware.",
-                    systemImage: "display"
-                )
-                .font(.system(size: 12.5))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                Label("External-display results vary by hardware.", systemImage: "display")
+                    .font(.system(size: 12.5)).foregroundStyle(.secondary)
+            } else {
+                NightShiftSupportNotice(isSupported: model.isSupported)
             }
-
-            if let statusText {
-                Text(verbatim: L10n.localizedRuntimeMessage(statusText, locale: locale))
+            if let status = model.statusText {
+                Text(verbatim: L10n.localizedRuntimeMessage(status, locale: locale))
                     .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(Self.isFailure(statusText) ? Color.red : Color.secondary)
+                    .foregroundStyle(model.hasError ? Color.red : Color.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-
             HStack(spacing: 10) {
-                Button {
-                    refreshNightShift()
-                } label: {
-                    Label(isRefreshingNightShift ? "Checking..." : "Refresh Status", systemImage: "arrow.clockwise")
+                Button { model.refresh() } label: {
+                    Label(model.isRefreshing ? "Checking..." : "Refresh Status", systemImage: "arrow.clockwise")
                 }
-                .buttonStyle(.bordered)
-                .disabled(isBusy)
-
+                .disabled(model.isBusy)
                 Button {
-                    reportOpenResult(
-                        SystemSettingsLinks.openDisplays(),
-                        store: store,
-                        failureMessage: "Could not open Displays settings."
-                    )
-                } label: {
-                    Label("Display Settings", systemImage: "display")
-                }
-                .buttonStyle(.bordered)
+                    reportOpenResult(SystemSettingsLinks.openDisplays(), store: store, failureMessage: "Could not open Displays settings.")
+                } label: { Label("Display Settings", systemImage: "display") }
             }
+            .buttonStyle(.bordered)
         }
-        .onAppear {
-            refreshNightShift()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .nightShiftStatusDidChange)) { _ in
-            refreshNightShift()
-        }
-    }
-
-    private static let keepsStateExplanation = "The switch stays as you set it, whatever the schedule."
-    private static let followsScheduleExplanation = "Like Control Center, a change lasts until the next scheduled time."
-
-    private static func isFailure(_ message: String) -> Bool {
-        message.hasPrefix("Could not") || message.contains("not available") ||
-            message.contains("not supported") || message.contains("did not")
+        .modifier(NightShiftSettingsRefresh(store: store, model: model))
     }
 
     private func lastChangeDescription(_ record: NightShiftChangeRecord) -> String {
@@ -5412,141 +5335,144 @@ private struct NightShiftPreferencesPanel: View {
         let cause = L10n.localizedResource(record.cause.description(enabled: record.enabled), locale: locale)
         return "\(time) · \(cause)"
     }
+}
 
-    private func refreshNightShift() {
-        guard !isRefreshingNightShift, !isUpdatingNightShift else {
-            pendingNightShiftRefresh = true
-            return
-        }
-        isRefreshingNightShift = true
-        DispatchQueue.global(qos: .utility).async {
-            let latest = NightShiftPanelState.load()
-            DispatchQueue.main.async {
-                apply(latest)
-                let shouldRefreshAgain = pendingNightShiftRefresh
-                pendingNightShiftRefresh = false
-                isRefreshingNightShift = false
-                store.refreshAsync(.nightShift)
-                if shouldRefreshAgain {
-                    refreshNightShift()
-                }
+private struct NightShiftOptionsButton: View {
+    @ObservedObject var store: SwitchStore
+    let openOptions: () -> Void
+
+    var body: some View {
+        Button(action: openOptions) {
+            HStack(spacing: 5) {
+                Image(systemName: "clock").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
             }
+            .foregroundStyle(store.snapshots[.nightShift]?.isOn == true ? Color.accentColor : .secondary)
+            .frame(width: 38, height: 25)
+            .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+            .contentShape(Rectangle())
         }
-    }
-
-    private func applyPreset(_ value: NightShiftSchedulePreset) {
-        guard !isUpdatingNightShift, !store.isActionBusy(.nightShift) else { return }
-        isUpdatingNightShift = true
-        preset = value
-        statusText = "Updating Night Shift schedule..."
-        let requestedSchedule = customSchedule
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let error = NightShiftPreferences.applySchedule(value, customSchedule: requestedSchedule)
-            let latest = NightShiftPanelState.load()
-            DispatchQueue.main.async {
-                finishUpdate(latest, error: error, success: Self.scheduleStatusText(for: value))
-            }
-        }
-    }
-
-    private func updateKeepsSwitchState(_ value: Bool) {
-        guard !isUpdatingNightShift, !store.isActionBusy(.nightShift) else { return }
-        isUpdatingNightShift = true
-        keepsSwitchState = value
-        statusText = "Updating Night Shift schedule..."
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let error = NightShiftPreferences.setKeepsSwitchState(value)
-            let latest = NightShiftPanelState.load()
-            DispatchQueue.main.async {
-                finishUpdate(
-                    latest,
-                    error: error,
-                    success: value
-                        ? "The switch now keeps Night Shift as set."
-                        : "The switch works like Control Center again."
-                )
-            }
-        }
-    }
-
-    private func finishUpdate(_ latest: NightShiftPanelState, error: String?, success: String) {
-        isUpdatingNightShift = false
-        apply(latest)
-        statusText = error ?? success
-        store.refreshAsync(.nightShift)
-        if pendingNightShiftRefresh {
-            pendingNightShiftRefresh = false
-            refreshNightShift()
-        }
-    }
-
-    private func apply(_ latest: NightShiftPanelState) {
-        keepsSwitchState = latest.keepsSwitchState
-        lastChange = latest.lastChange
-        guard let state = latest.state else {
-            nightShiftSupported = false
-            currentStatus = nil
-            return
-        }
-        nightShiftSupported = state.isAvailable
-        preset = NightShiftSchedulePreset.current(mode: state.scheduleMode, schedule: state.schedule)
-        currentStatus = latest.subtitle
-        customSchedule = preset == .alwaysOn ? latest.restoredCustomSchedule : state.schedule
-        customScheduleHasChanges = false
-    }
-
-    private static func scheduleStatusText(for preset: NightShiftSchedulePreset) -> String {
-        switch preset {
-        case .off:
-            return "Night Shift scheduling is off. You can still use the dashboard switch manually."
-        case .sunsetToSunrise:
-            return "Night Shift will follow sunset and sunrise."
-        case .custom:
-            return "Night Shift will follow your custom schedule."
-        case .alwaysOn:
-            return "Night Shift stays on around the clock."
-        }
-    }
-
-    private var customStartBinding: Binding<TimeOfDay> {
-        Binding(
-            get: { customSchedule.start },
-            set: { value, _ in
-                customSchedule.start = value
-                customScheduleHasChanges = true
-            }
-        )
-    }
-
-    private var customEndBinding: Binding<TimeOfDay> {
-        Binding(
-            get: { customSchedule.end },
-            set: { value, _ in
-                customSchedule.end = value
-                customScheduleHasChanges = true
-            }
-        )
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("Night Shift options"))
+        .help("Choose a schedule and switch behavior")
     }
 }
 
-private struct NightShiftPanelState: Sendable {
-    var state: NightShiftState?
-    var subtitle: String?
-    var keepsSwitchState: Bool
-    var restoredCustomSchedule: NightShiftScheduleState
-    var lastChange: NightShiftChangeRecord?
+struct NightShiftQuickOptions: View {
+    @ObservedObject var store: SwitchStore
+    @ObservedObject var model: NightShiftSettingsModel
+    @Environment(\.locale) private var locale
 
-    static func load() -> NightShiftPanelState {
-        let state = NightShiftPreferences.state
-        return NightShiftPanelState(
-            state: state,
-            subtitle: state.flatMap(NightShiftPreferences.subtitle(for:)),
-            keepsSwitchState: NightShiftPreferences.keepsSwitchState,
-            restoredCustomSchedule: NightShiftPreferences.restoredCustomSchedule,
-            lastChange: NightShiftPreferences.lastChange
-        )
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Night Shift").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+            if model.isSupported == true {
+                NightShiftScheduleControls(model: model, isBusy: model.isBusy, compact: true)
+            } else {
+                NightShiftSupportNotice(isSupported: model.isSupported)
+            }
+            if model.hasError, let status = model.statusText {
+                Text(verbatim: L10n.localizedRuntimeMessage(status, locale: locale))
+                    .font(.system(size: 12)).foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(7)
+        .transaction { $0.animation = nil }
+        .modifier(NightShiftSettingsRefresh(store: store, model: model))
+    }
+}
+
+private struct NightShiftSupportNotice: View {
+    let isSupported: Bool?
+    var body: some View {
+        Label(isSupported == nil ? "Checking Night Shift support..." : "The current Mac or display did not report Night Shift support.",
+              systemImage: isSupported == nil ? "clock" : "display")
+            .font(.system(size: 12.5)).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+private struct NightShiftSettingsRefresh: ViewModifier {
+    @ObservedObject var store: SwitchStore
+    let model: NightShiftSettingsModel
+    func body(content: Content) -> some View {
+        content
+            .onAppear { model.refresh() }
+            .onReceive(NotificationCenter.default.publisher(for: .nightShiftStatusDidChange)) { _ in model.refresh() }
+            .onChange(of: store.isActionBusy(.nightShift)) { _, busy in
+                if !busy { model.refresh() }
+            }
+    }
+}
+
+private struct NightShiftScheduleControls: View {
+    @ObservedObject var model: NightShiftSettingsModel
+    let isBusy: Bool
+    let compact: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+            if compact {
+                Text("Schedule").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 2), spacing: 5) {
+                    ForEach(NightShiftSchedulePreset.allCases) { preset in
+                        Button { model.applyPreset(preset) } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
+                                    .frame(width: 10).opacity(model.preset == preset ? 1 : 0)
+                                Text(LocalizedStringKey(preset.title))
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .multilineTextAlignment(.leading)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.horizontal, 7)
+                            .frame(maxWidth: .infinity, minHeight: 38)
+                            .foregroundStyle(model.preset == preset ? Color.accentColor : .primary)
+                            .background(model.preset == preset ? Color.accentColor.opacity(0.16) : DashboardColors.controlFill,
+                                        in: RoundedRectangle(cornerRadius: 6))
+                            .contentShape(Rectangle())
+                            .animation(.easeOut(duration: 0.12), value: model.preset == preset)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isBusy)
+                        .accessibilityAddTraits(model.preset == preset ? .isSelected : [])
+                    }
+                }
+            } else {
+                Picker("Schedule", selection: Binding(get: { model.preset }, set: { model.applyPreset($0) })) {
+                    ForEach(NightShiftSchedulePreset.allCases) { preset in
+                        Text(LocalizedStringKey(preset.title)).tag(preset)
+                    }
+                }
+                .pickerStyle(.menu).disabled(isBusy)
+            }
+            if model.preset == .custom {
+                VStack(alignment: .leading, spacing: 8) {
+                    TimeOfDayPickerRow(label: "From", time: Binding(get: { model.customSchedule.start }, set: { model.setCustomStart($0) }))
+                    TimeOfDayPickerRow(label: "To", time: Binding(get: { model.customSchedule.end }, set: { model.setCustomEnd($0) }))
+                    Button { model.applyPreset(.custom) } label: {
+                        Label("Apply Custom Schedule", systemImage: "checkmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!model.customScheduleHasChanges || isBusy)
+                }
+                .disabled(isBusy)
+            }
+            Divider()
+            Toggle("Keep the switch as set", isOn: Binding(get: { model.keepsSwitchState }, set: { model.updateKeepsSwitchState($0) }))
+                .toggleStyle(.checkbox)
+                .font(.system(size: compact ? 12 : 14))
+                .disabled(isBusy)
+            Text(LocalizedStringKey(model.keepsSwitchState
+                                    ? "The switch stays as you set it, whatever the schedule."
+                                    : "Like Control Center, a change lasts until the next scheduled time."))
+                .font(.system(size: 12)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }
 

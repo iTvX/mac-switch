@@ -265,3 +265,7 @@
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS 已接受修復要求，但夜覽仍無法使用。";
 "The switch stays as you set it, whatever the schedule." = "開關會保持你的設定，不受排程影響。";
 "Like Control Center, a change lasts until the next scheduled time." = "與控制中心相同，變更會持續到下一個排程時間。";
+
+"Night Shift options" = "夜覽選項";
+
+"Choose a schedule and switch behavior" = "選擇排程和開關行為";
