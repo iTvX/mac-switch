@@ -265,3 +265,7 @@
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS ha accettato la riparazione, ma Night Shift non è diventato disponibile.";
 "The switch stays as you set it, whatever the schedule." = "L’interruttore resta come lo imposti, indipendentemente dalla programmazione.";
 "Like Control Center, a change lasts until the next scheduled time." = "Come nel Centro di Controllo, una modifica dura fino al prossimo orario programmato.";
+
+"Night Shift options" = "Opzioni Night Shift";
+
+"Choose a schedule and switch behavior" = "Scegli la programmazione e il comportamento del pulsante";

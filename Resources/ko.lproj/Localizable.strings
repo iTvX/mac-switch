@@ -265,3 +265,7 @@
 "macOS accepted the repair request, but Night Shift did not become available." = "macOS가 복구 요청을 수락했지만 Night Shift를 사용할 수 없습니다.";
 "The switch stays as you set it, whatever the schedule." = "스위치는 일정과 관계없이 설정한 상태로 유지됩니다.";
 "Like Control Center, a change lasts until the next scheduled time." = "제어 센터처럼 변경 사항은 다음 예정된 시간까지 유지됩니다.";
+
+"Night Shift options" = "Night Shift 옵션";
+
+"Choose a schedule and switch behavior" = "일정 및 스위치 동작 선택";
