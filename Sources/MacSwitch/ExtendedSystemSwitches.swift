@@ -574,7 +574,8 @@ enum ScreenResolutionPreferences {
         guard !displays.isEmpty else { return 0 }
         if let storedSignature = UserDefaults.standard.string(forKey: selectedDisplaySignatureKey),
            !storedSignature.isEmpty,
-           let matchedIndex = displays.firstIndex(where: { displaySignature(for: $0.displayID) == storedSignature }) {
+           let matchedIndex = displays.firstIndex(where: { displaySignature(for: $0.displayID) == storedSignature
+               || (uniqueLegacyDisplay($0.displayID) && legacyDisplaySignature(for: $0.displayID) == storedSignature) }) {
             return matchedIndex
         }
         let stored = UserDefaults.standard.integer(forKey: selectedDisplayIndexKey)
@@ -640,7 +641,8 @@ enum ScreenResolutionPreferences {
         if let stored = UserDefaults.standard.object(forKey: selectedModeKey(for: displayID)) as? Int {
             return stored
         }
-        return UserDefaults.standard.integer(forKey: legacySelectedModeIDKey)
+        if uniqueLegacyDisplay(displayID), let legacy = UserDefaults.standard.object(forKey: "switch.screenResolution.selectedModeID.\(legacyDisplaySignature(for: displayID))") as? Int { return legacy }
+        return displayOptions.count == 1 ? UserDefaults.standard.integer(forKey: legacySelectedModeIDKey) : 0
     }
 
     static func setSelectedModeID(_ newValue: Int, for displayID: CGDirectDisplayID?) {
@@ -739,6 +741,7 @@ enum ScreenResolutionPreferences {
         if let stored = UserDefaults.standard.object(forKey: key) as? Int {
             return stored
         }
+        if uniqueLegacyDisplay(displayID), let legacy = UserDefaults.standard.object(forKey: "switch.screenResolution.previousMode.\(legacyDisplaySignature(for: displayID))") as? Int { return legacy }
         if displayOptions.count == 1,
            let legacy = UserDefaults.standard.object(forKey: legacyPreviousModeKey) as? Int {
             return legacy
@@ -752,6 +755,7 @@ enum ScreenResolutionPreferences {
 
     fileprivate static func clearPreviousMode(for displayID: CGDirectDisplayID) {
         UserDefaults.standard.removeObject(forKey: previousModeKey(for: displayID))
+        if uniqueLegacyDisplay(displayID) { UserDefaults.standard.removeObject(forKey: "switch.screenResolution.previousMode.\(legacyDisplaySignature(for: displayID))") }
         if displayOptions.count == 1 {
             UserDefaults.standard.removeObject(forKey: legacyPreviousModeKey)
         }
@@ -789,7 +793,23 @@ enum ScreenResolutionPreferences {
         return "\(base) (\(size))"
     }
 
+    fileprivate static func displayUUID(_ display: CGDirectDisplayID) -> String? {
+        guard let uuid = CGDisplayCreateUUIDFromDisplayID(display)?.takeRetainedValue() else { return nil }
+        return CFUUIDCreateString(nil, uuid) as String
+    }
+
+    fileprivate static func displayID(matching uuid: String) -> CGDirectDisplayID? {
+        let matches = onlineDisplayIDs.filter { displayUUID($0) == uuid }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
     private static func displaySignature(for displayID: CGDirectDisplayID) -> String {
+        displayUUID(displayID) ?? legacyDisplaySignature(for: displayID)
+    }
+    private static func uniqueLegacyDisplay(_ id: CGDirectDisplayID) -> Bool {
+        onlineDisplayIDs.filter { legacyDisplaySignature(for: $0) == legacyDisplaySignature(for: id) }.count == 1
+    }
+    private static func legacyDisplaySignature(for displayID: CGDirectDisplayID) -> String {
         let vendor = CGDisplayVendorNumber(displayID)
         let model = CGDisplayModelNumber(displayID)
         let serial = CGDisplaySerialNumber(displayID)
@@ -1064,218 +1084,6 @@ struct ShowHiddenFilesSwitch {
 
     func setEnabled(_ enabled: Bool) -> String? {
         DefaultsBoolSwitch.write(enabled, domain: "com.apple.finder", key: "AppleShowAllFiles", restart: "Finder")
-    }
-}
-
-struct MuteMicrophoneSwitch {
-    func snapshot() -> SwitchSnapshot {
-        guard let device = defaultInputDevice else {
-            return switchSnapshot(isAvailable: false, warning: "No input device")
-        }
-        let canSetMute = canSetInputProperty(kAudioDevicePropertyMute, device: device)
-        let canSetVolume = canSetInputProperty(kAudioDevicePropertyVolumeScalar, device: device)
-
-        if let muted = readMute(device: device), canSetMute {
-            return switchSnapshot(isOn: muted, subtitle: muted ? "The microphone has been muted" : nil)
-        }
-        if let volume = readVolume(device: device) {
-            let muted = volume <= 0.001
-            if canSetVolume {
-                return switchSnapshot(isOn: muted, subtitle: muted ? "The microphone has been muted" : "Volume fallback")
-            }
-            return switchSnapshot(
-                isAvailable: false,
-                warning: "The default input device reports volume but does not allow Mac Switch to change it."
-            )
-        }
-        return switchSnapshot(
-            isAvailable: false,
-            warning: "The default input device does not expose macOS mute or input volume control."
-        )
-    }
-
-    func setEnabled(_ enabled: Bool) -> String? {
-        guard let device = defaultInputDevice else { return "No default input device." }
-        if setMute(enabled, device: device) {
-            guard waitForMute(device: device, equals: enabled) else {
-                return "macOS accepted the microphone mute request, but input mute did not change."
-            }
-            if !enabled {
-                MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier(for: device))
-            }
-            return nil
-        }
-
-        guard let currentVolume = readVolume(device: device) else {
-            return "The current microphone does not expose mute or input volume control."
-        }
-        let restoreIdentifier = restoreIdentifier(for: device)
-        if enabled {
-            MicrophoneVolumeRestoreStore.save(Double(currentVolume), for: restoreIdentifier)
-            guard setVolume(0, device: device) else {
-                MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier)
-                return "Could not mute microphone input volume."
-            }
-            return waitForVolume(device: device) { $0 <= 0.001 }
-                ? nil
-                : "macOS accepted the request, but microphone input volume did not mute."
-        }
-
-        let previous = MicrophoneVolumeRestoreStore.volume(for: restoreIdentifier)
-        let restored = Float32(previous ?? 0.65)
-        let target = max(restored, 0.25)
-        if setVolume(target, device: device),
-           waitForVolume(device: device, matches: target) {
-            MicrophoneVolumeRestoreStore.clear(for: restoreIdentifier)
-            return nil
-        }
-        return "Could not restore microphone input volume."
-    }
-
-    private var defaultInputDevice: AudioDeviceID? {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var device = AudioDeviceID(0)
-        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
-        let status = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device)
-        return status == noErr && device != 0 ? device : nil
-    }
-
-    private func restoreIdentifier(for device: AudioDeviceID) -> String {
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyDeviceUID,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var uid: Unmanaged<CFString>?
-        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
-        if AudioObjectGetPropertyData(device, &address, 0, nil, &size, &uid) == noErr,
-           let uid {
-            let value = uid.takeRetainedValue() as String
-            if !value.isEmpty {
-                return "uid:\(value)"
-            }
-        }
-        return "id:\(device)"
-    }
-
-    private func readMute(device: AudioDeviceID) -> Bool? {
-        var values: [Bool] = []
-        for var address in preferredReadableInputAddresses(kAudioDevicePropertyMute, device: device) {
-            var value = UInt32(0)
-            var size = UInt32(MemoryLayout<UInt32>.size)
-            let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
-            if status == noErr {
-                values.append(value != 0)
-            }
-        }
-        guard !values.isEmpty else { return nil }
-        if values.allSatisfy({ $0 }) { return true }
-        if values.allSatisfy({ !$0 }) { return false }
-        return nil
-    }
-
-    private func setMute(_ enabled: Bool, device: AudioDeviceID) -> Bool {
-        var didSet = false
-        for var address in settableInputAddresses(kAudioDevicePropertyMute, device: device) {
-            var value = UInt32(enabled ? 1 : 0)
-            let size = UInt32(MemoryLayout<UInt32>.size)
-            didSet = AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr || didSet
-        }
-        return didSet
-    }
-
-    private func waitForMute(device: AudioDeviceID, equals enabled: Bool) -> Bool {
-        waitForCondition {
-            readMute(device: device) == enabled
-        }
-    }
-
-    private func readVolume(device: AudioDeviceID) -> Float32? {
-        var values: [Float32] = []
-        for var address in preferredReadableInputAddresses(kAudioDevicePropertyVolumeScalar, device: device) {
-            var value = Float32(0)
-            var size = UInt32(MemoryLayout<Float32>.size)
-            let status = AudioObjectGetPropertyData(device, &address, 0, nil, &size, &value)
-            if status == noErr {
-                values.append(value)
-            }
-        }
-        guard !values.isEmpty else { return nil }
-        return values.reduce(0, +) / Float32(values.count)
-    }
-
-    private func setVolume(_ volume: Float32, device: AudioDeviceID) -> Bool {
-        var didSet = false
-        for var address in settableInputAddresses(kAudioDevicePropertyVolumeScalar, device: device) {
-            var value = min(max(volume, 0), 1)
-            let size = UInt32(MemoryLayout<Float32>.size)
-            didSet = AudioObjectSetPropertyData(device, &address, 0, nil, size, &value) == noErr || didSet
-        }
-        return didSet
-    }
-
-    private func waitForVolume(device: AudioDeviceID, matches target: Float32) -> Bool {
-        waitForVolume(device: device) { abs($0 - target) <= 0.03 }
-    }
-
-    private func waitForVolume(device: AudioDeviceID, predicate: @escaping (Float32) -> Bool) -> Bool {
-        waitForCondition {
-            guard let volume = readVolume(device: device) else { return false }
-            return predicate(volume)
-        }
-    }
-
-    private func canSetInputProperty(_ selector: AudioObjectPropertySelector, device: AudioDeviceID) -> Bool {
-        !settableInputAddresses(selector, device: device).isEmpty
-    }
-
-    private func isSettable(device: AudioDeviceID, address: inout AudioObjectPropertyAddress) -> Bool {
-        var settable = DarwinBoolean(false)
-        return AudioObjectIsPropertySettable(device, &address, &settable) == noErr && settable.boolValue
-    }
-
-    private func preferredReadableInputAddresses(
-        _ selector: AudioObjectPropertySelector,
-        device: AudioDeviceID
-    ) -> [AudioObjectPropertyAddress] {
-        let readable = readableInputAddresses(selector, device: device)
-        let settable = settableInputAddresses(selector, device: device, readable: readable)
-        return settable.isEmpty ? readable : settable
-    }
-
-    private func readableInputAddresses(
-        _ selector: AudioObjectPropertySelector,
-        device: AudioDeviceID
-    ) -> [AudioObjectPropertyAddress] {
-        inputAddresses(selector).filter { candidate in
-            var address = candidate
-            return AudioObjectHasProperty(device, &address)
-        }
-    }
-
-    private func settableInputAddresses(
-        _ selector: AudioObjectPropertySelector,
-        device: AudioDeviceID,
-        readable: [AudioObjectPropertyAddress]? = nil
-    ) -> [AudioObjectPropertyAddress] {
-        (readable ?? readableInputAddresses(selector, device: device)).filter { candidate in
-            var address = candidate
-            return isSettable(device: device, address: &address)
-        }
-    }
-
-    private func inputAddresses(_ selector: AudioObjectPropertySelector) -> [AudioObjectPropertyAddress] {
-        [kAudioObjectPropertyElementMain, 1, 2].map {
-            AudioObjectPropertyAddress(
-                mSelector: selector,
-                mScope: kAudioDevicePropertyScopeInput,
-                mElement: $0
-            )
-        }
     }
 }
 
@@ -1666,7 +1474,71 @@ struct DisplaySleepSwitch {
     }
 }
 
+protocol DisplayModeAccess: Sendable {
+    func display(matching uuid: String) -> CGDirectDisplayID?
+    func applyMode(_ id: Int, display: CGDirectDisplayID) -> String?
+    func savePreviousMode(_ id: Int?, display: CGDirectDisplayID)
+}
+
+struct CoreGraphicsDisplayModeAccess: DisplayModeAccess {
+    func display(matching uuid: String) -> CGDirectDisplayID? { ScreenResolutionPreferences.displayID(matching: uuid) }
+    func savePreviousMode(_ id: Int?, display: CGDirectDisplayID) {
+        if let id { ScreenResolutionPreferences.setPreviousMode(id, for: display) }
+        else { ScreenResolutionPreferences.clearPreviousMode(for: display) }
+    }
+    func applyMode(_ id: Int, display: CGDirectDisplayID) -> String? {
+        guard let target = ScreenResolutionPreferences.displayModes(for: display).first(where: { ScreenResolutionPreferences.modeID($0) == id }) else {
+            return "Original display mode is no longer available."
+        }
+        if CGDisplayCopyDisplayMode(display).map(ScreenResolutionPreferences.modeID) == id { return nil }
+        guard CGDisplaySetDisplayMode(display, target, nil) == .success,
+              waitForCondition(timeout: 0.45, { CGDisplayCopyDisplayMode(display).map(ScreenResolutionPreferences.modeID) == id }) else {
+            return "Could not restore display resolution."
+        }
+        return nil
+    }
+}
+
 struct ScreenResolutionSwitch {
+    private let access: any DisplayModeAccess
+    init(access: any DisplayModeAccess = CoreGraphicsDisplayModeAccess()) { self.access = access }
+    func captureRestorePoint() -> DisplayModeRestorePoint? {
+        guard let display = ScreenResolutionPreferences.selectedDisplayID,
+              let uuid = ScreenResolutionPreferences.displayUUID(display),
+              let mode = CGDisplayCopyDisplayMode(display) else { return nil }
+        let previous = ScreenResolutionPreferences.previousMode(for: display)
+        let target = previous != nil && previous != modeID(mode) ? mode : ScreenResolutionPreferences.selectedMode(for: display)
+            ?? lowerResolutionMode(from: mode, modes: ScreenResolutionPreferences.displayModes(for: display))
+        return DisplayModeRestorePoint(uuid: uuid, originalModeID: modeID(mode),
+                                       previousToggleModeID: previous,
+                                       selectedTargetModeID: target.map(modeID))
+    }
+
+    func setEnabled(_ enabled: Bool, boundTo point: DisplayModeRestorePoint) -> String? {
+        guard let display = access.display(matching: point.uuid) else {
+            return "The original display is disconnected. Reconnect it and retry."
+        }
+        guard let target = enabled ? point.selectedTargetModeID : (point.previousToggleModeID ?? point.originalModeID) else {
+            return "No lower resolution mode is available."
+        }
+        let error = access.applyMode(target, display: display)
+        if error == nil {
+            if enabled, target != point.originalModeID, point.previousToggleModeID == nil {
+                access.savePreviousMode(point.originalModeID, display: display)
+            } else if !enabled { access.savePreviousMode(nil, display: display) }
+        }
+        return error
+    }
+
+    func restore(_ point: DisplayModeRestorePoint) -> String? {
+        guard let display = access.display(matching: point.uuid) else {
+            return "The original display is disconnected. Reconnect it and retry."
+        }
+        if let error = access.applyMode(point.originalModeID, display: display) { return error }
+        access.savePreviousMode(point.previousToggleModeID, display: display)
+        return nil
+    }
+
     func snapshot() -> SwitchSnapshot {
         guard let displayID = ScreenResolutionPreferences.selectedDisplayID else {
             return switchSnapshot(isAvailable: false, warning: "No active display")

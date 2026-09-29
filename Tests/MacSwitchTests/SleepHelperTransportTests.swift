@@ -2,8 +2,30 @@ import Foundation
 import Security
 import XCTest
 import SleepHelperCore
+@testable import MacSwitch
 
 final class SleepHelperTransportTests: XCTestCase, @unchecked Sendable {
+    func testProductionClientNotifiesLeaseLossAndReconnectsOverXPC() async throws {
+        let power = TransportPower()
+        let server = SleepHelperServer(coordinator: try SleepLeaseCoordinator(power: power, recovery: TransportRecovery()), requirement: try currentProcessRequirement())
+        let harness = DisconnectableListener(server: server)
+        defer { harness.close() }
+        let client = SleepHelperClient(connectionFactory: { harness.connect() }, serviceValidation: { nil })
+        let disconnected = expectation(description: "Production invalidation handler reports the lost lease")
+        let observer = try XCTUnwrap(client.observeLeaseLoss { disconnected.fulfill() })
+        XCTAssertNil(client.setDisabled(true, until: nil))
+        XCTAssertTrue(power.disabled)
+        harness.disconnectPeer()
+        await fulfillment(of: [disconnected], timeout: 3)
+        client.removeLeaseObserver(observer)
+        for _ in 0..<100 where power.disabled { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertFalse(power.disabled)
+        XCTAssertNil(client.setDisabled(true, until: Date().addingTimeInterval(60)))
+        XCTAssertTrue(power.disabled)
+        XCTAssertNil(client.setDisabled(false, until: nil))
+        XCTAssertFalse(power.disabled)
+    }
+
     func testAuthenticatedXPCRequestsAndDisconnectCleanup() async throws {
         let power = TransportPower()
         let recovery = TransportRecovery()
@@ -80,6 +102,26 @@ final class SleepHelperTransportTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(SecRequirementCopyString(try XCTUnwrap(requirement), [], &text), errSecSuccess)
         return try XCTUnwrap(text) as String
     }
+}
+
+private final class DisconnectableListener: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
+    private let server: SleepHelperServer
+    private let listener = NSXPCListener.anonymous()
+    private let lock = NSLock()
+    private var peers: [NSXPCConnection] = []
+    init(server: SleepHelperServer) {
+        self.server = server
+        super.init()
+        listener.delegate = self
+        listener.resume()
+    }
+    func connect() -> NSXPCConnection { NSXPCConnection(listenerEndpoint: listener.endpoint) }
+    func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
+        lock.withLock { peers.append(connection) }
+        return server.listener(listener, shouldAcceptNewConnection: connection)
+    }
+    func disconnectPeer() { lock.withLock { peers }.forEach { $0.invalidate() } }
+    func close() { disconnectPeer(); listener.invalidate() }
 }
 
 private final class TransportPower: SleepPowerControlling, @unchecked Sendable {
