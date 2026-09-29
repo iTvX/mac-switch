@@ -51,6 +51,10 @@ Keep Awake has a timer button directly in its dashboard row. Click it, or right-
 
 Night Shift follows the macOS model: like Control Center, the dashboard switch makes a temporary change that lasts until the next scheduled time, and the row shows when that is, such as **On until 07:00** or **Off until sunset**. Open the clock button beside Night Shift in the menu bar (or right-click the row) to choose **Off**, **Sunset to Sunrise**, **Custom**, or **Always On**. Custom start/end times and **Keep the switch as set** are available in the same quick panel, without opening Customize. **Always On** keeps it on around the clock. Turn on **Keep the switch as set** to make the switch itself persistent, whatever the schedule; turning the option off restores your previous schedule. Modes hold Night Shift through scheduled times and restore the exact schedule they replaced. The panel also shows what last changed Night Shift, such as the macOS schedule or Control Center.
 
+Modes save the original microphone UID, per-channel mute/volume state, and display UUID/resolution before making changes. Switching your default input or selected display does not redirect restoration. If the original device is disconnected, the Mode retains its recovery record until you reconnect it and retry. Interrupted activation or restoration is recovered on the next launch, and completed restoration steps are not repeated. Older sessions that lack device identity ask for manual device recovery in Mode settings.
+
+If the Keep Awake helper disconnects, the menu immediately stops claiming lid-closed protection and reconnects using the session’s original deadline. Night Shift schedule changes retain their recovery data until all writes or rollback succeed; retry the last change if recovery is still pending. A temporary DND observation failure does not disable an otherwise verified setup. Unrelated switches remain responsive while another action waits for power-mode authorization.
+
 ## Permissions
 
 Mac Switch only asks for macOS permissions needed by the features you use:

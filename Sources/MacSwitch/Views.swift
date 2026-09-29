@@ -3238,8 +3238,8 @@ private struct CustomModeSettingsRow: View {
             .toggleStyle(.checkbox)
             .labelsHidden()
             .frame(width: 20)
-            .disabled(store.isModeInteractionDisabled(mode) || store.isModeActive(mode.id) || mode.items.isEmpty)
-            .help(store.isModeActive(mode.id) ? store.modeText(.turnOffBeforeHiding) : store.modeText(.showModeInMenu))
+            .disabled(store.isModeInteractionDisabled(mode) || store.hasModeSession(mode.id) || mode.items.isEmpty)
+            .help(store.hasModeSession(mode.id) ? store.modeText(.turnOffBeforeHiding) : store.modeText(.showModeInMenu))
 
             Button(action: openEditor) {
                 HStack(spacing: 10) {
@@ -3280,8 +3280,8 @@ private struct CustomModeSettingsRow: View {
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
             .disabled(store.isModeInteractionDisabled(mode))
-            .help(store.isModeActive(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode))
-            .accessibilityLabel(Text(store.isModeActive(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode)))
+            .help(store.hasModeSession(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode))
+            .accessibilityLabel(Text(store.hasModeSession(mode.id) ? store.modeText(.restoreThenDelete) : store.modeText(.deleteMode)))
         }
         .padding(.horizontal, 12)
         .frame(height: 50)
@@ -3296,13 +3296,13 @@ private struct CustomModeSettingsRow: View {
             isPresented: $confirmsDeletion,
             titleVisibility: .visible
         ) {
-            Button(store.isModeActive(mode.id) ? store.modeText(.turnOffAndDelete) : store.modeText(.deleteMode), role: .destructive) {
+            Button(store.hasModeSession(mode.id) ? store.modeText(.turnOffAndDelete) : store.modeText(.deleteMode), role: .destructive) {
                 store.deleteCustomMode(mode.id)
             }
             Button(store.text(.cancel), role: .cancel) {}
         } message: {
             Text(
-                store.isModeActive(mode.id)
+                store.hasModeSession(mode.id)
                     ? store.modeText(.deleteActiveModeMessage)
                     : store.modeText(.deleteModeIrreversible)
             )
@@ -3373,6 +3373,19 @@ private struct CustomModeDetailPanel: View {
 
                     ScrollView(.vertical, showsIndicators: true) {
                         VStack(alignment: .leading, spacing: 12) {
+                            if store.modeNeedsManualRecovery(mode.id) {
+                                Text("This older Mode did not record its original microphone or display. Restore those devices manually, then confirm below.")
+                                    .font(.system(size: 12)).foregroundStyle(.orange)
+                                Button("Confirm manual recovery") {
+                                    let alert = NSAlert()
+                                    alert.messageText = L10n.localizedResource("Confirm manual recovery", locale: Locale(identifier: store.effectiveLanguage.localeIdentifier))
+                                    alert.informativeText = L10n.localizedResource("Confirm only after restoring the original microphone and display settings yourself. Other saved settings will still be restored automatically.", locale: Locale(identifier: store.effectiveLanguage.localeIdentifier))
+                                    alert.addButton(withTitle: L10n.localizedResource("Confirm manual recovery", locale: Locale(identifier: store.effectiveLanguage.localeIdentifier)))
+                                    alert.addButton(withTitle: store.text(.cancel))
+                                    if alert.runModal() == .alertFirstButtonReturn { store.confirmManualModeRecovery(mode.id) }
+                                }
+                                .disabled(store.isModeBusy(mode))
+                            }
                             if !isEditable {
                                 Label(store.modeText(.turnOffBeforeEditing), systemImage: "lock.fill")
                                     .font(.system(size: 11, weight: .medium))
@@ -3483,7 +3496,7 @@ private struct CustomModeDetailPanel: View {
 
     private var isEditable: Bool {
         guard let mode else { return false }
-        return !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
+        return !store.hasModeSession(mode.id) && !store.isModeInteractionDisabled(mode)
     }
 
     private var hasMetadataChanges: Bool {
@@ -3589,7 +3602,7 @@ private struct CustomModeSwitchTargetRow: View {
 
     private var isEditable: Bool {
         guard let mode else { return false }
-        return !store.isModeActive(mode.id) && !store.isModeInteractionDisabled(mode)
+        return !store.hasModeSession(mode.id) && !store.isModeInteractionDisabled(mode)
     }
 
     private func setIncluded(_ include: Bool) {

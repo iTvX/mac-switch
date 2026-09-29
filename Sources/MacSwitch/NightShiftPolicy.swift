@@ -352,7 +352,16 @@ enum NightShiftChangeClassifier {
     }
 }
 
+struct NightShiftTransactionRecovery: Codable, Sendable {
+    let point: NightShiftRestorePoint
+    let active: Bool
+    let override: NightShiftOverride?
+    let backup: NightShiftScheduleBackup?
+    let keepsSwitchState: Bool
+}
+
 enum NightShiftPreferenceKey {
+    static let pendingRecovery = "nightShift.pendingRecovery.v1"
     static let keepsSwitchState = "nightShift.keepsSwitchState"
     static let scheduleBackup = "nightShift.scheduleBackup"
     static let lastChange = "nightShift.lastChange"

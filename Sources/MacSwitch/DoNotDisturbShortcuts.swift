@@ -177,7 +177,7 @@ final class DoNotDisturbShortcuts: @unchecked Sendable {
                 let installation = try readyInstallation(force: force)
                 snapshot = Self.observed(try state(for: readFocus(installation)))
             } catch { snapshot = Self.unavailable(error.localizedDescription) }
-            cachedSnapshot = (Date(), snapshot)
+            if snapshot.isAvailable { cachedSnapshot = (Date(), snapshot) }
             return snapshot
         }
     }
@@ -198,7 +198,8 @@ final class DoNotDisturbShortcuts: @unchecked Sendable {
                 return SwitchOperationResult(snapshot: snapshot, error: nil)
             } catch {
                 let snapshot = Self.unavailable(error.localizedDescription)
-                cachedSnapshot = (Date(), snapshot)
+                // A temporary observation failure is not a permanent loss of capability.
+                // Keep the last confirmed state so the next passive refresh exposes a retryable switch.
                 return SwitchOperationResult(snapshot: snapshot, error: error.localizedDescription)
             }
         }

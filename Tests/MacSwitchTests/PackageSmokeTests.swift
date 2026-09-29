@@ -379,7 +379,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(storeSource.contains("let items = Self.deduplicatedModeItems(mode.items).filter { $0.kind.isModeEligible }"))
         XCTAssertTrue(storeSource.contains("captureFreshModeSnapshots(for: kinds)"))
         XCTAssertTrue(storeSource.contains("runModeSteps(steps, stopOnFailure: true)"))
-        XCTAssertTrue(storeSource.contains("let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)"))
         XCTAssertTrue(storeSource.contains("originalKeepAwakeEndDate:"))
         XCTAssertTrue(storeSource.contains("originalDoNotDisturbEndDate:"))
         XCTAssertTrue(storeSource.contains("activeModeSessions.removeValue(forKey: mode.id)"))
@@ -1695,7 +1694,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(preflightSource.contains("actionsPreparing.insert(kind)"))
         XCTAssertTrue(preflightSource.contains("if kind.snapshotRequiresMainThread"))
         XCTAssertTrue(preflightSource.contains("DispatchQueue.main.async"))
-        XCTAssertTrue(preflightSource.contains("actionQueue.async"))
         XCTAssertTrue(preflightSource.contains("controller.snapshot(for: kind"))
         XCTAssertTrue(preflightSource.contains("finishPreflightTrigger(kind, snapshot: snapshot)"))
         XCTAssertTrue(preflightSource.contains("private func finishPreflightTrigger"))
@@ -2533,11 +2531,6 @@ final class PackageSmokeTests: XCTestCase {
             from: "private struct TrueToneSwitch",
             to: "private final class KeyboardLocker"
         )
-        let microphoneSource = try extract(
-            extendedSwitches,
-            from: "struct MuteMicrophoneSwitch",
-            to: "struct ScreenSaverSwitch"
-        )
         let screenSaverSource = try extract(
             extendedSwitches,
             from: "struct ScreenSaverSwitch",
@@ -2588,17 +2581,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(trueToneSource.contains("True Tone did not change"))
 
         XCTAssertTrue(extendedSwitches.contains("waitForCondition"))
-        XCTAssertTrue(microphoneSource.contains("waitForMute(device: device, equals: enabled)"))
-        XCTAssertTrue(microphoneSource.contains("waitForVolume(device: device)"))
-        XCTAssertTrue(microphoneSource.contains("microphone input volume did not mute"))
-        XCTAssertTrue(microphoneSource.contains("preferredReadableInputAddresses"))
-        XCTAssertTrue(microphoneSource.contains("let settable = settableInputAddresses"))
-        XCTAssertTrue(microphoneSource.contains("return settable.isEmpty ? readable : settable"))
-        XCTAssertTrue(microphoneSource.contains("if values.allSatisfy({ $0 }) { return true }"))
-        XCTAssertTrue(microphoneSource.contains("if values.allSatisfy({ !$0 }) { return false }"))
-        XCTAssertTrue(microphoneSource.contains("for var address in settableInputAddresses(kAudioDevicePropertyMute"))
-        XCTAssertTrue(microphoneSource.contains("for var address in settableInputAddresses(kAudioDevicePropertyVolumeScalar"))
-        XCTAssertTrue(microphoneSource.contains("kAudioDevicePropertyDeviceUID"))
+        // Microphone channel mutation and readback are exercised in MicrophoneBehaviorTests.
         XCTAssertTrue(extendedSwitches.contains("enum MicrophoneVolumeRestoreStore"))
         XCTAssertTrue(extendedSwitches.contains("previousVolumesByDevice"))
         XCTAssertTrue(screenSaverSource.contains("let opened = openWorkspaceURL(url)"))
@@ -2698,8 +2681,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(audioSwitchSource.contains("result != kIOReturnSuccess,"))
         XCTAssertTrue(audioSwitchSource.contains("waitForDevice(device, connected: false, timeout: 2)"))
 
-        XCTAssertTrue(model.contains("private let bluetoothActionQueue = DispatchQueue"))
-        XCTAssertTrue(model.contains("let operationQueue = kind == .bluetoothAudio ? bluetoothActionQueue : actionQueue"))
         XCTAssertTrue(model.contains("for delay in [1.2, 4.5]"))
         XCTAssertFalse(snapshotThreadSource.contains(".bluetoothAudio"))
 
@@ -2859,22 +2840,6 @@ final class PackageSmokeTests: XCTestCase {
             "diagnostics summary formatting should use the precomputed accessibility status"
         )
         XCTAssertTrue(source.contains("diagnosticsCopyInProgress"))
-    }
-
-    func testMicrophoneSwitchRequiresSettableInputControls() throws {
-        let source = try String(contentsOf: packageRoot.appendingPathComponent("Sources/MacSwitch/ExtendedSystemSwitches.swift"))
-        let microphoneSource = try extract(
-            source,
-            from: "struct MuteMicrophoneSwitch",
-            to: "struct ScreenSaverSwitch"
-        )
-
-        XCTAssertTrue(microphoneSource.contains("AudioObjectIsPropertySettable"))
-        XCTAssertTrue(microphoneSource.contains("does not allow Mac Switch to change it"))
-        XCTAssertFalse(
-            microphoneSource.contains("Microphone mute not supported"),
-            "unsupported microphone state should explain whether input or controls are missing"
-        )
     }
 
     func testPlayMusicSnapshotSurfacesAutomationDenial() throws {
