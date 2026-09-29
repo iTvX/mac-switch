@@ -296,3 +296,4 @@
 "Could not save Night Shift recovery data. Retry the operation." = "無法儲存 Night Shift 復原資料，請再試一次。";
 "The original display is disconnected. Reconnect it and retry." = "原顯示器已中斷連線，請重新連接後再試。";
 "Could not verify the original device for this Mode." = "無法確認此模式的原裝置。";
+"Previous Mode" = "舊版模式";

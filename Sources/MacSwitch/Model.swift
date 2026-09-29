@@ -184,7 +184,7 @@ struct SwitchModeItem: Codable, Equatable, Sendable {
 }
 
 struct ActiveSwitchModeSession: Codable, Equatable, Sendable {
-    let modeID: SwitchModeID
+    var modeID: SwitchModeID
     private let rawOriginalStates: [String: Bool]
     let originalKeepAwakeEndDate: Date?
     let originalDoNotDisturbEndDate: Date?
@@ -997,6 +997,7 @@ final class SwitchStore: ObservableObject {
         }
 
         for kind in SwitchKind.allCases { snapshots[kind] = .off }
+        exposeLegacyDeviceRecovery()
         if activeModeSessions.values.contains(where: \.needsRecovery) {
             reportModeError("A Mode was interrupted. Select it to restore its previous settings.")
         }
@@ -1274,7 +1275,29 @@ final class SwitchStore: ObservableObject {
         guard activeModeOperationID == nil, var session = activeModeSessions[modeID], !session.legacyDeviceKinds.isEmpty else { return }
         session.manuallyRecoveredKinds = (session.manuallyRecoveredKinds ?? []) + session.legacyDeviceKinds
         activeModeSessions[modeID] = session
+        if modeID.rawValue.hasPrefix("custom.recovery.") { pendingCustomModeDeletionID = modeID }
         if let mode = customModes.first(where: { $0.id == modeID }) { deactivateMode(mode) }
+    }
+
+    /// Retired presets have no editor. Give ambiguous device journals a visible recovery entry.
+    private func exposeLegacyDeviceRecovery() {
+        var sessions = activeModeSessions
+        for oldID in Self.legacyPresetModeIDs {
+            guard var session = sessions[oldID], !session.legacyDeviceKinds.isEmpty else { continue }
+            let id = SwitchModeID(rawValue: "custom.recovery.\(oldID.rawValue)")
+            if !customModes.contains(where: { $0.id == id }) {
+                customModes.append(SwitchModeDefinition(
+                    id: id, title: L10n.localizedResource("Previous Mode", locale: Locale(identifier: effectiveLanguage.localeIdentifier)),
+                    subtitle: "", symbolName: "arrow.counterclockwise",
+                    items: session.originalKinds.map { SwitchModeItem(kind: $0, targetIsOn: session.originalState(for: $0) ?? false) }
+                ))
+            }
+            // Persist the visible entry first; then replace the journal key in one write.
+            session.modeID = id
+            sessions.removeValue(forKey: oldID)
+            sessions[id] = session
+        }
+        if sessions != activeModeSessions { activeModeSessions = sessions }
     }
 
     func isModeBusy(_ mode: SwitchModeDefinition) -> Bool {

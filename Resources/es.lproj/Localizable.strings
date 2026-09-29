@@ -296,3 +296,4 @@
 "Could not save Night Shift recovery data. Retry the operation." = "No se pudieron guardar los datos de recuperación de Night Shift. Reinténtalo.";
 "The original display is disconnected. Reconnect it and retry." = "La pantalla original está desconectada. Conéctala e inténtalo de nuevo.";
 "Could not verify the original device for this Mode." = "No se pudo verificar el dispositivo original de este modo.";
+"Previous Mode" = "Modo anterior";

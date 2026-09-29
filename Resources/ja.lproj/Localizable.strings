@@ -296,3 +296,4 @@
 "Could not save Night Shift recovery data. Retry the operation." = "Night Shift の復元データを保存できませんでした。やり直してください。";
 "The original display is disconnected. Reconnect it and retry." = "元のディスプレイが切断されています。再接続してやり直してください。";
 "Could not verify the original device for this Mode." = "このモードの元のデバイスを確認できませんでした。";
+"Previous Mode" = "以前のモード";

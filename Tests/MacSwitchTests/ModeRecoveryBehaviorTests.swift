@@ -134,6 +134,28 @@ final class ModeRecoveryBehaviorTests: XCTestCase {
         XCTAssertTrue(controller.microphones.writes.isEmpty)
     }
 
+    func testRetiredPresetWithUnknownDeviceGetsAVisibleRecoveryEntry() async throws {
+        let controller = RecoveryController(), defaults = InMemoryUserDefaults()
+        controller.microphones.add(1, uid: "B", channels: 2, mute: true)
+        controller.change(.darkMode, true)
+        defaults.set(Data(#"[{"modeID":"focus","rawOriginalStates":{"muteMicrophone":true,"darkMode":false}}]"#.utf8), forKey: "switch.modes.activeSessions")
+        let store = SwitchStore(controller: controller, defaults: defaults, enableRuntimeServices: false)
+        let recovery = try XCTUnwrap(store.visibleModes.first)
+        XCTAssertTrue(recovery.id.rawValue.hasPrefix("custom.recovery."))
+        XCTAssertTrue(store.modeNeedsManualRecovery(recovery.id))
+        // Relaunch during migration must reuse the entry and retain the complete journal.
+        let restarted = SwitchStore(controller: controller, defaults: defaults, enableRuntimeServices: false)
+        XCTAssertEqual(restarted.visibleModes.map(\.id), [recovery.id])
+        restarted.recoverInterruptedMode()
+        try await idle(restarted)
+        XCTAssertFalse(controller.value(.darkMode))
+        XCTAssertTrue(controller.microphones.writes.isEmpty)
+        restarted.confirmManualModeRecovery(recovery.id)
+        try await idle(restarted)
+        XCTAssertTrue(restarted.customModes.isEmpty)
+        XCTAssertTrue(try sessions(defaults).isEmpty)
+    }
+
     func testBlockedPowerAuthorizationAllowsKeepAwakeStopAndMicButReservesOtherPowerActions() async throws {
         let controller = RecoveryController()
         controller.microphones.add(1, uid: "A", channels: 2, mute: true)
