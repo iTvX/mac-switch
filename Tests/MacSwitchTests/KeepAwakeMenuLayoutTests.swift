@@ -11,7 +11,8 @@ final class KeepAwakeMenuLayoutTests: XCTestCase {
         let store = SwitchStore(controller: controller, defaults: InMemoryUserDefaults(), enableRuntimeServices: false)
         store.snapshots[.keepAwake] = SwitchSnapshot(isOn: true, isAvailable: true, subtitle: "Active indefinitely", warning: nil)
         let host = NSHostingView(rootView: MenuLayoutFixture(store: store))
-        host.frame = NSRect(x: 0, y: 0, width: 268, height: 266)
+        host.appearance = NSAppearance(named: .aqua)
+        host.frame = NSRect(origin: .zero, size: DashboardRowQuickMenu.size(for: .keepAwake))
         try await Task.sleep(for: .milliseconds(30))
         host.layoutSubtreeIfNeeded()
         let initial = host.fittingSize
@@ -26,7 +27,7 @@ final class KeepAwakeMenuLayoutTests: XCTestCase {
         XCTAssertFalse(store.isActionBusy(.keepAwake))
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(host.fittingSize.height, initial.height, accuracy: 0.5)
-        XCTAssertLessThanOrEqual(initial.height, DashboardLayout.minHeight - 12)
+        XCTAssertLessThanOrEqual(initial.height, DashboardLayout.minHeight - 20)
     }
 }
 

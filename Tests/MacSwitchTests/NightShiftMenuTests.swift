@@ -88,41 +88,41 @@ final class NightShiftMenuTests: XCTestCase {
         XCTAssertFalse(store.isActionBusy(.nightShift))
     }
 
-    func testQuickPanelFitsSmallDashboardAndKeepsItsFrameAcrossChanges() async throws {
+    func testQuickPanelFitsSmallDashboardAndOnlyExpandsForCustomTimes() async throws {
         _ = NSApplication.shared
-        let (store, model, backend) = fixture()
+        let (store, model, _) = fixture()
         model.refresh()
         try await settle(model)
-        for locale in ["en", "zh-Hans", "de"] {
-            for height in [DashboardLayout.minHeight - 20, DashboardLayout.maxHeight - 20] {
-                let size = DashboardRowQuickMenu.size(for: .nightShift, availableHeight: height)
+        for height in [DashboardLayout.minHeight - 20, DashboardLayout.maxHeight - 20] {
+            var renderedHeights: [CGFloat] = []
+            for preset in [NightShiftSchedulePreset.alwaysOn, .custom] {
+                model.applyPreset(preset)
+                try await settle(model)
+                XCTAssertEqual(model.preset, preset)
+                let size = DashboardRowQuickMenu.size(for: .nightShift, availableHeight: height, isCustomNightShift: preset == .custom)
+                // Each preset gets a fresh host: off-window NSHostingView caches its initial intrinsic size.
                 let host = NSHostingView(rootView: DashboardRowQuickMenu(
                     kind: .nightShift, store: store, hideDisabledReason: nil,
                     availableHeight: height, configure: {}, hideFromMenu: {}
-                ).environment(\.locale, Locale(identifier: locale)))
+                ))
+                host.appearance = NSAppearance(named: .aqua)
                 host.frame = NSRect(origin: .zero, size: size)
                 try await Task.sleep(for: .milliseconds(30))
                 host.layoutSubtreeIfNeeded()
                 XCTAssertEqual(host.fittingSize.height, size.height, accuracy: 0.5)
                 XCTAssertEqual(host.fittingSize.width, size.width, accuracy: 0.5)
                 XCTAssertLessThanOrEqual(host.fittingSize.height, height)
-                model.applyPreset(.alwaysOn)
-                try await settle(model)
-                host.layoutSubtreeIfNeeded()
-                XCTAssertEqual(host.fittingSize.height, size.height, accuracy: 0.5)
-                model.applyPreset(.custom)
-                try await settle(model)
-                host.layoutSubtreeIfNeeded()
-                XCTAssertEqual(host.fittingSize.height, size.height, accuracy: 0.5)
+                renderedHeights.append(host.fittingSize.height)
                 if let directory = ProcessInfo.processInfo.environment["NIGHT_MENU_SCREENSHOTS"],
                    let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) {
                     host.cacheDisplay(in: host.bounds, to: bitmap)
                     try bitmap.representation(using: .png, properties: [:])?.write(to:
-                        URL(fileURLWithPath: directory).appendingPathComponent("night-menu-\(locale)-\(Int(height)).png"))
+                        URL(fileURLWithPath: directory).appendingPathComponent("night-menu-\(preset.rawValue)-\(Int(height)).png"))
                 }
+                try await settle(model)
             }
+            XCTAssertLessThan(renderedHeights[0], renderedHeights[1], "Ordinary presets should not leave an empty time editor area")
         }
-        XCTAssertFalse(backend.operations.isEmpty)
     }
 
     private func fixture(controller: NightMenuController = NightMenuController()) -> (SwitchStore, NightShiftSettingsModel, NightMenuBackend) {

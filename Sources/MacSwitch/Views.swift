@@ -33,6 +33,7 @@ struct DashboardView: View {
     @State private var dashboardQuickMenuKind: SwitchKind?
     @State private var dashboardQuickMenuOpeningEventNumber: Int?
     @State private var dashboardRowFrames: [SwitchKind: CGRect] = [:]
+    @State private var dashboardQuickMenuSizes: [SwitchKind: CGSize] = [:]
 
     private var panelSize: NSSize {
         DashboardLayout.size(
@@ -163,14 +164,18 @@ struct DashboardView: View {
                     hideFromMenu: {
                         closeQuickMenu()
                         store.setEnabled(kind, false)
-                    }
+                    },
+                    dismiss: closeQuickMenu
                 )
                 .position(quickMenuPosition(for: rowFrame, kind: kind))
-                .transition(.scale(scale: 0.96, anchor: .topTrailing).combined(with: .opacity))
+                .transition(.opacity)
                 .zIndex(40)
             }
         }
         .coordinateSpace(name: DashboardLayout.coordinateSpaceName)
+        .onPreferenceChange(DashboardQuickMenuSizePreferenceKey.self) { sizes in
+            MainActor.assumeIsolated { dashboardQuickMenuSizes.merge(sizes) { _, new in new } }
+        }
         .onPreferenceChange(DashboardRowFramePreferenceKey.self) { frames in
             MainActor.assumeIsolated {
                 dashboardRowFrames = frames
@@ -194,17 +199,17 @@ struct DashboardView: View {
     }
 
     private func quickMenuPosition(for rowFrame: CGRect, kind: SwitchKind) -> CGPoint {
-        let size = DashboardRowQuickMenu.size(for: kind, availableHeight: panelSize.height - 20)
+        let size = dashboardQuickMenuSizes[kind] ?? DashboardRowQuickMenu.size(for: kind, availableHeight: panelSize.height - 20)
         let halfWidth = size.width / 2
         let halfHeight = size.height / 2
         let x = min(
             panelSize.width - halfWidth - 10,
             max(halfWidth + 10, rowFrame.maxX - halfWidth - 4)
         )
-        let y = min(
-            panelSize.height - halfHeight - 10,
-            max(halfHeight + 10, rowFrame.midY)
-        )
+        // Reserve expansion space below the title so Custom can open without moving the menu header.
+        let maximumHeight = min(DashboardRowQuickMenu.maximumHeight(for: kind), panelSize.height - 20)
+        let top = min(panelSize.height - maximumHeight - 10, max(10, rowFrame.minY - 6))
+        let y = top + halfHeight
         return CGPoint(x: x, y: y)
     }
 
@@ -1068,13 +1073,24 @@ private struct DashboardSwitchButton: View {
     }
 }
 
+private struct DashboardQuickMenuSizePreferenceKey: PreferenceKey {
+    static let defaultValue: [SwitchKind: CGSize] = [:]
+    static func reduce(value: inout [SwitchKind: CGSize], nextValue: () -> [SwitchKind: CGSize]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 struct DashboardRowQuickMenu: View {
-    static func size(for kind: SwitchKind, availableHeight: CGFloat = DashboardLayout.maxHeight - 20) -> CGSize {
+    static func size(for kind: SwitchKind, availableHeight: CGFloat = DashboardLayout.maxHeight - 20, isCustomNightShift: Bool = false) -> CGSize {
         switch kind {
-        case .keepAwake: return CGSize(width: 268, height: 266)
-        case .nightShift: return CGSize(width: 292, height: min(418, availableHeight))
+        case .keepAwake: return CGSize(width: QuickOptionsCardMetrics.width, height: min(247, availableHeight))
+        case .nightShift: return CGSize(width: QuickOptionsCardMetrics.width, height: min(isCustomNightShift ? 257 : 213, availableHeight))
         default: return CGSize(width: 154, height: 84)
         }
+    }
+
+    static func maximumHeight(for kind: SwitchKind) -> CGFloat {
+        kind == .nightShift ? 297 : size(for: kind).height
     }
 
     let kind: SwitchKind
@@ -1083,57 +1099,181 @@ struct DashboardRowQuickMenu: View {
     var availableHeight: CGFloat = DashboardLayout.maxHeight - 20
     let configure: () -> Void
     let hideFromMenu: () -> Void
+    var dismiss: () -> Void = {}
 
     var body: some View {
-        VStack(spacing: 3) {
+        Group {
             if kind == .keepAwake {
-                KeepAwakeQuickOptions(store: store)
-                Divider().padding(.horizontal, 7)
-            } else if kind == .nightShift {
-                ScrollView {
-                    NightShiftQuickOptions(store: store, model: store.nightShiftSettings)
-                        // Keep the option grid still when a system scrollbar appears for custom times.
-                        .frame(width: Self.size(for: kind).width - 30)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                QuickOptionsCard(title: store.switchTitle(kind), symbol: "cup.and.saucer.fill", tint: kind.accentColor,
+                                 contentHeight: 175, availableHeight: availableHeight, hideDisabledReason: hideDisabledReason,
+                                 configure: configure, hideFromMenu: hideFromMenu, dismiss: dismiss) {
+                    KeepAwakeQuickOptions(store: store)
                 }
-                .frame(maxHeight: .infinity)
-                Divider().padding(.horizontal, 7)
+            } else if kind == .nightShift {
+                NightShiftQuickMenu(store: store, model: store.nightShiftSettings, availableHeight: availableHeight,
+                                    hideDisabledReason: hideDisabledReason, configure: configure,
+                                    hideFromMenu: hideFromMenu, dismiss: dismiss)
+            } else {
+                VStack(spacing: 3) {
+                    DashboardQuickMenuButton(symbol: "slider.horizontal.3", title: "Configure", subtitle: nil,
+                                             isDisabled: false, action: configure)
+                    Divider().padding(.horizontal, 7)
+                    DashboardQuickMenuButton(symbol: "eye.slash", title: "Hide from Menu", subtitle: hideDisabledReason,
+                                             isDisabled: hideDisabledReason != nil, action: hideFromMenu)
+                }
+                .padding(6)
+                .frame(width: Self.size(for: kind).width)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.primary.opacity(0.10), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
             }
-            DashboardQuickMenuButton(
-                symbol: "slider.horizontal.3",
-                title: "Configure",
-                subtitle: nil,
-                isDisabled: false,
-                action: configure
-            )
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: DashboardQuickMenuSizePreferenceKey.self, value: [kind: proxy.size])
+            }
+        }
+    }
+}
 
-            Rectangle()
-                .fill(DashboardColors.separator)
-                .frame(height: 1)
-                .padding(.horizontal, 7)
+private enum QuickOptionsCardMetrics {
+    static let width: CGFloat = 272
+    static let chromeHeight: CGFloat = 72
+}
 
-            DashboardQuickMenuButton(
-                symbol: "eye.slash",
-                title: "Hide from Menu",
-                subtitle: hideDisabledReason,
-                reservesSubtitle: kind == .keepAwake || kind == .nightShift,
-                isDisabled: hideDisabledReason != nil,
-                action: hideFromMenu
-            )
+private struct QuickOptionsCard<Content: View>: View {
+    let title: String
+    let symbol: String
+    let tint: Color
+    let contentHeight: CGFloat
+    let availableHeight: CGFloat
+    let hideDisabledReason: String?
+    let configure: () -> Void
+    let hideFromMenu: () -> Void
+    let dismiss: () -> Void
+    @ViewBuilder let content: Content
+
+    private var height: CGFloat { min(contentHeight + QuickOptionsCardMetrics.chromeHeight, availableHeight) }
+    private var viewportHeight: CGFloat { max(0, height - QuickOptionsCardMetrics.chromeHeight) }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: symbol).font(.system(size: 13, weight: .medium)).foregroundStyle(tint)
+                Text(verbatim: title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 4)
+                Button(action: dismiss) { Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)) }
+                    .buttonStyle(.plain).foregroundStyle(Color.primary.opacity(0.55))
+                    .accessibilityLabel(Text("Close options"))
+                    .help("Close options")
+            }
+            .padding(.horizontal, 9)
+            .frame(height: 30)
+            Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1)
+            Group {
+                if contentHeight > viewportHeight {
+                    ScrollView(.vertical) { content.frame(maxWidth: .infinity, alignment: .topLeading) }
+                        .scrollIndicators(.hidden)
+                } else {
+                    content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+            }
+            .padding(.horizontal, 3)
+            .frame(height: viewportHeight)
+            Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1)
+            HStack(spacing: 0) {
+                QuickMenuFooterAction(symbol: "gearshape", title: "Configure", action: configure)
+                Spacer(minLength: 4)
+                QuickMenuFooterAction(symbol: "eye.slash", title: "Hide from Menu", isDisabled: hideDisabledReason != nil, action: hideFromMenu)
+                    .help(Text(LocalizedStringKey(hideDisabledReason ?? "Hide from Menu")))
+            }
+            .padding(.horizontal, 3)
+            .frame(height: 28)
         }
         .padding(6)
-        .frame(width: Self.size(for: kind).width,
-               height: kind == .nightShift ? Self.size(for: kind, availableHeight: availableHeight).height : nil)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.10))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.22), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
+        .frame(width: QuickOptionsCardMetrics.width, height: height)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.20), radius: 14, y: 6)
+        .transaction { $0.animation = nil }
+    }
+}
+
+private struct QuickMenuFooterAction: View {
+    let symbol: String
+    let title: String
+    var isDisabled = false
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label(LocalizedStringKey(title), systemImage: symbol)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.primary.opacity(isDisabled ? 0.35 : 0.72))
+                .padding(.horizontal, 5).frame(height: 24)
+                .background(hovered && !isDisabled ? Color.primary.opacity(0.06) : .clear, in: RoundedRectangle(cornerRadius: 5))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).disabled(isDisabled)
+        .onHover { hovered = $0 }
+    }
+}
+
+private struct QuickMenuChoice: View {
+    let title: String
+    let isSelected: Bool
+    var isEnabled = true
+    let action: () -> Void
+    @State private var hovered = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button { if isEnabled { action() } } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark").font(.system(size: 10, weight: .semibold))
+                    .frame(width: 13).opacity(isSelected ? 1 : 0)
+                    .foregroundStyle(colorScheme == .dark ? Color.white : Color.accentColor)
+                Text(LocalizedStringKey(title)).font(.system(size: 12.5, weight: isSelected ? .medium : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 6)
+            .frame(height: 24)
+            .background(hovered ? Color.primary.opacity(0.07) : (isSelected ? Color.accentColor.opacity(colorScheme == .dark ? 0.24 : 0.09) : .clear),
+                        in: RoundedRectangle(cornerRadius: 5))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityRespondsToUserInteraction(isEnabled)
+        .onHover { hovered = $0 }
+        .animation(.easeOut(duration: 0.12), value: isSelected)
+    }
+}
+
+private struct QuickMenuDivider: View {
+    var body: some View { Rectangle().fill(Color.primary.opacity(0.10)).frame(height: 1).padding(.horizontal, 6).frame(height: 9) }
+}
+
+private struct QuickMenuToggle: View {
+    let title: String
+    let explanation: String
+    @Binding var isOn: Bool
+    var isEnabled = true
+
+    var body: some View {
+        Toggle(isOn: Binding(get: { isOn }, set: { if isEnabled { isOn = $0 } })) {
+            Text(LocalizedStringKey(title)).font(.system(size: 12))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .toggleStyle(.switch).controlSize(.mini)
+        .padding(.horizontal, 6)
+        .frame(minHeight: 36)
+        .accessibilityRespondsToUserInteraction(isEnabled)
+        .help(Text(LocalizedStringKey(explanation)))
     }
 }
 
@@ -1141,7 +1281,6 @@ private struct DashboardQuickMenuButton: View {
     let symbol: String
     let title: String
     let subtitle: String?
-    var reservesSubtitle = false
     let isDisabled: Bool
     let action: () -> Void
     @State private var isHovering = false
@@ -1164,7 +1303,7 @@ private struct DashboardQuickMenuButton: View {
                         .foregroundStyle(isDisabled ? DashboardColors.subtleText.opacity(0.62) : .primary)
                         .lineLimit(1)
 
-                    if subtitle != nil || reservesSubtitle {
+                    if subtitle != nil {
                         Text(verbatim: L10n.localizedResource(subtitle ?? " ", locale: locale))
                             .font(.system(size: 10.2, weight: .medium))
                             .foregroundStyle(DashboardColors.subtleText.opacity(isDisabled ? 0.62 : 0.86))
@@ -1428,51 +1567,28 @@ private struct KeepAwakeDurationMenu: View {
 
 private struct KeepAwakeQuickOptions: View {
     @ObservedObject var store: SwitchStore
+    private let minutes: [KeepAwakeDuration] = [.fiveMinutes, .fifteenMinutes, .twentyFiveMinutes, .thirtyMinutes]
+    private let hours: [KeepAwakeDuration] = [.oneHour, .twoHours, .fiveHours, .eightHours]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Keep Awake duration")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 3), spacing: 5) {
-                ForEach(KeepAwakeDuration.allCases) { duration in
-                    Button {
-                        store.setKeepAwakeDuration(duration)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark")
-                                .font(.system(size: 9, weight: .bold))
-                                .frame(width: 10)
-                                .opacity(store.keepAwakeDuration == duration ? 1 : 0)
-                            Text(duration == .indefinitely ? "∞" : duration.compactDashboardTitle)
-                                .font(.system(size: 12, weight: .semibold))
-                        }
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 27)
-                        .foregroundStyle(store.keepAwakeDuration == duration ? Color.accentColor : .primary)
-                        .background(store.keepAwakeDuration == duration ? Color.accentColor.opacity(0.16) : DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
-                        .contentShape(Rectangle())
-                        .animation(.easeOut(duration: 0.12), value: store.keepAwakeDuration == duration)
-                    }
-                    .buttonStyle(.plain)
-                    .allowsHitTesting(!store.isActionBusy(.keepAwake))
-                    .accessibilityLabel(Text(LocalizedStringKey(duration.menuTitle)))
-                    .accessibilityAddTraits(store.keepAwakeDuration == duration ? .isSelected : [])
-                    .help(Text(LocalizedStringKey(duration.menuTitle)))
-                }
+        VStack(spacing: 0) {
+            choice(.indefinitely)
+            HStack(spacing: 6) {
+                VStack(spacing: 0) { ForEach(minutes) { choice($0) } }
+                VStack(spacing: 0) { ForEach(hours) { choice($0) } }
             }
-            Toggle("Keep awake when the lid is closed", isOn: Binding(
-                get: { store.keepAwakeWhenLidClosed },
-                set: { value, _ in store.setKeepAwakeWhenLidClosed(value) }
-            ))
-            .toggleStyle(.checkbox)
-            .font(.system(size: 12))
-            .fixedSize(horizontal: false, vertical: true)
-            .allowsHitTesting(!store.isActionBusy(.keepAwake))
-            .help("Authorize Keep Awake once in Login Items. Later changes do not request your password.")
+            QuickMenuDivider()
+            QuickMenuToggle(title: "Keep awake when the lid is closed",
+                            explanation: "Authorize Keep Awake once in Login Items. Later changes do not request your password.",
+                            isOn: Binding(get: { store.keepAwakeWhenLidClosed }, set: { store.setKeepAwakeWhenLidClosed($0) }),
+                            isEnabled: !store.isActionBusy(.keepAwake))
         }
-        .padding(7)
-        .transaction { $0.animation = nil }
+        .padding(.vertical, 5)
+    }
+
+    private func choice(_ duration: KeepAwakeDuration) -> some View {
+        QuickMenuChoice(title: duration.menuTitle, isSelected: store.keepAwakeDuration == duration,
+                        isEnabled: !store.isActionBusy(.keepAwake)) { store.setKeepAwakeDuration(duration) }
     }
 }
 
@@ -5296,7 +5412,7 @@ private struct NightShiftSettingsPanel: View {
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(.secondary)
                 }
-                NightShiftScheduleControls(model: model, isBusy: model.isBusy, compact: false)
+                NightShiftScheduleControls(model: model, isBusy: model.isBusy)
                 if let lastChange = model.lastChange {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Last change").font(.system(size: 12.5, weight: .semibold))
@@ -5359,29 +5475,101 @@ private struct NightShiftOptionsButton: View {
     }
 }
 
-struct NightShiftQuickOptions: View {
+private struct NightShiftQuickMenu: View {
     @ObservedObject var store: SwitchStore
     @ObservedObject var model: NightShiftSettingsModel
-    @Environment(\.locale) private var locale
+    let availableHeight: CGFloat
+    let hideDisabledReason: String?
+    let configure: () -> Void
+    let hideFromMenu: () -> Void
+    let dismiss: () -> Void
+
+    private var contentHeight: CGFloat {
+        let options: CGFloat = model.preset == .custom && model.isSupported == true ? 185 : 141
+        return options + (model.hasError ? 40 : 0)
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Night Shift").font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-            if model.isSupported == true {
-                NightShiftScheduleControls(model: model, isBusy: model.isBusy, compact: true)
-            } else {
-                NightShiftSupportNotice(isSupported: model.isSupported)
-            }
-            if model.hasError, let status = model.statusText {
-                Text(verbatim: L10n.localizedRuntimeMessage(status, locale: locale))
-                    .font(.system(size: 12)).foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
+        QuickOptionsCard(title: store.switchTitle(.nightShift), symbol: "moon.stars.fill", tint: SwitchKind.nightShift.accentColor,
+                         contentHeight: contentHeight, availableHeight: availableHeight, hideDisabledReason: hideDisabledReason,
+                         configure: configure, hideFromMenu: hideFromMenu, dismiss: dismiss) {
+            VStack(spacing: 0) {
+                if model.isSupported == true {
+                    ForEach(NightShiftSchedulePreset.allCases) { preset in
+                        QuickMenuChoice(title: preset.title, isSelected: model.preset == preset, isEnabled: !model.isBusy) {
+                            model.applyPreset(preset)
+                        }
+                    }
+                    if model.preset == .custom {
+                        NightShiftQuickTimeEditor(model: model).frame(height: 44)
+                    }
+                    QuickMenuDivider()
+                    QuickMenuToggle(title: "Keep the switch as set",
+                                    explanation: model.keepsSwitchState
+                                        ? "The switch stays as you set it, whatever the schedule."
+                                        : "Like Control Center, a change lasts until the next scheduled time.",
+                                    isOn: Binding(get: { model.keepsSwitchState }, set: { model.updateKeepsSwitchState($0) }),
+                                    isEnabled: !model.isBusy)
+                } else {
+                    NightShiftSupportNotice(isSupported: model.isSupported).padding(8)
+                }
+                if model.hasError, let status = model.statusText {
+                    NightShiftQuickError(message: status).frame(height: 40)
+                }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(7)
-        .transaction { $0.animation = nil }
         .modifier(NightShiftSettingsRefresh(store: store, model: model))
+    }
+}
+
+private struct NightShiftQuickError: View {
+    let message: String
+    @Environment(\.locale) private var locale
+    var body: some View {
+        Text(verbatim: L10n.localizedRuntimeMessage(message, locale: locale))
+            .font(.system(size: 11)).foregroundStyle(.red)
+            .lineLimit(2).padding(.horizontal, 6)
+            .help(Text(verbatim: L10n.localizedRuntimeMessage(message, locale: locale)))
+    }
+}
+
+private struct NightShiftQuickTimeEditor: View {
+    @ObservedObject var model: NightShiftSettingsModel
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            QuickTimeField(title: "From", time: Binding(get: { model.customSchedule.start }, set: { model.setCustomStart($0) }))
+            QuickTimeField(title: "To", time: Binding(get: { model.customSchedule.end }, set: { model.setCustomEnd($0) }))
+            Button("Apply") { model.applyPreset(.custom) }
+            .font(.system(size: 11, weight: .medium))
+            .buttonStyle(.bordered).controlSize(.small)
+            .disabled(!model.customScheduleHasChanges || model.isBusy)
+            .accessibilityLabel(Text("Apply Custom Schedule"))
+            .help("Apply Custom Schedule")
+        }
+        .disabled(model.isBusy)
+        .padding(.horizontal, 6)
+    }
+}
+
+private struct QuickTimeField: View {
+    let title: String
+    @Binding var time: TimeOfDay
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(LocalizedStringKey(title)).font(.system(size: 10.5)).foregroundStyle(Color.primary.opacity(0.72))
+            DatePicker(LocalizedStringKey(title), selection: date, displayedComponents: [.hourAndMinute])
+                .datePickerStyle(.field).labelsHidden().controlSize(.small)
+                .fixedSize()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var date: Binding<Date> {
+        Binding(get: {
+            Calendar.current.date(from: DateComponents(year: 2001, month: 1, day: 1, hour: time.hour, minute: time.minute)) ?? .distantPast
+        }, set: { value in
+            let parts = Calendar.current.dateComponents([.hour, .minute], from: value)
+            time = TimeOfDay(hour: parts.hour ?? 0, minute: parts.minute ?? 0)
+        })
     }
 }
 
@@ -5411,45 +5599,15 @@ private struct NightShiftSettingsRefresh: ViewModifier {
 private struct NightShiftScheduleControls: View {
     @ObservedObject var model: NightShiftSettingsModel
     let isBusy: Bool
-    let compact: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: compact ? 10 : 14) {
-            if compact {
-                Text("Schedule").font(.system(size: 12, weight: .medium)).foregroundStyle(.secondary)
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 5), count: 2), spacing: 5) {
-                    ForEach(NightShiftSchedulePreset.allCases) { preset in
-                        Button { model.applyPreset(preset) } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "checkmark").font(.system(size: 9, weight: .bold))
-                                    .frame(width: 10).opacity(model.preset == preset ? 1 : 0)
-                                Text(LocalizedStringKey(preset.title))
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .multilineTextAlignment(.leading)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Spacer(minLength: 0)
-                            }
-                            .padding(.horizontal, 7)
-                            .frame(maxWidth: .infinity, minHeight: 38)
-                            .foregroundStyle(model.preset == preset ? Color.accentColor : .primary)
-                            .background(model.preset == preset ? Color.accentColor.opacity(0.16) : DashboardColors.controlFill,
-                                        in: RoundedRectangle(cornerRadius: 6))
-                            .contentShape(Rectangle())
-                            .animation(.easeOut(duration: 0.12), value: model.preset == preset)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(isBusy)
-                        .accessibilityAddTraits(model.preset == preset ? .isSelected : [])
-                    }
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("Schedule", selection: Binding(get: { model.preset }, set: { model.applyPreset($0) })) {
+                ForEach(NightShiftSchedulePreset.allCases) { preset in
+                    Text(LocalizedStringKey(preset.title)).tag(preset)
                 }
-            } else {
-                Picker("Schedule", selection: Binding(get: { model.preset }, set: { model.applyPreset($0) })) {
-                    ForEach(NightShiftSchedulePreset.allCases) { preset in
-                        Text(LocalizedStringKey(preset.title)).tag(preset)
-                    }
-                }
-                .pickerStyle(.menu).disabled(isBusy)
             }
+            .pickerStyle(.menu).disabled(isBusy)
             if model.preset == .custom {
                 VStack(alignment: .leading, spacing: 8) {
                     TimeOfDayPickerRow(label: "From", time: Binding(get: { model.customSchedule.start }, set: { model.setCustomStart($0) }))
@@ -5465,7 +5623,7 @@ private struct NightShiftScheduleControls: View {
             Divider()
             Toggle("Keep the switch as set", isOn: Binding(get: { model.keepsSwitchState }, set: { model.updateKeepsSwitchState($0) }))
                 .toggleStyle(.checkbox)
-                .font(.system(size: compact ? 12 : 14))
+                .font(.system(size: 14))
                 .disabled(isBusy)
             Text(LocalizedStringKey(model.keepsSwitchState
                                     ? "The switch stays as you set it, whatever the schedule."
