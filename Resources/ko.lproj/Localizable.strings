@@ -272,3 +272,27 @@
 
 "Close options" = "옵션 닫기";
 "Apply" = "적용";
+
+/* System state recovery */
+"Needs recovery" = "복구 필요";
+"Confirm manual recovery" = "수동 복구 확인";
+"This older Mode did not record its original microphone or display. Restore those devices manually, then confirm below." = "이전 버전의 모드에는 원래 마이크나 디스플레이 기록이 없습니다. 수동으로 복구한 뒤 아래에서 확인하세요.";
+"Confirm only after restoring the original microphone and display settings yourself. Other saved settings will still be restored automatically." = "원래 마이크와 디스플레이 설정을 직접 복구한 후에만 확인하세요. 나머지 저장된 설정은 자동으로 복구됩니다.";
+"A Mode was interrupted. Select it to restore its previous settings." = "모드가 중단되었습니다. 해당 모드를 선택하여 이전 설정을 복구하세요.";
+"Could not save the original device state. The Mode was not started." = "기기의 원래 상태를 저장할 수 없어 모드를 시작하지 않았습니다.";
+"This older Mode did not record its original device. Restore it manually in Mode settings." = "이전 버전의 모드에는 원래 기기 기록이 없습니다. 모드 설정에서 수동으로 복구하세요.";
+"Could not save Mode recovery information." = "모드 복구 정보를 저장할 수 없습니다.";
+"The microphone does not expose control for every input channel." = "이 마이크는 모든 입력 채널 제어를 지원하지 않습니다.";
+"The original microphone is disconnected. Reconnect it and retry." = "원래 마이크의 연결이 끊겼습니다. 다시 연결하고 재시도하세요.";
+"Could not restore microphone input volume." = "마이크 입력 음량을 복구할 수 없습니다.";
+"Could not restore microphone mute state." = "마이크 음소거 상태를 복구할 수 없습니다.";
+"Could not change mute on every microphone input channel." = "모든 마이크 입력 채널의 음소거를 변경할 수 없습니다.";
+"Could not identify the microphone for volume restoration." = "음량을 복구할 마이크를 식별할 수 없습니다.";
+"Keep Awake is active, but lid-closed protection is unavailable. Retry Keep Awake setup." = "Keep Awake는 활성화되어 있지만 덮개를 닫은 상태에서는 사용할 수 없습니다. 설정을 다시 시도하세요.";
+"Keep Awake helper disconnected. Retry the operation." = "Keep Awake 보조 서비스의 연결이 끊겼습니다. 다시 시도하세요.";
+"Night Shift has an unfinished change. Retry your last change to recover its previous settings." = "Night Shift에 완료되지 않은 변경이 있습니다. 마지막 변경을 다시 시도하여 이전 설정을 복구하세요.";
+"Night Shift has an unfinished change. Restore failed; retry when the display is available." = "Night Shift의 미완료 변경을 복구하지 못했습니다. 디스플레이가 연결되면 다시 시도하세요.";
+"Night Shift could not restore its previous settings. Retry to recover them." = "Night Shift의 이전 설정을 복구할 수 없습니다. 다시 시도하세요.";
+"Could not save Night Shift recovery data. Retry the operation." = "Night Shift 복구 데이터를 저장할 수 없습니다. 다시 시도하세요.";
+"The original display is disconnected. Reconnect it and retry." = "원래 디스플레이의 연결이 끊겼습니다. 다시 연결하고 재시도하세요.";
+"Could not verify the original device for this Mode." = "이 모드의 원래 기기를 확인할 수 없습니다.";

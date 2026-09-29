@@ -272,3 +272,27 @@
 
 "Close options" = "オプションを閉じる";
 "Apply" = "適用";
+
+/* System state recovery */
+"Needs recovery" = "復元が必要";
+"Confirm manual recovery" = "手動復元を確認";
+"This older Mode did not record its original microphone or display. Restore those devices manually, then confirm below." = "旧バージョンのモードには元のマイクやディスプレイの記録がありません。手動で復元してから下で確認してください。";
+"Confirm only after restoring the original microphone and display settings yourself. Other saved settings will still be restored automatically." = "元のマイクとディスプレイの設定を手動で復元した後に確認してください。他の保存済み設定は自動で復元されます。";
+"A Mode was interrupted. Select it to restore its previous settings." = "モードが中断されました。選択して以前の設定を復元してください。";
+"Could not save the original device state. The Mode was not started." = "デバイスの元の状態を保存できなかったため、モードは開始されませんでした。";
+"This older Mode did not record its original device. Restore it manually in Mode settings." = "旧バージョンのモードには元のデバイスの記録がありません。モード設定から手動で復元してください。";
+"Could not save Mode recovery information." = "モードの復元情報を保存できませんでした。";
+"The microphone does not expose control for every input channel." = "このマイクはすべての入力チャンネルの制御に対応していません。";
+"The original microphone is disconnected. Reconnect it and retry." = "元のマイクが切断されています。再接続してやり直してください。";
+"Could not restore microphone input volume." = "マイクの入力音量を復元できませんでした。";
+"Could not restore microphone mute state." = "マイクのミュート状態を復元できませんでした。";
+"Could not change mute on every microphone input channel." = "すべてのマイク入力チャンネルのミュートを変更できませんでした。";
+"Could not identify the microphone for volume restoration." = "音量を復元するマイクを識別できませんでした。";
+"Keep Awake is active, but lid-closed protection is unavailable. Retry Keep Awake setup." = "Keep Awake は有効ですが、蓋を閉じた状態での動作は利用できません。設定をやり直してください。";
+"Keep Awake helper disconnected. Retry the operation." = "Keep Awake の補助サービスが切断されました。やり直してください。";
+"Night Shift has an unfinished change. Retry your last change to recover its previous settings." = "Night Shift に未完了の変更があります。前の設定を復元するには最後の変更をやり直してください。";
+"Night Shift has an unfinished change. Restore failed; retry when the display is available." = "Night Shift の未完了の変更を復元できませんでした。ディスプレイが利用可能になってからやり直してください。";
+"Night Shift could not restore its previous settings. Retry to recover them." = "Night Shift の前の設定を復元できませんでした。もう一度お試しください。";
+"Could not save Night Shift recovery data. Retry the operation." = "Night Shift の復元データを保存できませんでした。やり直してください。";
+"The original display is disconnected. Reconnect it and retry." = "元のディスプレイが切断されています。再接続してやり直してください。";
+"Could not verify the original device for this Mode." = "このモードの元のデバイスを確認できませんでした。";

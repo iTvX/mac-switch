@@ -189,19 +189,35 @@ struct ActiveSwitchModeSession: Codable, Equatable, Sendable {
     let originalKeepAwakeEndDate: Date?
     let originalDoNotDisturbEndDate: Date?
     let originalNightShift: NightShiftRestorePoint?
+    let originalDevices: [String: DeviceModeRestorePoint]?
+    var phase: ModeSessionPhase?
+    var attemptedKinds: [SwitchKind]?
+    var pendingRestorationKinds: [SwitchKind]?
+    var manuallyRecoveredKinds: [SwitchKind]?
+
+    var needsRecovery: Bool { phase != .active }
+    var legacyDeviceKinds: [SwitchKind] {
+        originalKinds.filter { ($0 == .muteMicrophone || $0 == .screenResolution)
+            && originalDevices?[$0.rawValue] == nil && !(manuallyRecoveredKinds ?? []).contains($0) }
+    }
 
     init(
         modeID: SwitchModeID,
         originalStates: [SwitchKind: Bool],
         originalKeepAwakeEndDate: Date? = nil,
         originalDoNotDisturbEndDate: Date? = nil,
-        originalNightShift: NightShiftRestorePoint? = nil
+        originalNightShift: NightShiftRestorePoint? = nil,
+        originalDevices: [String: DeviceModeRestorePoint]? = nil,
+        phase: ModeSessionPhase = .active
     ) {
         self.modeID = modeID
         self.rawOriginalStates = Dictionary(uniqueKeysWithValues: originalStates.map { ($0.key.rawValue, $0.value) })
         self.originalKeepAwakeEndDate = originalKeepAwakeEndDate
         self.originalDoNotDisturbEndDate = originalDoNotDisturbEndDate
         self.originalNightShift = originalNightShift
+        self.originalDevices = originalDevices
+        self.phase = phase
+        self.attemptedKinds = phase == .activating ? [] : nil
     }
 
     var originalKinds: [SwitchKind] {
@@ -816,7 +832,21 @@ final class SwitchStore: ObservableObject {
     private let shortcutManager = GlobalShortcutManager()
     private let refreshQueue = DispatchQueue(label: "com.maxyu.macswitch.snapshot-refresh", qos: .utility)
     private let actionQueue = DispatchQueue(label: "com.maxyu.macswitch.switch-actions", qos: .userInitiated)
-    private let bluetoothActionQueue = DispatchQueue(label: "com.maxyu.macswitch.bluetooth-audio", qos: .userInitiated)
+    private var resourceActionQueues: [String: DispatchQueue] = [:]
+
+    private func actionQueue(for kind: SwitchKind) -> DispatchQueue {
+        let resource: String
+        switch kind {
+        case .lowPowerMode, .energyMode: resource = "power-mode"
+        case .hideDesktopIcons, .showHiddenFiles: resource = "finder"
+        case .stageManager, .hideWidgets, .hideDock: resource = "dock"
+        default: resource = kind.rawValue
+        }
+        if let queue = resourceActionQueues[resource] { return queue }
+        let queue = DispatchQueue(label: "com.maxyu.macswitch.action.\(resource)", qos: .userInitiated)
+        resourceActionQueues[resource] = queue
+        return queue
+    }
     private var snapshotVersions: [SwitchKind: Int] = [:]
     private var actionVersions: [SwitchKind: Int] = [:]
     private var refreshInFlight = false
@@ -843,6 +873,8 @@ final class SwitchStore: ObservableObject {
         let endDate: Date?
         let forcesIndefiniteDuration: Bool
         var nightShift: NightShiftModeAction? = nil
+        var device: DeviceModeRestorePoint? = nil
+        var restoresDevice = false
     }
 
     // A temporary Night Shift change ends at the next scheduled time, so Modes hold the state
@@ -964,17 +996,18 @@ final class SwitchStore: ObservableObject {
             refreshStartAtLoginStatusAsync()
         }
 
-        for kind in SwitchKind.allCases {
-            snapshots[kind] = .off
+        for kind in SwitchKind.allCases { snapshots[kind] = .off }
+        if activeModeSessions.values.contains(where: \.needsRecovery) {
+            reportModeError("A Mode was interrupted. Select it to restore its previous settings.")
         }
 
         if enableRuntimeServices {
             controller.onExternalChange = { [weak self] kind in
                 DispatchQueue.main.async {
-                    if kind == .keepAwake {
+                    self?.refresh(kind)
+                    if kind == .keepAwake, self?.snapshots[.keepAwake]?.isOn == false {
                         self?.clearKeepAwakeRestoreState()
                     }
-                    self?.refresh(kind)
                 }
             }
 
@@ -997,6 +1030,9 @@ final class SwitchStore: ObservableObject {
             reconcileDarkModeSchedule()
             registerShortcuts()
             scheduleLegacyPresetRestoration()
+            if activeModeSessions.values.contains(where: \.needsRecovery) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.recoverInterruptedMode() }
+            }
         }
     }
 
@@ -1172,7 +1208,7 @@ final class SwitchStore: ObservableObject {
         invalidatePendingSnapshot(for: .nightShift)
         let controller = controller
         let duration = keepAwakeDuration
-        actionQueue.async { [weak self] in
+        actionQueue(for: .nightShift).async { [weak self] in
             let (state, error) = operation()
             let snapshot = controller.snapshot(for: .nightShift, keepAwakeDuration: duration)
             DispatchQueue.main.async {
@@ -1226,8 +1262,19 @@ final class SwitchStore: ObservableObject {
         return L10n.localizedResource(key, locale: locale)
     }
 
-    func isModeActive(_ modeID: SwitchModeID) -> Bool {
-        activeModeSessions[modeID] != nil
+    func hasModeSession(_ modeID: SwitchModeID) -> Bool { activeModeSessions[modeID] != nil }
+
+    func isModeActive(_ modeID: SwitchModeID) -> Bool { activeModeSessions[modeID]?.phase == .active }
+
+    func modeNeedsManualRecovery(_ modeID: SwitchModeID) -> Bool {
+        !(activeModeSessions[modeID]?.legacyDeviceKinds.isEmpty ?? true)
+    }
+
+    func confirmManualModeRecovery(_ modeID: SwitchModeID) {
+        guard activeModeOperationID == nil, var session = activeModeSessions[modeID], !session.legacyDeviceKinds.isEmpty else { return }
+        session.manuallyRecoveredKinds = (session.manuallyRecoveredKinds ?? []) + session.legacyDeviceKinds
+        activeModeSessions[modeID] = session
+        if let mode = customModes.first(where: { $0.id == modeID }) { deactivateMode(mode) }
     }
 
     func isModeBusy(_ mode: SwitchModeDefinition) -> Bool {
@@ -1242,9 +1289,10 @@ final class SwitchStore: ObservableObject {
         if pendingCustomModeDeletionID == mode.id {
             return modeText(.restoringBeforeDeletion)
         }
-        if isModeActive(mode.id) {
-            return modeText(.active)
+        if activeModeSessions[mode.id]?.needsRecovery == true, !isModeBusy(mode) {
+            return L10n.localizedResource("Needs recovery", locale: Locale(identifier: effectiveLanguage.localeIdentifier))
         }
+        if isModeActive(mode.id) { return modeText(.active) }
         if isModeBusy(mode) {
             return modeText(.updating)
         }
@@ -1263,7 +1311,7 @@ final class SwitchStore: ObservableObject {
             }
             enabledModeIDs.insert(modeID)
         } else {
-            if isModeActive(modeID) || activeModeOperationID == modeID {
+            if hasModeSession(modeID) || activeModeOperationID == modeID {
                 reportModeError(modeText(.turnOffBeforeHiding))
                 return
             }
@@ -1314,7 +1362,7 @@ final class SwitchStore: ObservableObject {
             return
         }
 
-        if isModeActive(modeID) {
+        if hasModeSession(modeID) {
             pendingCustomModeDeletionID = modeID
             deactivateMode(mode)
             return
@@ -1332,7 +1380,7 @@ final class SwitchStore: ObservableObject {
     func toggleMode(_ mode: SwitchModeDefinition) {
         guard let currentMode = customModes.first(where: { $0.id == mode.id }) else { return }
         guard activeModeOperationID == nil else { return }
-        if isModeActive(currentMode.id) {
+        if hasModeSession(currentMode.id) {
             deactivateMode(currentMode)
         } else {
             activateMode(currentMode)
@@ -1361,7 +1409,17 @@ final class SwitchStore: ObservableObject {
             let capturesNightShift = captured[.nightShift]?.isAvailable == true
             self.captureNightShiftRestorePoint(if: capturesNightShift) { [weak self] nightShiftPoint in
                 guard let self, self.activeModeOperationID == mode.id else { return }
-                self.startMode(mode, items: items, kinds: kinds, captured: captured, nightShiftPoint: nightShiftPoint)
+                let controller = self.controller
+                self.actionQueue.async { [weak self] in
+                    let points = Dictionary(uniqueKeysWithValues: items.compactMap { item -> (String, DeviceModeRestorePoint)? in
+                        guard captured[item.kind]?.isAvailable == true,
+                              let point = controller.captureDeviceRestorePoint(for: item.kind) else { return nil }
+                        return (item.kind.rawValue, point)
+                    })
+                    Task { @MainActor in
+                        self?.startMode(mode, items: items, kinds: kinds, captured: captured, nightShiftPoint: nightShiftPoint, devicePoints: points)
+                    }
+                }
             }
         }
     }
@@ -1388,13 +1446,25 @@ final class SwitchStore: ObservableObject {
         items: [SwitchModeItem],
         kinds: Set<SwitchKind>,
         captured: [SwitchKind: SwitchSnapshot],
-        nightShiftPoint: NightShiftRestorePoint?
+        nightShiftPoint: NightShiftRestorePoint?,
+        devicePoints: [String: DeviceModeRestorePoint]
     ) {
+        guard activeModeOperationID == mode.id else { return }
         let availableItems = items.filter { captured[$0.kind]?.isAvailable == true }
         let skipped = items.filter { captured[$0.kind]?.isAvailable != true }
         guard !availableItems.isEmpty else {
             self.finishModeOperation(mode.id, reservedKinds: kinds)
             self.reportModeError(self.modeText(.unavailableToStart, mode.title))
+            return
+        }
+
+        let missingRestorePoint = availableItems.contains { item in
+            if item.kind == .nightShift { return nightShiftPoint == nil }
+            return (item.kind == .muteMicrophone || item.kind == .screenResolution) && devicePoints[item.kind.rawValue] == nil
+        }
+        guard !missingRestorePoint else {
+            finishModeOperation(mode.id, reservedKinds: kinds)
+            reportModeError("Could not save the original device state. The Mode was not started.")
             return
         }
 
@@ -1411,7 +1481,9 @@ final class SwitchStore: ObservableObject {
             originalDoNotDisturbEndDate: originalStates[.doNotDisturb] == true
                 ? self.defaults.object(forKey: DefaultsKey.doNotDisturbEndDate) as? Date
                 : nil,
-            originalNightShift: originalStates[.nightShift] == nil ? nil : nightShiftPoint
+            originalNightShift: originalStates[.nightShift] == nil ? nil : nightShiftPoint,
+            originalDevices: devicePoints,
+            phase: .activating
         )
         self.activeModeSessions[mode.id] = session
         self.clearModeError()
@@ -1422,6 +1494,8 @@ final class SwitchStore: ObservableObject {
         self.runModeSteps(steps, stopOnFailure: true) { [weak self] failures in
             guard let self, self.activeModeOperationID == mode.id else { return }
             guard !failures.isEmpty else {
+                self.activeModeSessions[mode.id]?.phase = .active
+                self.activeModeSessions[mode.id]?.attemptedKinds = nil
                 self.finishModeOperation(mode.id, reservedKinds: kinds)
                 if !skipped.isEmpty {
                     let skippedTitles = skipped.map { self.switchTitle($0.kind) }.joined(separator: ", ")
@@ -1430,7 +1504,9 @@ final class SwitchStore: ObservableObject {
                 return
             }
 
-            let rollback = self.restorationPlan(for: session, snapshots: self.snapshots)
+            let currentSession = self.activeModeSessions[mode.id] ?? session
+            let rollback = self.restorationPlan(for: currentSession, snapshots: self.snapshots)
+            self.markRestoring(mode.id, steps: rollback.steps, failures: rollback.failures)
             self.runModeSteps(rollback.steps, stopOnFailure: false) { [weak self] rollbackFailures in
                 guard let self, self.activeModeOperationID == mode.id else { return }
                 let allRollbackFailures = rollback.failures + rollbackFailures
@@ -1476,6 +1552,7 @@ final class SwitchStore: ObservableObject {
         captureFreshModeSnapshots(for: kinds) { [weak self] captured in
             guard let self, self.activeModeOperationID == mode.id else { return }
             let plan = self.restorationPlan(for: session, snapshots: captured)
+            self.markRestoring(mode.id, steps: plan.steps, failures: plan.failures)
             self.runModeSteps(plan.steps, stopOnFailure: false) { [weak self] operationFailures in
                 guard let self, self.activeModeOperationID == mode.id else { return }
                 let failures = plan.failures + operationFailures
@@ -1501,6 +1578,22 @@ final class SwitchStore: ObservableObject {
                 }
             }
         }
+    }
+
+    func recoverInterruptedMode() {
+        guard activeModeOperationID == nil,
+              let session = activeModeSessions.values.first(where: \.needsRecovery),
+              let mode = customModes.first(where: { $0.id == session.modeID }) else { return }
+        if session.originalKinds.contains(where: { isActionBusy($0) }) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.recoverInterruptedMode() }
+            return
+        }
+        deactivateMode(mode)
+    }
+
+    private func markRestoring(_ id: SwitchModeID, steps: [ModeStep], failures: [ModeStepFailure]) {
+        activeModeSessions[id]?.phase = .restoring
+        activeModeSessions[id]?.pendingRestorationKinds = Array(Set(steps.map(\.kind) + failures.map(\.kind)))
     }
 
     private func finishPendingCustomModeDeletionIfNeeded(_ modeID: SwitchModeID) {
@@ -1605,6 +1698,9 @@ final class SwitchStore: ObservableObject {
         snapshot: SwitchSnapshot,
         session: ActiveSwitchModeSession
     ) -> ModeStep? {
+        if let point = session.originalDevices?[item.kind.rawValue] {
+            return ModeStep(kind: item.kind, targetIsOn: item.targetIsOn, endDate: nil, forcesIndefiniteDuration: false, device: point)
+        }
         if item.kind == .nightShift, session.originalNightShift != nil {
             // Hold even when already there, or the next scheduled time would change it mid-Mode.
             return ModeStep(
@@ -1642,7 +1738,18 @@ final class SwitchStore: ObservableObject {
         var steps: [ModeStep] = []
         var failures: [ModeStepFailure] = []
         for kind in session.originalKinds {
+            if (session.manuallyRecoveredKinds ?? []).contains(kind) { continue }
+            if session.phase == .activating, let attempted = session.attemptedKinds, !attempted.contains(kind) { continue }
+            if session.phase == .restoring, let pending = session.pendingRestorationKinds, !pending.contains(kind) { continue }
             guard let target = session.restorationState(for: kind, at: date) else { continue }
+            if let point = session.originalDevices?[kind.rawValue] {
+                steps.append(ModeStep(kind: kind, targetIsOn: target, endDate: nil, forcesIndefiniteDuration: false, device: point, restoresDevice: true))
+                continue
+            }
+            if kind == .muteMicrophone || kind == .screenResolution {
+                failures.append(ModeStepFailure(kind: kind, message: "This older Mode did not record its original device. Restore it manually in Mode settings."))
+                continue
+            }
             guard let snapshot = currentSnapshots[kind], snapshot.isAvailable else {
                 failures.append(ModeStepFailure(kind: kind, message: "unavailable"))
                 continue
@@ -1706,6 +1813,15 @@ final class SwitchStore: ObservableObject {
         _ step: ModeStep,
         completion: @escaping @MainActor @Sendable (ModeStepFailure?) -> Void
     ) {
+        if let id = activeModeOperationID, activeModeSessions[id]?.phase == .activating {
+            var attempted = activeModeSessions[id]?.attemptedKinds ?? []
+            if !attempted.contains(step.kind) { attempted.append(step.kind) }
+            activeModeSessions[id]?.attemptedKinds = attempted
+        }
+        guard defaults.synchronize() else {
+            completion(ModeStepFailure(kind: step.kind, message: "Could not save Mode recovery information."))
+            return
+        }
         invalidatePendingSnapshot(for: step.kind)
         let actionVersion = nextActionVersion(for: step.kind)
         actionsInProgress.insert(step.kind)
@@ -1716,6 +1832,11 @@ final class SwitchStore: ObservableObject {
         let duration = keepAwakeDuration
         let controller = self.controller
         let operation: @Sendable () -> SwitchOperationResult = {
+            if let point = step.device {
+                return step.restoresDevice
+                    ? controller.restoreDevice(point, kind: step.kind, duration: duration)
+                    : controller.setDevice(point, kind: step.kind, enabled: step.targetIsOn, duration: duration)
+            }
             switch step.nightShift {
             case .hold:
                 return controller.holdNightShift(step.targetIsOn, keepAwakeDuration: duration)
@@ -1748,11 +1869,14 @@ final class SwitchStore: ObservableObject {
             }
             if let error = result.error {
                 failureMessage = error
-            } else if !restoresNightShift, result.snapshot.isOn != step.targetIsOn {
+            } else if !restoresNightShift, step.device == nil, result.snapshot.isOn != step.targetIsOn {
                 // A restored Night Shift follows its schedule, which may differ from the captured state.
                 failureMessage = self.modeText(.macOSDidNotReachState)
             } else {
                 failureMessage = nil
+            }
+            if failureMessage == nil, let id = self.activeModeOperationID, self.activeModeSessions[id]?.phase == .restoring {
+                self.activeModeSessions[id]?.pendingRestorationKinds?.removeAll { $0 == step.kind }
             }
             completion(failureMessage.map { ModeStepFailure(kind: step.kind, message: $0) })
         }
@@ -1762,7 +1886,7 @@ final class SwitchStore: ObservableObject {
                 finish(operation())
             }
         } else {
-            actionQueue.async {
+            actionQueue(for: step.kind).async {
                 let result = operation()
                 Task { @MainActor in
                     finish(result)
@@ -1789,7 +1913,7 @@ final class SwitchStore: ObservableObject {
     }
 
     private func modeFailureDescription(_ failures: [ModeStepFailure]) -> String {
-        failures.map { "\(switchTitle($0.kind)): \($0.message)" }.joined(separator: "; ")
+        failures.map { "\(switchTitle($0.kind)): \(L10n.localizedRuntimeMessage($0.message, locale: Locale(identifier: effectiveLanguage.localeIdentifier)))" }.joined(separator: "; ")
     }
 
     private func uniqueCustomModeTitle(base: String) -> String {
@@ -1861,7 +1985,7 @@ final class SwitchStore: ObservableObject {
                 finish(controller.snapshotForAction(for: kind, keepAwakeDuration: duration))
             }
         } else {
-            actionQueue.async {
+            actionQueue(for: kind).async {
                 let snapshot = controller.snapshotForAction(for: kind, keepAwakeDuration: duration)
                 Task { @MainActor in
                     finish(snapshot)
@@ -1916,7 +2040,7 @@ final class SwitchStore: ObservableObject {
             return
         }
 
-        actionQueue.async { [weak self] in
+        actionQueue(for: kind).async { [weak self] in
             let snapshot = controller.snapshot(for: kind, keepAwakeDuration: duration)
             DispatchQueue.main.async { [weak self] in
                 self?.finishPreflightTrigger(kind, snapshot: snapshot)
@@ -2005,7 +2129,7 @@ final class SwitchStore: ObservableObject {
         }
 
         let controller = self.controller
-        let operationQueue = kind == .bluetoothAudio ? bluetoothActionQueue : actionQueue
+        let operationQueue = actionQueue(for: kind)
         operationQueue.async { [weak self] in
             let result = controller.set(kind, enabled: enabled, keepAwakeDuration: duration)
             DispatchQueue.main.async {
@@ -2489,6 +2613,7 @@ final class SwitchStore: ObservableObject {
         let orderedSessions = activeModeSessions.values.sorted { $0.modeID.rawValue < $1.modeID.rawValue }
         guard let data = try? JSONEncoder().encode(orderedSessions) else { return }
         defaults.set(data, forKey: DefaultsKey.activeModeSessions)
+        _ = defaults.synchronize()
     }
 
     private func saveCustomModes() {
@@ -2564,7 +2689,7 @@ final class SwitchStore: ObservableObject {
         let defaultDuration = keepAwakeDuration
         let controller = self.controller
 
-        actionQueue.async { [weak self] in
+        actionQueue(for: .keepAwake).async { [weak self] in
             let result = controller.setKeepAwake(
                 endingAt: endDate,
                 defaultDuration: defaultDuration
@@ -2886,8 +3011,9 @@ final class SwitchStore: ObservableObject {
     }
 
     private func reportModeError(_ message: String) {
-        modeErrorMessage = message
-        lastError = message
+        let localized = L10n.localizedRuntimeMessage(message, locale: Locale(identifier: effectiveLanguage.localeIdentifier))
+        modeErrorMessage = localized
+        lastError = localized
     }
 
     private func clearModeError() {

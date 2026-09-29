@@ -272,3 +272,27 @@
 
 "Close options" = "关闭选项";
 "Apply" = "应用";
+
+/* System state recovery */
+"Needs recovery" = "需要恢复";
+"Confirm manual recovery" = "确认已手动恢复";
+"This older Mode did not record its original microphone or display. Restore those devices manually, then confirm below." = "此旧版模式未记录原麦克风或显示器。请先手动恢复这些设备，再在下方确认。";
+"Confirm only after restoring the original microphone and display settings yourself. Other saved settings will still be restored automatically." = "请仅在自行恢复原麦克风和显示器设置后确认。其他已保存的设置仍会自动恢复。";
+"A Mode was interrupted. Select it to restore its previous settings." = "某个模式被中断。请选择该模式以恢复之前的设置。";
+"Could not save the original device state. The Mode was not started." = "无法保存设备原始状态，模式未启动。";
+"This older Mode did not record its original device. Restore it manually in Mode settings." = "此旧版模式未记录原设备，请在模式设置中手动恢复。";
+"Could not save Mode recovery information." = "无法保存模式恢复信息。";
+"The microphone does not expose control for every input channel." = "此麦克风不支持控制全部输入通道。";
+"The original microphone is disconnected. Reconnect it and retry." = "原麦克风已断开，请重新连接后重试。";
+"Could not restore microphone input volume." = "无法恢复麦克风输入音量。";
+"Could not restore microphone mute state." = "无法恢复麦克风静音状态。";
+"Could not change mute on every microphone input channel." = "无法更改全部麦克风输入通道的静音状态。";
+"Could not identify the microphone for volume restoration." = "无法识别麦克风，不能安全恢复音量。";
+"Keep Awake is active, but lid-closed protection is unavailable. Retry Keep Awake setup." = "保活已启用，但合盖保活不可用。请重试保活设置。";
+"Keep Awake helper disconnected. Retry the operation." = "保活辅助服务已断开，请重试。";
+"Night Shift has an unfinished change. Retry your last change to recover its previous settings." = "Night Shift 有未完成的更改。请重试上次操作以恢复之前的设置。";
+"Night Shift has an unfinished change. Restore failed; retry when the display is available." = "Night Shift 的未完成更改恢复失败，请在显示器可用后重试。";
+"Night Shift could not restore its previous settings. Retry to recover them." = "Night Shift 无法恢复之前的设置，请重试恢复。";
+"Could not save Night Shift recovery data. Retry the operation." = "无法保存 Night Shift 恢复数据，请重试。";
+"The original display is disconnected. Reconnect it and retry." = "原显示器已断开，请重新连接后重试。";
+"Could not verify the original device for this Mode." = "无法确认此模式的原设备。";

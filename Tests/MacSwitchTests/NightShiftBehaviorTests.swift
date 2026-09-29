@@ -464,6 +464,8 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
     var onStatusChange: (@Sendable () -> Void)?
     var state: NightShiftState?
     var operations: [Operation] = []
+    var rejectsModeChanges = false
+    var rejectedSchedule: NightShiftScheduleState?
     // With a clock, the fake follows corebrightnessd: a manual change is an override,
     // and changing the mode clears it so the schedule decides again.
     private let clock: TestClock?
@@ -511,6 +513,7 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
 
     func setScheduleMode(_ mode: NightShiftScheduleMode) -> Bool {
         operations.append(.setScheduleMode(mode))
+        if rejectsModeChanges { return false }
         let changed = state?.scheduleMode != mode
         state?.scheduleMode = mode
         if changed {
@@ -522,6 +525,7 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
 
     func setSchedule(_ schedule: NightShiftScheduleState) -> Bool {
         operations.append(.setSchedule(schedule))
+        if rejectedSchedule == schedule { return false }
         state?.schedule = schedule
         if state?.override == NightShiftOverride.none {
             followSchedule()
@@ -540,5 +544,65 @@ private final class FakeNightShiftClient: NightShiftClientProtocol, @unchecked S
             at: clock.date,
             calendar: calendar
         ) ?? current.enabled
+    }
+}
+
+extension NightShiftBehaviorTests {
+    func testFailedRollbackPersistsRecoveryAndExplicitRetryFinishesItAfterRelaunch() throws {
+        let defaults = InMemoryUserDefaults(), clock = TestClock(date(hour: 12))
+        let calendar = utcCalendar
+        let client = FakeNightShiftClient(state: makeState(active: true, enabled: false, mode: .off), clock: clock)
+        let subject = NightShiftSwitch(client: client, defaults: defaults, now: { clock.date }, calendar: { calendar })
+        client.rejectsModeChanges = true
+        client.rejectedSchedule = .defaultSchedule
+        XCTAssertNotNil(subject.applySchedule(.alwaysOn, customSchedule: .defaultSchedule))
+        XCTAssertNotNil(defaults.data(forKey: NightShiftPreferenceKey.pendingRecovery))
+        XCTAssertNotEqual(client.state?.schedule, .defaultSchedule)
+        let restarted = NightShiftSwitch(client: client, defaults: defaults, now: { clock.date }, calendar: { calendar })
+        let operations = client.operations
+        restarted.reconcileAlwaysOn()
+        XCTAssertNotNil(restarted.snapshot().warning)
+        XCTAssertEqual(client.operations, operations, "Passive refresh must not fight an unfinished transaction")
+        client.rejectsModeChanges = false
+        client.rejectedSchedule = nil
+        XCTAssertNil(restarted.applySchedule(.off, customSchedule: .defaultSchedule))
+        XCTAssertEqual(client.state?.schedule, .defaultSchedule)
+        XCTAssertEqual(client.state?.scheduleMode, .off)
+        XCTAssertNil(defaults.data(forKey: NightShiftPreferenceKey.pendingRecovery))
+    }
+
+    func testFailedKeepStateChangeRestoresPreferenceAndOriginalSessionOverride() {
+        let client = FakeNightShiftClient(state: makeState(active: true, enabled: false, mode: .custom))
+        client.state?.override = .offForSession
+        let subject = makeSwitch(client)
+        client.rejectsModeChanges = true
+        XCTAssertNotNil(subject.setKeepsSwitchState(true))
+        XCTAssertFalse(subject.keepsSwitchState)
+        XCTAssertEqual(client.state?.scheduleMode, .custom)
+        XCTAssertEqual(client.state?.override, .offForSession)
+        XCTAssertNil(subject.scheduleBackup)
+    }
+
+    func testFailedRestoreMustRetainScheduleBackupForRetry() throws {
+        let clock = TestClock(date(hour: 12))
+        let client = FakeNightShiftClient(state: makeState(active: true, enabled: false, mode: .custom), clock: clock)
+        let subject = makeSwitch(client, clock: clock)
+        XCTAssertNil(subject.setKeepsSwitchState(true))
+        XCTAssertEqual(client.state?.scheduleMode, .off)
+        let saved = try XCTUnwrap(subject.scheduleBackup)
+        client.rejectsModeChanges = true
+        XCTAssertNotNil(subject.setKeepsSwitchState(false))
+        XCTAssertEqual(subject.scheduleBackup, saved, "Failed restoration erased the only original schedule backup")
+        client.rejectsModeChanges = false
+        XCTAssertNil(subject.setKeepsSwitchState(false))
+        XCTAssertEqual(client.state?.scheduleMode, .custom, "Retry silently succeeds but cannot restore the lost schedule")
+    }
+    func testFailedScheduleChangeMustUndoItsEarlierTimeWrite() {
+        let client = FakeNightShiftClient(state: makeState(active: true, enabled: false, mode: .off))
+        let subject = makeSwitch(client)
+        let old = client.state?.schedule
+        client.rejectsModeChanges = true
+        XCTAssertNotNil(subject.applySchedule(.alwaysOn, customSchedule: .defaultSchedule))
+        XCTAssertEqual(client.state?.schedule, old, "Failed transaction left full-day times installed despite reporting failure")
     }
 }

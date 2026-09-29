@@ -283,11 +283,21 @@ protocol SystemSwitchControlling: AnyObject, Sendable {
     func performXcodeClean(progress: @escaping @Sendable (Double) -> Void) -> SwitchOperationResult
     func prepareForTermination()
     func captureNightShiftRestorePoint() -> NightShiftRestorePoint?
+    func captureDeviceRestorePoint(for kind: SwitchKind) -> DeviceModeRestorePoint?
+    func setDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, enabled: Bool, duration: KeepAwakeDuration) -> SwitchOperationResult
+    func restoreDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, duration: KeepAwakeDuration) -> SwitchOperationResult
     func holdNightShift(_ enabled: Bool, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult
     func restoreNightShift(_ point: NightShiftRestorePoint, keepAwakeDuration: KeepAwakeDuration) -> SwitchOperationResult
 }
 
 extension SystemSwitchControlling {
+    func captureDeviceRestorePoint(for kind: SwitchKind) -> DeviceModeRestorePoint? { nil }
+    func setDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, enabled: Bool, duration: KeepAwakeDuration) -> SwitchOperationResult {
+        .init(snapshot: snapshot(for: kind, keepAwakeDuration: duration), error: "Could not verify the original device for this Mode.")
+    }
+    func restoreDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, duration: KeepAwakeDuration) -> SwitchOperationResult {
+        .init(snapshot: snapshot(for: kind, keepAwakeDuration: duration), error: "Could not verify the original device for this Mode.")
+    }
     func captureNightShiftRestorePoint() -> NightShiftRestorePoint? {
         nil
     }
@@ -352,9 +362,9 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
 
     init(doNotDisturb: DoNotDisturbSwitch = DoNotDisturbSwitch()) {
         self.doNotDisturb = doNotDisturb
-        keepAwake.onExpired = { [weak self] in
-            self?.onExternalChange?(.keepAwake)
-        }
+        keepAwake.onExpired = { [weak self] in self?.onExternalChange?(.keepAwake) }
+        keepAwake.onStateChanged = { [weak self] in self?.onExternalChange?(.keepAwake) }
+        guard !CommandLine.arguments.contains("--self-test-safe") else { return }
         nightShift.observeStatusChanges { [weak self] in
             self?.onExternalChange?(.nightShift)
             NotificationCenter.default.post(name: .nightShiftStatusDidChange, object: nil)
@@ -376,7 +386,7 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
                 isOn: keepAwake.isActive,
                 isAvailable: true,
                 subtitle: keepAwake.subtitle(defaultDuration: keepAwakeDuration),
-                warning: nil
+                warning: keepAwake.warning
             )
         case .stageManager:
             return stageManager.snapshot()
@@ -532,6 +542,32 @@ final class SystemSwitchController: SystemSwitchControlling, @unchecked Sendable
         xcodeClean.perform(progress: progress)
     }
 
+    func captureDeviceRestorePoint(for kind: SwitchKind) -> DeviceModeRestorePoint? {
+        switch kind {
+        case .muteMicrophone: return muteMicrophone.captureRestorePoint().map(DeviceModeRestorePoint.microphone)
+        case .screenResolution: return screenResolution.captureRestorePoint().map(DeviceModeRestorePoint.display)
+        default: return nil
+        }
+    }
+    func setDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, enabled: Bool, duration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error: String?
+        switch (kind, point) {
+        case (.muteMicrophone, .microphone(let saved)): error = muteMicrophone.setEnabled(enabled, boundTo: saved)
+        case (.screenResolution, .display(let saved)): error = screenResolution.setEnabled(enabled, boundTo: saved)
+        default: error = "Could not verify the original device for this Mode."
+        }
+        return .init(snapshot: snapshot(for: kind, keepAwakeDuration: duration), error: error)
+    }
+    func restoreDevice(_ point: DeviceModeRestorePoint, kind: SwitchKind, duration: KeepAwakeDuration) -> SwitchOperationResult {
+        let error: String?
+        switch (kind, point) {
+        case (.muteMicrophone, .microphone(let saved)): error = muteMicrophone.restore(saved)
+        case (.screenResolution, .display(let saved)): error = screenResolution.restore(saved)
+        default: error = "Could not verify the original device for this Mode."
+        }
+        return .init(snapshot: snapshot(for: kind, keepAwakeDuration: duration), error: error)
+    }
+
     func captureNightShiftRestorePoint() -> NightShiftRestorePoint? {
         nightShift.captureRestorePoint()
     }
@@ -589,7 +625,21 @@ final class KeepAwakeManager: @unchecked Sendable {
     private var expirationWorkItem: DispatchWorkItem?
     private var endDate: Date?
     private var ownsLidLease = false
+    private var leaseEpoch = 0
+    private var leaseObserver: UUID?
+    private var recoveringLease = false
+    private let recoveryQueue = DispatchQueue(label: "com.maxyu.macswitch.lid-recovery", qos: .utility)
     var onExpired: (() -> Void)?
+    var onStateChanged: (@Sendable () -> Void)?
+
+    var warning: String? {
+        guard lidPreference() else { return nil }
+        return stateLock.withLock {
+            !assertionIDs.isEmpty && !ownsLidLease
+                ? "Keep Awake is active, but lid-closed protection is unavailable. Retry Keep Awake setup."
+                : nil
+        }
+    }
 
     init(
         assertions: any KeepAwakeAsserting = SystemKeepAwakeAssertions(),
@@ -603,9 +653,13 @@ final class KeepAwakeManager: @unchecked Sendable {
         self.lidPreference = lidPreference
         self.legacyRecoveryPending = legacyRecoveryPending && !CommandLine.arguments.contains("--self-test-safe")
         self.didRestoreLegacy = didRestoreLegacy
+        if !CommandLine.arguments.contains("--self-test-safe") {
+            leaseObserver = lidController.observeLeaseLoss { [weak self] in self?.leaseWasLost() }
+        }
     }
 
     deinit {
+        if let leaseObserver { lidController.removeLeaseObserver(leaseObserver) }
         // Safe diagnostics only read state; they must not restore another process's session.
         if !CommandLine.arguments.contains("--self-test-safe") { _ = disable() }
     }
@@ -642,8 +696,13 @@ final class KeepAwakeManager: @unchecked Sendable {
         }
         let wantsLid = lidPreference()
         if error == nil, wantsLid || stateLock.withLock({ ownsLidLease }) {
+            let epoch = stateLock.withLock { leaseEpoch }
             error = lidController.setDisabled(wantsLid, until: expirationDate)
-            if error == nil { stateLock.withLock { ownsLidLease = wantsLid } }
+            stateLock.withLock {
+                if error == nil, epoch == leaseEpoch { ownsLidLease = wantsLid }
+                else { ownsLidLease = false }
+            }
+            if error == nil, epoch != stateLock.withLock({ leaseEpoch }) { error = "Keep Awake helper disconnected. Retry the operation." }
         }
         if let expirationDate {
             guard expirationDate > Date() else { return disable() ?? error }
@@ -670,6 +729,44 @@ final class KeepAwakeManager: @unchecked Sendable {
             didRestoreLegacy()
         }
         return nil
+    }
+
+    private func leaseWasLost() {
+        let scheduleRecovery = stateLock.withLock { () -> Bool in
+            leaseEpoch += 1
+            ownsLidLease = false
+            guard !assertionIDs.isEmpty, !recoveringLease else { return false }
+            recoveringLease = true
+            return true
+        }
+        onStateChanged?()
+        if scheduleRecovery { recoverLease(attempt: 0) }
+    }
+
+    private func recoverLease(attempt: Int) {
+        let delays: [Double] = [0.2, 1, 3]
+        recoveryQueue.asyncAfter(deadline: .now() + delays[attempt]) { [weak self] in
+            guard let self else { return }
+            self.operationLock.lock()
+            let active = self.isActive && self.lidPreference()
+            let deadline = self.stateLock.withLock { self.endDate }
+            let expired = deadline.map { $0 <= Date() } ?? false
+            var recovered = false
+            if active && !expired {
+                let epoch = self.stateLock.withLock { self.leaseEpoch }
+                let error = self.lidController.setDisabled(true, until: deadline)
+                recovered = self.stateLock.withLock {
+                    let valid = error == nil && self.leaseEpoch == epoch
+                    self.ownsLidLease = valid
+                    return valid
+                }
+            }
+            let retry = active && !expired && !recovered && attempt + 1 < delays.count
+            if !retry { self.stateLock.withLock { self.recoveringLease = false } }
+            self.operationLock.unlock()
+            self.onStateChanged?()
+            if retry { self.recoverLease(attempt: attempt + 1) }
+        }
     }
 
     private func scheduleExpiration(at deadline: Date) {
@@ -1187,6 +1284,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     private var observedState: NightShiftState?
     private var wakeObserver: NSObjectProtocol?
     private var appliedSessionOverride = false
+    private var transactionDepth = 0
     private var localMutationDepth = 0
     private var localMutationGraceEnd: Date?
     private let localMutationGrace: TimeInterval = 3
@@ -1261,6 +1359,8 @@ final class NightShiftSwitch: @unchecked Sendable {
         let warning: String?
         if !state.isAvailable {
             warning = unsupportedDeviceMessage
+        } else if defaults.data(forKey: NightShiftPreferenceKey.pendingRecovery) != nil {
+            warning = "Night Shift has an unfinished change. Retry your last change to recover its previous settings."
         } else if state.enabled && !state.active {
             warning = "Enabled, but macOS is not applying Night Shift"
         } else {
@@ -1277,7 +1377,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     /// The dashboard switch. By default it behaves like Control Center: macOS keeps the change
     /// until the next scheduled time. With "Keep the switch as set", the schedule itself changes.
     func setEnabled(_ enabled: Bool) -> String? {
-        operationLock.withLock {
+        transaction {
             guard keepsSwitchState else { return setTemporarilyEnabled(enabled) }
             guard let state = currentState else { return Self.notAvailableMessage }
             guard state.isAvailable else { return Self.notSupportedMessage }
@@ -1332,7 +1432,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     /// Keeps Night Shift on or off across scheduled times by changing the macOS schedule:
     /// Always On for on, Off for off. Callers own restoring the previous schedule.
     func hold(_ enabled: Bool) -> String? {
-        operationLock.withLock {
+        transaction {
             guard let state = currentState else { return Self.notAvailableMessage }
             guard state.isAvailable else { return Self.notSupportedMessage }
             nightShiftLogger.notice("Hold enabled=\(enabled, privacy: .public) from \(state.logDescription, privacy: .public)")
@@ -1348,7 +1448,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     }
 
     func applySchedule(_ preset: NightShiftSchedulePreset, customSchedule: NightShiftScheduleState) -> String? {
-        operationLock.withLock {
+        transaction {
             guard let state = currentState, state.isAvailable else { return Self.notAvailableMessage }
             nightShiftLogger.notice(
                 "Request schedule preset=\(preset.rawValue, privacy: .public) from \(state.logDescription, privacy: .public)"
@@ -1375,8 +1475,9 @@ final class NightShiftSwitch: @unchecked Sendable {
                 return nil
             }
             // An explicit schedule choice replaces the one saved for "Keep the switch as set".
-            scheduleBackup = nil
-            return updateSchedule(mode: mode, schedule: times, from: state)
+            let error = updateSchedule(mode: mode, schedule: times, from: state)
+            if error == nil { scheduleBackup = nil }
+            return error
         }
     }
 
@@ -1389,7 +1490,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     }
 
     func setKeepsSwitchState(_ keep: Bool) -> String? {
-        operationLock.withLock {
+        transaction {
             defaults.set(keep, forKey: NightShiftPreferenceKey.keepsSwitchState)
             nightShiftLogger.notice("Keep switch state=\(keep, privacy: .public)")
             guard let state = currentState, state.isAvailable else { return nil }
@@ -1408,7 +1509,7 @@ final class NightShiftSwitch: @unchecked Sendable {
 
     /// Restores the schedule a Mode replaced, then the on/off state that schedule implies now.
     func restore(_ point: NightShiftRestorePoint) -> String? {
-        operationLock.withLock {
+        transaction {
             guard let state = currentState else { return Self.notAvailableMessage }
             guard state.isAvailable else { return Self.notSupportedMessage }
             guard let mode = point.mode else { return setTemporarilyEnabled(point.enabled) }
@@ -1437,6 +1538,7 @@ final class NightShiftSwitch: @unchecked Sendable {
     /// longer Always On, the override Mac Switch applied hands control back to the schedule.
     func reconcileAlwaysOn() {
         operationLock.withLock {
+            guard transactionDepth > 0 || defaults.data(forKey: NightShiftPreferenceKey.pendingRecovery) == nil else { return }
             guard let state = currentState, state.isAvailable else { return }
             let appliedByMacSwitch = observationLock.withLock { () -> Bool in
                 if state.override != .onForSession {
@@ -1528,14 +1630,67 @@ final class NightShiftSwitch: @unchecked Sendable {
 
     private func restoreScheduleBackup(from state: NightShiftState) -> String? {
         guard let backup = scheduleBackup else { return nil }
-        scheduleBackup = nil
         // Only undo schedules Mac Switch applied; a schedule changed elsewhere is the user's newer choice.
         guard NightShiftAlwaysOn.isActive(state) || state.scheduleMode == .off else {
             nightShiftLogger.notice("Kept schedule changed outside Mac Switch: \(state.logDescription, privacy: .public)")
+            scheduleBackup = nil
             return nil
         }
-        guard state.scheduleMode != backup.mode || state.schedule != backup.schedule else { return nil }
-        return updateSchedule(mode: backup.mode, schedule: backup.schedule, from: state)
+        let error = updateSchedule(mode: backup.mode, schedule: backup.schedule, from: state)
+        if error == nil { scheduleBackup = nil }
+        return error
+    }
+
+    /// Persist before the first system write, and retain recovery data if rollback also fails.
+    /// Only explicit user/Mode operations enter this transaction; passive refresh never changes it.
+    private func transaction(_ operation: () -> String?) -> String? {
+        operationLock.withLock {
+            if transactionDepth > 0 { return operation() }
+            if let pending = decoded(NightShiftTransactionRecovery.self, forKey: NightShiftPreferenceKey.pendingRecovery) {
+                guard restoreTransaction(pending) else {
+                    return "Night Shift has an unfinished change. Restore failed; retry when the display is available."
+                }
+                encode(Optional<NightShiftTransactionRecovery>.none, forKey: NightShiftPreferenceKey.pendingRecovery)
+            }
+            guard let initial = currentState, initial.isAvailable,
+                  let point = NightShiftRestorePoint(state: initial, now: now(), calendar: calendar())
+            else { return Self.notAvailableMessage }
+            let recovery = NightShiftTransactionRecovery(point: point, active: initial.active, override: initial.override,
+                                                         backup: scheduleBackup, keepsSwitchState: keepsSwitchState)
+            encode(recovery, forKey: NightShiftPreferenceKey.pendingRecovery)
+            guard defaults.synchronize() else { return "Could not save Night Shift recovery data. Retry the operation." }
+            transactionDepth += 1
+            defer { transactionDepth -= 1 }
+            let error = operation()
+            if error == nil || restoreTransaction(recovery) {
+                encode(Optional<NightShiftTransactionRecovery>.none, forKey: NightShiftPreferenceKey.pendingRecovery)
+                defaults.synchronize()
+                return error
+            }
+            return "Night Shift could not restore its previous settings. Retry to recover them."
+        }
+    }
+
+    private func restoreTransaction(_ recovery: NightShiftTransactionRecovery) -> Bool {
+        scheduleBackup = recovery.backup
+        defaults.set(recovery.keepsSwitchState, forKey: NightShiftPreferenceKey.keepsSwitchState)
+        guard let state = currentState, state.isAvailable, let mode = recovery.point.mode else { return false }
+        return performLocalMutation {
+            if state.schedule != recovery.point.schedule, !client.setSchedule(recovery.point.schedule) { return false }
+            if state.scheduleMode != mode, !client.setScheduleMode(mode) { return false }
+            if state.active != recovery.active, !client.setActive(recovery.active) { return false }
+            guard let restored = currentState else { return false }
+            let target = recovery.point.desiredState(sunTimes: restored.sunTimes, at: now(), calendar: calendar())
+            if recovery.override?.isSessionBound == true {
+                if restored.enabled != target || restored.override != recovery.override {
+                    guard client.setEnabledForSession(target) else { return false }
+                }
+            } else if restored.enabled != target || restored.override?.isSessionBound == true {
+                guard client.setEnabled(target) else { return false }
+            }
+            return waitForState { $0.scheduleMode == mode && $0.schedule == recovery.point.schedule
+                && $0.active == recovery.active && $0.enabled == target }
+        }
     }
 
     private func recordObservedChange() {

@@ -272,3 +272,27 @@
 
 "Close options" = "Fermer les options";
 "Apply" = "Appliquer";
+
+/* System state recovery */
+"Needs recovery" = "Restauration nécessaire";
+"Confirm manual recovery" = "Confirmer la restauration manuelle";
+"This older Mode did not record its original microphone or display. Restore those devices manually, then confirm below." = "Cet ancien mode n’a pas enregistré le microphone ou l’écran d’origine. Restaurez-les manuellement, puis confirmez ci-dessous.";
+"Confirm only after restoring the original microphone and display settings yourself. Other saved settings will still be restored automatically." = "Confirmez uniquement après avoir rétabli vous-même les réglages du microphone et de l’écran d’origine. Les autres réglages enregistrés seront restaurés automatiquement.";
+"A Mode was interrupted. Select it to restore its previous settings." = "Un mode a été interrompu. Sélectionnez-le pour restaurer ses réglages précédents.";
+"Could not save the original device state. The Mode was not started." = "Impossible d’enregistrer l’état initial de l’appareil. Le mode n’a pas démarré.";
+"This older Mode did not record its original device. Restore it manually in Mode settings." = "Cet ancien mode n’a pas enregistré l’appareil d’origine. Restaurez-le manuellement dans les réglages du mode.";
+"Could not save Mode recovery information." = "Impossible d’enregistrer les données de restauration du mode.";
+"The microphone does not expose control for every input channel." = "Le microphone ne permet pas de contrôler tous ses canaux d’entrée.";
+"The original microphone is disconnected. Reconnect it and retry." = "Le microphone d’origine est déconnecté. Reconnectez-le et réessayez.";
+"Could not restore microphone input volume." = "Impossible de restaurer le volume d’entrée du microphone.";
+"Could not restore microphone mute state." = "Impossible de restaurer l’état de sourdine du microphone.";
+"Could not change mute on every microphone input channel." = "Impossible de modifier la sourdine sur tous les canaux du microphone.";
+"Could not identify the microphone for volume restoration." = "Impossible d’identifier le microphone pour restaurer son volume.";
+"Keep Awake is active, but lid-closed protection is unavailable. Retry Keep Awake setup." = "Keep Awake est actif, mais la protection avec le couvercle fermé est indisponible. Réessayez la configuration.";
+"Keep Awake helper disconnected. Retry the operation." = "Le service auxiliaire Keep Awake est déconnecté. Réessayez.";
+"Night Shift has an unfinished change. Retry your last change to recover its previous settings." = "Night Shift a une modification inachevée. Réessayez la dernière modification pour restaurer les réglages précédents.";
+"Night Shift has an unfinished change. Restore failed; retry when the display is available." = "La modification inachevée de Night Shift n’a pas pu être restaurée. Réessayez quand l’écran sera disponible.";
+"Night Shift could not restore its previous settings. Retry to recover them." = "Night Shift n’a pas pu restaurer ses réglages précédents. Réessayez pour les récupérer.";
+"Could not save Night Shift recovery data. Retry the operation." = "Impossible d’enregistrer les données de restauration de Night Shift. Réessayez.";
+"The original display is disconnected. Reconnect it and retry." = "L’écran d’origine est déconnecté. Reconnectez-le et réessayez.";
+"Could not verify the original device for this Mode." = "Impossible de vérifier l’appareil d’origine de ce mode.";

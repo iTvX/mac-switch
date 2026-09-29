@@ -292,3 +292,15 @@ private final class FakeDNDExecutor: DNDShortcutExecuting, @unchecked Sendable {
         }
     }
 }
+
+extension DoNotDisturbBehaviorTests {
+    func testDNDTemporaryFailureMustNotPermanentlyDisableDashboard() {
+        let (backend, fake) = verified()
+        fake.focus = "Work"
+        XCTAssertFalse(backend.snapshot(force: true).isAvailable)
+        fake.focus = ""
+        XCTAssertTrue(backend.installation().isVerified)
+        XCTAssertTrue(backend.snapshot().isAvailable, "Focus is off again, but passive dashboard still exposes the cached unavailable/Fix state")
+        XCTAssertTrue(backend.snapshot(force: true).isAvailable, "Explicit force refresh recovers, proving setup itself is valid")
+    }
+}
