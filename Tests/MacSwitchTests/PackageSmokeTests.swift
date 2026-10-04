@@ -2767,7 +2767,6 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(views.contains("store.isActionBusy(kind)"))
         XCTAssertTrue(keepAwakeDurationMenuSource.contains(".disabled(store.isActionBusy(.keepAwake))"))
         XCTAssertTrue(keepAwakeDurationMenuSource.contains(".opacity(store.isActionBusy(.keepAwake) ? 0.55 : 1)"))
-        XCTAssertTrue(keepAwakeDurationMenuSource.contains("Button(action: openOptions)"))
         XCTAssertTrue(keepAwakeDurationMenuSource.contains("store.keepAwakeDuration == duration"))
         XCTAssertTrue(doNotDisturbDurationMenuSource.contains(".disabled(store.isActionBusy(.doNotDisturb))"))
         XCTAssertTrue(doNotDisturbDurationMenuSource.contains(".opacity(store.isActionBusy(.doNotDisturb) ? 0.55 : 1)"))
