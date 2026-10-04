@@ -901,14 +901,14 @@ private struct ControlRow: View {
 
             HStack(spacing: 9) {
                 if kind == .keepAwake {
-                    KeepAwakeDurationMenu(store: store) {
+                    KeepAwakeDurationMenu(store: store, isPresented: isQuickMenuPresented) {
                         withAnimation(.snappy(duration: 0.16)) {
                             quickMenuOpeningEventNumber = NSApp.currentEvent?.eventNumber
                             quickMenuKind = isQuickMenuPresented ? nil : .keepAwake
                         }
                     }
                 } else if kind == .nightShift {
-                    NightShiftOptionsButton(store: store) {
+                    NightShiftOptionsButton(store: store, isPresented: isQuickMenuPresented) {
                         withAnimation(.snappy(duration: 0.16)) {
                             quickMenuOpeningEventNumber = NSApp.currentEvent?.eventNumber
                             quickMenuKind = isQuickMenuPresented ? nil : .nightShift
@@ -1538,30 +1538,54 @@ private struct SwitchGlyph: View {
 
 private struct KeepAwakeDurationMenu: View {
     @ObservedObject var store: SwitchStore
+    let isPresented: Bool
     let openOptions: () -> Void
 
     var body: some View {
-        Button(action: openOptions) {
-            HStack(spacing: 4) {
-                Image(systemName: "timer")
-                    .font(.system(size: 11, weight: .semibold))
-                Text(store.keepAwakeDuration == .indefinitely ? "∞" : store.keepAwakeDuration.compactDashboardTitle)
-                    .font(.system(size: 11, weight: .bold))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-            }
-            .foregroundStyle(store.snapshots[.keepAwake]?.isOn == true ? Color.accentColor : .secondary)
-            .frame(width: 62, height: 25)
-            .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        DashboardScheduleButton(isPresented: isPresented, action: openOptions)
         .disabled(store.isActionBusy(.keepAwake))
         .opacity(store.isActionBusy(.keepAwake) ? 0.55 : 1)
         .accessibilityLabel(Text("Keep Awake options"))
         .accessibilityValue(Text(LocalizedStringKey(store.keepAwakeDuration.menuTitle)))
         .help("Choose duration and lid-closed behavior")
+    }
+}
+
+/// A quiet, fixed-size entry point; schedule details belong in the row and quick panel.
+private struct DashboardScheduleButton: View {
+    let isPresented: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: "clock")
+                    .font(.system(size: 13, weight: .regular))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+                    .rotationEffect(.degrees(isPresented ? 180 : 0))
+            }
+            .frame(width: 36, height: 26)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(DashboardScheduleButtonStyle(isPresented: isPresented))
+    }
+}
+
+private struct DashboardScheduleButtonStyle: ButtonStyle {
+    let isPresented: Bool
+    @State private var isHovering = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(isPresented ? Color.accentColor : Color.secondary)
+            .background {
+                Capsule()
+                    .fill(isPresented
+                          ? Color.accentColor.opacity(configuration.isPressed ? 0.18 : 0.12)
+                          : Color.primary.opacity(configuration.isPressed ? 0.10 : isHovering ? 0.07 : 0.035))
+            }
+            .onHover { isHovering = $0 }
     }
 }
 
@@ -2081,22 +2105,6 @@ private struct CompactIconButton: View {
         .opacity(isDisabled ? 0.70 : 1)
         .onHover { isHovering = $0 }
         .accessibilityLabel(Text(accessibilityLabel))
-    }
-}
-
-private extension KeepAwakeDuration {
-    var compactDashboardTitle: String {
-        switch self {
-        case .indefinitely: return "All"
-        case .fiveMinutes: return "5m"
-        case .fifteenMinutes: return "15m"
-        case .twentyFiveMinutes: return "25m"
-        case .thirtyMinutes: return "30m"
-        case .oneHour: return "1h"
-        case .twoHours: return "2h"
-        case .fiveHours: return "5h"
-        case .eightHours: return "8h"
-        }
     }
 }
 
@@ -5468,21 +5476,11 @@ private struct NightShiftSettingsPanel: View {
 
 private struct NightShiftOptionsButton: View {
     @ObservedObject var store: SwitchStore
+    let isPresented: Bool
     let openOptions: () -> Void
 
     var body: some View {
-        Button(action: openOptions) {
-            HStack(spacing: 5) {
-                Image(systemName: "clock").font(.system(size: 11, weight: .semibold))
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
-            }
-            .foregroundStyle(store.snapshots[.nightShift]?.isOn == true ? Color.accentColor : .secondary)
-            .frame(width: 38, height: 25)
-            .background(DashboardColors.controlFill, in: RoundedRectangle(cornerRadius: 6))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.08), lineWidth: 1))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        DashboardScheduleButton(isPresented: isPresented, action: openOptions)
         .accessibilityLabel(Text("Night Shift options"))
         .help("Choose a schedule and switch behavior")
     }
