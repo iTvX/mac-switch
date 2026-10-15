@@ -12,9 +12,13 @@ on:
       - "Tests/**"
   workflow_dispatch:
     inputs:
+      validate_only:
+        description: "Build, notarize, and verify without publishing"
+        type: boolean
+        default: false
       tag:
         description: "Existing release tag, for example v1.0.0"
-        required: true
+        required: false
         type: string
       prerelease:
         description: "Mark the GitHub release as a prerelease"
@@ -44,14 +48,16 @@ concurrency:
 jobs:
   release:
     name: Build, notarize, and publish
-    runs-on: [self-hosted, macOS, ARM64, mac-switch-release]
+    runs-on: [self-hosted, macOS, ARM64, mac-switch-local]
     timeout-minutes: 90
+    env:
+      VALIDATE_ONLY: ${{ inputs.validate_only == true }}
 
     steps:
       - name: Check out release source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
       - name: Resolve release tag
@@ -60,7 +66,13 @@ jobs:
         run: |
           set -euo pipefail
           create_tag=false
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          if [[ "$VALIDATE_ONLY" == "true" ]]; then
+            create_tag=true
+            tag="v0.0.0-validation-${GITHUB_RUN_ID}"
+            prerelease=true
+            update_channel=stable
+            build_number="$(date -u +%Y%m%d%H%M%S)"
+          elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="${{ inputs.tag }}"
             prerelease="${{ inputs.prerelease }}"
             update_channel="${{ inputs.update_channel }}"
@@ -148,7 +160,7 @@ jobs:
 
           default_branch="${GITHUB_DEFAULT_BRANCH:-main}"
           git fetch --no-tags origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
-          if ! git merge-base --is-ancestor "$tag_commit" "origin/$default_branch"; then
+          if [[ "$VALIDATE_ONLY" != "true" ]] && ! git merge-base --is-ancestor "$tag_commit" "origin/$default_branch"; then
             if [[ "$prerelease" == "true" && "$update_channel" == "beta" && "$tag" == *beta* ]]; then
               echo "Allowing beta prerelease tag $tag outside $default_branch"
             else
@@ -172,7 +184,6 @@ jobs:
 
       - name: Build, sign, and notarize
         env:
-          NOTARY_PROFILE: mac-switch-notary
           SPARKLE_ACCOUNT: com.maxyu.macswitch.sparkle
           CODESIGN_VIA_LAUNCHCTL: "1"
           BUILD_NUMBER: ${{ steps.release_tag.outputs.build_number }}
@@ -181,8 +192,6 @@ jobs:
         run: ./Scripts/build_release.sh
 
       - name: Verify release bundle
-        env:
-          NOTARY_PROFILE: mac-switch-notary
         run: ./Scripts/check_release_ready.sh
 
       - name: Generate Sparkle appcast
@@ -195,7 +204,7 @@ jobs:
         run: ./Scripts/generate_appcast.sh
 
       - name: Publish generated release tag
-        if: steps.release_tag.outputs.create_tag == 'true'
+        if: steps.release_tag.outputs.create_tag == 'true' && inputs.validate_only != true
         env:
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         shell: bash
@@ -206,9 +215,11 @@ jobs:
             exit 1
           fi
           git tag "$RELEASE_TAG" "$GITHUB_SHA"
+          /opt/homebrew/bin/python3 "${HOME}/.config/git/identity-guard/guard.py" check
           git push origin "refs/tags/$RELEASE_TAG"
 
       - name: Upload GitHub release asset
+        if: inputs.validate_only != true
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
@@ -229,6 +240,7 @@ jobs:
           fi
 
       - name: Publish Sparkle appcast
+        if: inputs.validate_only != true
         env:
           GH_TOKEN: ${{ github.token }}
           APPCAST_RELEASE_TAG: appcast
