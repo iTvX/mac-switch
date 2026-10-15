@@ -796,7 +796,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertFalse(script.contains(privateCiPrefix), "release script should not expose project-specific private CI variables")
         XCTAssertTrue(script.contains("security unlock-keychain"), "release script should unlock the login keychain when a password is supplied")
         XCTAssertTrue(script.contains("NOTARY_KEYCHAIN=\"${NOTARY_KEYCHAIN:-}\""), "release script should use notarytool's default keychain unless explicitly overridden")
-        XCTAssertTrue(script.contains("set-key-partition-list"), "release script should allow codesign to use the unlocked key")
+        XCTAssertTrue(script.contains("--keychain \"$KEYCHAIN_DB\""), "release signing should use the explicitly unlocked Keychain")
         XCTAssertTrue(script.contains("--options runtime"), "release signing should use hardened runtime")
         XCTAssertTrue(script.contains("--entitlements"), "release signing should apply entitlements")
         XCTAssertTrue(script.contains("--self-test-safe"), "release build should run safe diagnostics")
