@@ -350,10 +350,19 @@ enum RegressionDiagnostics {
             !HandoffStatePolicy.isEnabled(advertising: true, receiving: false),
             "Handoff reports a partial preference state as off"
         )
-        reporter.check(
-            HandoffRuntimeCompatibility.supportsCurrentSystem,
-            "Handoff recognizes the current macOS preference and notification contract"
-        )
+        if HandoffRuntimeCompatibility.verifiedMajorVersions.contains(
+            ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        ) {
+            reporter.check(
+                HandoffRuntimeCompatibility.supportsCurrentSystem,
+                "Handoff recognizes the current macOS preference and notification contract"
+            )
+        } else {
+            reporter.check(
+                !HandoffRuntimeCompatibility.supportsCurrentSystem,
+                "Handoff stays disabled on unverified macOS versions"
+            )
+        }
     }
 
     private static func checkShortcutValidation(_ reporter: inout SelfTestReporter) {

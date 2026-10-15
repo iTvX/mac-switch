@@ -12,6 +12,7 @@ IDENTITY="${SIGN_IDENTITY:-}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-}"
 DEFAULT_NOTARY_PROFILE="${DEFAULT_NOTARY_PROFILE:-mac-switch-notary}"
 KEYCHAIN_PASSWORD="${KEYCHAIN_PASSWORD:-}"
+KEYCHAIN_PASSWORD_FILE="${KEYCHAIN_PASSWORD_FILE:-}"
 KEYCHAIN_DB="${KEYCHAIN_DB:-$HOME/Library/Keychains/login.keychain-db}"
 NOTARY_KEYCHAIN="${NOTARY_KEYCHAIN:-}"
 SU_FEED_URL="${SU_FEED_URL:-}"
@@ -91,6 +92,21 @@ explain_notary_profile_failure() {
 
 cd "$ROOT_DIR"
 
+if [[ -n "$KEYCHAIN_PASSWORD_FILE" ]]; then
+    [[ -f "$KEYCHAIN_PASSWORD_FILE" && ! -L "$KEYCHAIN_PASSWORD_FILE" ]] || {
+        echo "The local signing Keychain password file is unavailable or unsafe." >&2
+        exit 1
+    }
+    KEYCHAIN_PASSWORD="$(<"$KEYCHAIN_PASSWORD_FILE")"
+fi
+if [[ -n "$KEYCHAIN_PASSWORD" ]]; then
+    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_DB"
+    if [[ -n "$NOTARY_KEYCHAIN" && "$NOTARY_KEYCHAIN" != "$KEYCHAIN_DB" ]]; then
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$NOTARY_KEYCHAIN"
+    fi
+    unset KEYCHAIN_PASSWORD
+fi
+
 if [[ ! -f "Resources/MacSwitchIcon.icns" ]]; then
     echo "Missing Resources/MacSwitchIcon.icns. Run: swift Scripts/generate_app_icon.swift" >&2
     exit 1
@@ -130,7 +146,7 @@ if [[ "$SKIP_NOTARIZATION" != "1" ]]; then
 fi
 
 if [[ -z "$IDENTITY" ]]; then
-    IDENTITY="$(security find-identity -v -p codesigning | awk -F '"' '/"Developer ID Application:/ { print $2; exit }')"
+    IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_DB" | awk -F '"' '/"Developer ID Application:/ { print $2; exit }')"
 fi
 
 if [[ -z "$IDENTITY" ]]; then
@@ -139,19 +155,13 @@ if [[ -z "$IDENTITY" ]]; then
     exit 1
 fi
 
-if ! security find-identity -v -p codesigning | grep -F "$IDENTITY" >/dev/null; then
+if ! security find-identity -v -p codesigning "$KEYCHAIN_DB" | grep -F "$IDENTITY" >/dev/null; then
     echo "Code signing identity '$IDENTITY' was not found." >&2
     echo "Set SIGN_IDENTITY to an installed Developer ID Application identity." >&2
     exit 1
 fi
 
-echo "Signing with: $IDENTITY"
-
-if [[ -n "$KEYCHAIN_PASSWORD" && -f "$KEYCHAIN_DB" ]]; then
-    echo "Unlocking keychain for codesign."
-    security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_DB" || true
-    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_DB" || true
-fi
+echo "Signing with the local Developer ID identity."
 
 read -r -a BUILD_ARCHS <<< "$ARCHS"
 if [[ "${#BUILD_ARCHS[@]}" -eq 0 ]]; then
@@ -159,19 +169,23 @@ if [[ "${#BUILD_ARCHS[@]}" -eq 0 ]]; then
     exit 1
 fi
 
+BUILD_BIN_DIRS=()
+LIPO_INPUTS=()
+HELPER_INPUTS=()
 for arch in "${BUILD_ARCHS[@]}"; do
-    swift build -c release --arch "$arch"
+    scratch_path="$ROOT_DIR/.build/release-$arch"
+    swift build -c release --arch "$arch" --scratch-path "$scratch_path"
+    bin_dir="$(swift build -c release --arch "$arch" --scratch-path "$scratch_path" --show-bin-path)"
+    BUILD_BIN_DIRS+=("$bin_dir")
+    LIPO_INPUTS+=("$bin_dir/$EXECUTABLE_NAME")
+    HELPER_INPUTS+=("$bin_dir/MacSwitchSleepHelper")
 done
 
 rm -rf "$APP_PATH" "$ZIP_PATH"
 mkdir -p "$APP_PATH/Contents/MacOS" "$APP_PATH/Contents/Resources" "$FRAMEWORKS_DIR"
 if [[ "${#BUILD_ARCHS[@]}" -eq 1 ]]; then
-    cp ".build/${BUILD_ARCHS[0]}-apple-macosx/release/$EXECUTABLE_NAME" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
+    cp "${LIPO_INPUTS[0]}" "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 else
-    LIPO_INPUTS=()
-    for arch in "${BUILD_ARCHS[@]}"; do
-        LIPO_INPUTS+=(".build/$arch-apple-macosx/release/$EXECUTABLE_NAME")
-    done
     lipo -create "${LIPO_INPUTS[@]}" -output "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
 fi
 for arch in "${BUILD_ARCHS[@]}"; do
@@ -180,19 +194,15 @@ done
 
 HELPER_PATH="$APP_PATH/Contents/Helpers/MacSwitchSleepHelper"
 mkdir -p "$APP_PATH/Contents/Helpers" "$APP_PATH/Contents/Library/LaunchDaemons"
-HELPER_INPUTS=()
-for arch in "${BUILD_ARCHS[@]}"; do
-    HELPER_INPUTS+=(".build/$arch-apple-macosx/release/MacSwitchSleepHelper")
-done
 lipo -create "${HELPER_INPUTS[@]}" -output "$HELPER_PATH"
 cp Resources/LaunchDaemons/*.plist "$APP_PATH/Contents/Library/LaunchDaemons/"
-run_codesign --force --options runtime --timestamp --identifier com.maxyu.macswitch.sleep-helper --sign "$IDENTITY" "$HELPER_PATH"
+run_codesign --force --options runtime --timestamp --identifier com.maxyu.macswitch.sleep-helper --keychain "$KEYCHAIN_DB" --sign "$IDENTITY" "$HELPER_PATH"
 for arch in "${BUILD_ARCHS[@]}"; do
     lipo "$HELPER_PATH" -verify_arch "$arch" >/dev/null
 done
 
 
-SPARKLE_SOURCE=".build/${BUILD_ARCHS[0]}-apple-macosx/release/Sparkle.framework"
+SPARKLE_SOURCE="${BUILD_BIN_DIRS[0]}/Sparkle.framework"
 SPARKLE_DEST="$FRAMEWORKS_DIR/Sparkle.framework"
 if [[ ! -d "$SPARKLE_SOURCE" ]]; then
     echo "Missing Sparkle.framework at $SPARKLE_SOURCE. Run swift package resolve and rebuild." >&2
@@ -250,14 +260,14 @@ for nested in \
     "$SPARKLE_DEST/Versions/Current/Updater.app" \
     "$SPARKLE_DEST/Versions/Current/Autoupdate"; do
     if [[ -e "$nested" ]]; then
-        run_codesign --force --options runtime --timestamp --sign "$IDENTITY" "$nested"
+        run_codesign --force --options runtime --timestamp --keychain "$KEYCHAIN_DB" --sign "$IDENTITY" "$nested"
     fi
 done
-run_codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE_DEST"
+run_codesign --force --options runtime --timestamp --keychain "$KEYCHAIN_DB" --sign "$IDENTITY" "$SPARKLE_DEST"
 
 run_codesign --force --options runtime --timestamp \
     --entitlements "$ROOT_DIR/Resources/MacSwitch.entitlements" \
-    --sign "$IDENTITY" "$APP_PATH"
+    --keychain "$KEYCHAIN_DB" --sign "$IDENTITY" "$APP_PATH"
 
 run_codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 "$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME" --self-test-safe

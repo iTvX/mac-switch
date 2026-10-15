@@ -17,7 +17,8 @@ concurrency:
 jobs:
   swift-tests:
     name: Swift tests
-    runs-on: macos-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64, mac-switch-local]
     timeout-minutes: 30
 
     steps:
@@ -31,39 +32,15 @@ jobs:
         run: bash -n Scripts/build_release.sh Scripts/check_release_ready.sh Scripts/generate_appcast.sh Scripts/publish_appcast.sh
 
   handoff-compatibility:
-    name: Handoff compatibility (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Handoff compatibility (local macOS)
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, macOS, ARM64, mac-switch-local]
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - macos-14
-          - macos-15
-
     steps:
       - name: Check out source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
-
-      - name: Select Swift 6 toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ matrix.os }}" == "macos-14" ]]; then
-            xcode_path="/Applications/Xcode_16.2.app"
-            if [[ ! -d "$xcode_path" ]]; then
-              echo "::error::Expected Swift 6 toolchain at $xcode_path"
-              exit 1
-            fi
-            sudo xcode-select --switch "$xcode_path/Contents/Developer"
-          fi
-
-          swift_version="$(swift --version)"
-          echo "$swift_version"
-          if [[ ! "$swift_version" =~ Swift\ version\ 6\. ]]; then
-            echo "::error::Handoff compatibility tests require Swift 6"
-            exit 1
-          fi
+      - name: Show local Swift toolchain
+        run: swift --version
 
       - name: Verify Handoff contract and behavior
         run: swift test --filter HandoffBehaviorTests

@@ -79,3 +79,16 @@ See [LICENSE](LICENSE).
 ## Trademark Notice
 
 Apple, Mac, macOS, Stage Manager, Night Shift, and True Tone are trademarks of Apple Inc., registered in the U.S. and other countries and regions. Mac Switch is not affiliated with or endorsed by Apple Inc.
+
+### Local CI runner
+
+PR builds and release builds run on the dedicated `mac-switch-local` runner.
+Handoff compatibility checks exercise the installed macOS/Swift toolchain; they
+no longer use the hosted macOS 14/15 matrix. The runner starts at user login.
+
+Keep `NOTARY_PROFILE`, `NOTARY_KEYCHAIN`, `KEYCHAIN_DB`,
+`KEYCHAIN_PASSWORD_FILE`, and `SPARKLE_BIN_DIR` in its private environment.
+The password file unlocks the dedicated signing Keychain before preflight checks.
+Sparkle retains the existing `com.maxyu.macswitch.sparkle` signing account.
+A manual Release run with `validate_only` verifies the complete build and signed
+update feed without publishing. Supply a tag for a normal manual release.

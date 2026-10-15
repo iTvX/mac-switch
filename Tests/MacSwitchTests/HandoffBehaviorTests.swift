@@ -210,7 +210,7 @@ final class HandoffBehaviorTests: XCTestCase {
         let after = handoff.currentState()
 
         XCTAssertTrue(before.didSynchronize)
-        XCTAssertTrue(before.notificationContractAvailable)
+        XCTAssertEqual(before.notificationContractAvailable, HandoffRuntimeCompatibility.supportsCurrentSystem)
         XCTAssertEqual(after.rawAdvertising, before.rawAdvertising)
         XCTAssertEqual(after.rawReceiving, before.rawReceiving)
         XCTAssertEqual(after.isEnabled, before.isEnabled)

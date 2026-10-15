@@ -1036,6 +1036,7 @@ private struct UISmokeResult {
     let output: String
 }
 
+@MainActor
 private enum UISmokeDiagnostics {
     static func evaluateCurrentProcess(
         windowTitle: String,
@@ -1045,15 +1046,16 @@ private enum UISmokeDiagnostics {
         var reporter = UISmokeReporter()
         reporter.section(sectionTitle)
 
-        let windows = currentProcessWindows()
-        let targetWindow = windows.first { windowName($0) == windowTitle }
+        // Inspect our own AppKit windows without requiring screen-recording access
+        // to window-server metadata on a persistent developer machine.
+        let targetWindow = NSApp.windows.first { $0.title == windowTitle }
         reporter.check(targetWindow != nil, "\(windowTitle) window exists")
 
         if let targetWindow {
-            let onscreen = isOnscreen(targetWindow)
+            let onscreen = targetWindow.isVisible
             reporter.check(onscreen, "\(windowTitle) window is onscreen")
 
-            let size = windowSize(targetWindow)
+            let size = targetWindow.frame.size
             reporter.check(
                 size.width >= minimumSize.width && size.height >= minimumSize.height,
                 "\(windowTitle) window size is \(Int(size.width))x\(Int(size.height))"
@@ -1063,47 +1065,6 @@ private enum UISmokeDiagnostics {
         return UISmokeResult(passed: !reporter.hasFailures, output: reporter.output)
     }
 
-    private static func currentProcessWindows() -> [[String: Any]] {
-        let pid = Int(getpid())
-        let windows = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]
-        return (windows ?? []).filter { ownerPID($0) == pid }
-    }
-
-    private static func ownerPID(_ window: [String: Any]) -> Int? {
-        if let value = window[kCGWindowOwnerPID as String] as? Int {
-            return value
-        }
-        if let value = window[kCGWindowOwnerPID as String] as? Int32 {
-            return Int(value)
-        }
-        return nil
-    }
-
-    private static func windowName(_ window: [String: Any]) -> String {
-        window[kCGWindowName as String] as? String ?? ""
-    }
-
-    private static func isOnscreen(_ window: [String: Any]) -> Bool {
-        if let value = window[kCGWindowIsOnscreen as String] as? Bool {
-            return value
-        }
-        if let value = window[kCGWindowIsOnscreen as String] as? Int {
-            return value != 0
-        }
-        return false
-    }
-
-    private static func windowSize(_ window: [String: Any]) -> CGSize {
-        guard let bounds = window[kCGWindowBounds as String] as? [String: Any] else { return .zero }
-        return CGSize(width: number(bounds["Width"]), height: number(bounds["Height"]))
-    }
-
-    private static func number(_ value: Any?) -> CGFloat {
-        if let value = value as? CGFloat { return value }
-        if let value = value as? Double { return CGFloat(value) }
-        if let value = value as? Int { return CGFloat(value) }
-        return 0
-    }
 }
 
 private struct UISmokeReporter {
