@@ -712,31 +712,22 @@ final class PackageSmokeTests: XCTestCase {
         }
     }
 
-    func testSourceAvailableLicenseRestrictsCommercialUseAndForkDistribution() throws {
+    func testMITLicenseAndDocumentationAllowRedistribution() throws {
         let license = try String(contentsOf: packageRoot.appendingPathComponent("LICENSE"))
         let readme = try String(contentsOf: packageRoot.appendingPathComponent("README.md"))
+        let contributing = try String(contentsOf: packageRoot.appendingPathComponent("CONTRIBUTING.md"))
 
-        XCTAssertTrue(license.contains("Mac Switch Source Available License 1.0"))
-        XCTAssertTrue(license.contains("not an\nOpen Source Initiative approved open source license"))
-        XCTAssertTrue(license.contains("Use the Software for Commercial Use."))
-        XCTAssertTrue(license.contains("prior written permission from the Copyright Holder"))
-        XCTAssertTrue(license.contains("Publish, release, maintain, promote, or distribute a fork"))
-        XCTAssertTrue(license.contains("app store submission"))
-        XCTAssertTrue(license.contains("binary release"))
-        XCTAssertTrue(license.contains("update feed"))
-        XCTAssertTrue(license.contains("this license does not grant permission to publish, release, promote, distribute,\nor commercialize any fork or derivative version"))
-
-        XCTAssertTrue(readme.contains("source-available under the Mac Switch Source Available License"))
-        XCTAssertTrue(readme.contains("published for transparency and review"))
-        XCTAssertTrue(readme.contains("Commercial use, redistribution, binary releases"))
-        XCTAssertTrue(readme.contains("publishing forked or rebranded versions"))
-        XCTAssertTrue(readme.contains("operating an update feed require prior written permission"))
-
-        let permissiveLicenseName = ascii([77, 73, 84, 32, 76, 105, 99, 101, 110, 115, 101])
-        let permissiveGrantPhrase = ascii([80, 101, 114, 109, 105, 115, 115, 105, 111, 110, 32, 105, 115, 32, 104, 101, 114, 101, 98, 121, 32, 103, 114, 97, 110, 116, 101, 100])
-        XCTAssertFalse(license.contains(permissiveLicenseName))
-        XCTAssertFalse(readme.contains(permissiveLicenseName))
-        XCTAssertFalse(license.contains(permissiveGrantPhrase))
+        XCTAssertTrue(license.hasPrefix("MIT License\n"))
+        XCTAssertTrue(license.contains("Copyright (c) 2026 Mac Switch contributors"))
+        XCTAssertTrue(license.contains("Permission is hereby granted, free of charge"))
+        XCTAssertTrue(license.contains("publish, distribute, sublicense, and/or sell"))
+        XCTAssertTrue(license.contains("The above copyright notice and this permission notice shall be included"))
+        XCTAssertTrue(readme.contains("Mac Switch is open source under the MIT License."))
+        XCTAssertTrue(contributing.contains("[MIT License](LICENSE)"))
+        for document in [license, readme, contributing] {
+            XCTAssertFalse(document.contains("Mac Switch Source Available License"))
+            XCTAssertFalse(document.contains("require prior written permission"))
+        }
     }
 
     func testReleaseScriptKeepsSigningNotaryAndArchiveGuards() throws {
@@ -838,7 +829,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(readinessScript.contains("notary_profile_history"), "release readiness should capture notarytool validation output")
         XCTAssertTrue(readinessScript.contains("Apple Developer agreement is missing or expired"), "release readiness should explain Apple agreement failures")
         XCTAssertTrue(readinessScript.contains("ditto -x -k"), "release readiness should verify the archive contents")
-        XCTAssertTrue(readme.contains("not as a public build or redistribution guide"))
+        XCTAssertTrue(readme.contains("Downstream builds use their own signing identities and update feeds."))
         XCTAssertTrue(readme.contains("Official downloads are published through the repository's GitHub Releases"))
         XCTAssertFalse(readme.contains("./Scripts/build_release.sh"))
         XCTAssertFalse(readme.contains("./Scripts/check_release_ready.sh"))

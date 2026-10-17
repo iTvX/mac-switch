@@ -14,7 +14,7 @@ Mac Switch is a native macOS menu bar utility for the small system controls you 
 - Real system actions, not placeholder UI.
 - Customizable dashboard visibility and drag-to-reorder menu items.
 - Lightweight native SwiftUI/AppKit app built for macOS 14 and later.
-- Source published for transparency and review, not as a public build or redistribution guide.
+- Open source under the MIT License, with permission to use, modify, and redistribute.
 
 ## Controls
 
@@ -68,11 +68,11 @@ Do Not Disturb uses two bundled, signed Apple Shortcuts. In Customize > Do Not D
 
 ## Official Releases
 
-Official downloads are published through the repository's GitHub Releases and the in-app update feed. The public source tree is intended to let users inspect what the app does; it is not permission to publish alternate builds, package-manager releases, app-store submissions, forked editions, or third-party update feeds.
+Official downloads are published through the repository's GitHub Releases and the in-app update feed. Downstream builds use their own signing identities and update feeds. Maintainer signing credentials and private keys are not included in the source tree.
 
 ## License
 
-Mac Switch is source-available under the Mac Switch Source Available License 1.0. You may inspect the source for review and personal understanding. Commercial use, redistribution, binary releases, app-store submissions, package-manager distribution, publishing forked or rebranded versions, and operating an update feed require prior written permission from the copyright holder.
+Mac Switch is open source under the MIT License. Commercial use, modification, redistribution, and distribution of forked versions are permitted, provided the copyright and permission notices are retained. Third-party dependencies retain their own licenses.
 
 See [LICENSE](LICENSE).
 

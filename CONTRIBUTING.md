@@ -17,8 +17,6 @@ machine-specific release configuration in pull requests.
 
 ## License
 
-By submitting a contribution, you agree that it may be included in Mac Switch
-under the project license. The project is source-available, not OSI-approved
-open source. Commercial use, redistribution, app-store submission, package
-manager distribution, update-feed distribution, and publishing forked or
-rebranded versions require prior written permission.
+By submitting a contribution, you agree to license it under the project's
+[MIT License](LICENSE). Keep third-party copyright and license notices with
+any third-party material you contribute.
