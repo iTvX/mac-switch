@@ -3723,11 +3723,9 @@ private enum AppDiagnostics {
         ).sorted()
         let switchLines = SwitchKind.allCases.map { kind -> String in
             let snapshot = store.snapshots[kind] ?? .off
-            let status = snapshot.isAvailable ? (snapshot.isOn ? "on" : "off") : "unavailable"
-            let detail = DiagnosticRedactor.redact(snapshot.warning ?? snapshot.subtitle ?? "")
-            return "- \(kind.title): \(status)\(detail.isEmpty ? "" : " (\(detail))")"
+            return DiagnosticExport.switchLine(kind, snapshot: snapshot)
         }
-        let lastError = store.lastError.map(DiagnosticRedactor.redact) ?? "none"
+        let lastError = DiagnosticExport.errorSummary(store.lastError)
         let nightShiftChange = NightShiftPreferences.lastChange.map { record in
             "\(ISO8601DateFormatter().string(from: record.date)) \(record.cause.rawValue) enabled=\(record.enabled)"
         } ?? "none"

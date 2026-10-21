@@ -1713,7 +1713,8 @@ struct XcodeCleanSwitch {
             return unavailableActionResult("DerivedData: Zero")
         }
         do {
-            let items = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            let cache = try XcodeCacheDirectory()
+            let items = try cache.itemNames()
             guard !items.isEmpty else {
                 Self.setCachedSize(0)
                 progress?(100)
@@ -1725,10 +1726,10 @@ struct XcodeCleanSwitch {
             var failures: [String] = []
             for (index, item) in items.enumerated() {
                 do {
-                    try FileManager.default.removeItem(at: item)
+                    try cache.removeItem(named: item)
                     removedCount += 1
                 } catch {
-                    failures.append("\(item.lastPathComponent): \(error.localizedDescription)")
+                    failures.append("\(item): \(error.localizedDescription)")
                 }
                 let percent = (Double(index + 1) / Double(items.count)) * 100
                 progress?(percent)
