@@ -70,6 +70,20 @@ Do Not Disturb uses two bundled, signed Apple Shortcuts. In Customize > Do Not D
 
 Official downloads are published through the repository's GitHub Releases and the in-app update feed. Downstream builds use their own signing identities and update feeds. Maintainer signing credentials and private keys are not included in the source tree.
 
+## Diagnostic privacy and cache cleanup
+
+Copied support diagnostics include switch state and whether a subtitle, warning,
+or error is present, but omit their free-form contents. This keeps device names,
+media metadata, disk names, and subprocess error details out of the shared summary.
+Home-directory usernames in the remaining technical paths are redacted; the
+summary is not intended to be a fully anonymous report.
+
+Xcode Cache Clean requires real directories below your home directory through
+`Library/Developer/Xcode/DerivedData`. It refuses symlinked cache paths, unlinks
+symlinks inside the cache without following them, and does not cross filesystem
+boundaries. Cleanup stays anchored to the directory opened at the start. If you
+deliberately relocated DerivedData using a symlink, manage that cache directly.
+
 ## License
 
 Mac Switch is open source under the MIT License. Commercial use, modification, redistribution, and distribution of forked versions are permitted, provided the copyright and permission notices are retained. Third-party dependencies retain their own licenses.
