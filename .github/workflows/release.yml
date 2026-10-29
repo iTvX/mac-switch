@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - beta-pr40-modes
     paths-ignore:
       - "README.md"
       - "docs/**"
@@ -48,7 +47,7 @@ concurrency:
 jobs:
   release:
     name: Build, notarize, and publish
-    runs-on: [self-hosted, macOS, ARM64, mac-switch-local]
+    runs-on: [self-hosted, macOS, ARM64, mac-switch-release]
     timeout-minutes: 90
     env:
       VALIDATE_ONLY: ${{ inputs.validate_only == true }}
@@ -99,15 +98,6 @@ jobs:
                   sleep 1
                   tag="v${short_version}-$(date -u +%Y%m%d%H%M%S)"
                 done
-                ;;
-              beta-pr40-modes)
-                if [[ ! "$short_version" =~ ^[0-9]+(\.[0-9]+){1,2}-beta\.[0-9]+$ ]]; then
-                  echo "::error::The beta branch must use a version like 1.0.0-beta.14"
-                  exit 1
-                fi
-                prerelease=true
-                update_channel=beta
-                tag="v${short_version}"
                 ;;
               *)
                 echo "::error::Automatic releases are not configured for $GITHUB_REF_NAME"
