@@ -30,12 +30,11 @@ Mac Switch currently includes:
 | Dark Mode | Lock Screen |
 | Bluetooth Audio | Xcode Cache Clean |
 | Handoff | Empty Trash |
-| Do Not Disturb | Eject Disk |
+| Hide Dock | Eject Disk |
 | Night Shift | Empty Pasteboard |
 | True Tone, when available | Hide Windows |
 | Play Music | |
 | Show Hidden Files | |
-| Hide Dock | |
 | Low Power Mode | |
 | Energy Mode | |
 
@@ -63,8 +62,6 @@ Mac Switch only asks for macOS permissions needed by the features you use:
 - Accessibility/Input Monitoring: Lock Keyboard and Screen Cleaning event suppression.
 - Bluetooth: paired audio device listing and connection.
 - Location: sunrise/sunset Dark Mode scheduling.
-
-Do Not Disturb uses two bundled, signed Apple Shortcuts. In Customize > Do Not Disturb, install **Mac Switch DND Enable** and **Mac Switch DND Disable**, then choose **Verify Setup** once with Focus off. Verification briefly enables DND and restores it to off; subsequent actions run in the background. The helpers read Current Focus and explicitly return its name, so state checks do not depend on shared Focus Status. Opening the dashboard shows the last confirmed DND state without executing a shortcut. Toggle preflight, Mode activation, and restoration use fresh observations, including when DND was already on. Other active Focus modes are left unchanged. Reinstalling or renaming the helpers requires setup again. Legacy custom DND shortcuts are no longer used.
 
 ## Official Releases
 
