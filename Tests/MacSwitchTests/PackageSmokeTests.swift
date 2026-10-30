@@ -422,7 +422,7 @@ final class PackageSmokeTests: XCTestCase {
         XCTAssertTrue(customModeSettingsRowSource.contains("store.modeText(.deleteActiveModeMessage)"))
         XCTAssertTrue(customModeSettingsRowSource.contains("store.modeText(.deleteModeIrreversible)"))
         XCTAssertTrue(customModeSettingsRowSource.contains(".disabled(store.isModeInteractionDisabled(mode))"))
-        XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter(\\.isModeEligible)"))
+        XCTAssertTrue(modesSource.contains("SwitchKind.allCases.filter { $0.isModeEligible && $0.isOffered }"))
         XCTAssertTrue(modesSource.contains("store.setModeVisible(mode.id, value)"))
         XCTAssertTrue(modesSource.contains("store.modeText(.turnOffBeforeHiding)"))
         XCTAssertTrue(modeLocalization.contains(".simplifiedChinese:"))
@@ -1508,7 +1508,8 @@ final class PackageSmokeTests: XCTestCase {
             to: "private static func migratedEnabledKindsIfNeeded"
         )
 
-        XCTAssertTrue(visibleSource.contains("Self.normalizedOrder(orderedKinds).filter { enabledKinds.contains($0) }"))
+        XCTAssertTrue(visibleSource.contains("Self.normalizedOrder(orderedKinds).filter { $0.isOffered && enabledKinds.contains($0) }"))
+        XCTAssertFalse(SwitchKind.doNotDisturb.isOffered, "Do Not Disturb stays hidden while its Shortcuts helpers are removed")
         XCTAssertTrue(initSource.contains("let storedUnique = Self.deduplicatedKinds(storedOrder)"))
         XCTAssertTrue(initSource.contains("let storedSet = Set(storedUnique)"))
         XCTAssertTrue(initSource.contains("orderedKinds = storedUnique + missing"))

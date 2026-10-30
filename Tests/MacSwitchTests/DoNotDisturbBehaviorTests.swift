@@ -2,31 +2,6 @@ import XCTest
 @testable import MacSwitch
 
 final class DoNotDisturbBehaviorTests: XCTestCase {
-    func testBundledWorkflowsHaveReadOnlyBranchAndExplicitOutputs() throws {
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        for role in DNDShortcut.allCases {
-            let path = root.appendingPathComponent("Resources/Shortcuts/\(role.name).wflow")
-            let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: Data(contentsOf: path), format: nil) as? [String: Any])
-            let actions = try XCTUnwrap(plist["WFWorkflowActions"] as? [[String: Any]])
-            let parameters = actions.compactMap { $0["WFWorkflowActionParameters"] as? [String: Any] }
-            XCTAssertEqual(actions.count, 11)
-            let input = try XCTUnwrap(parameters[0]["WFInput"] as? [String: Any])
-            let variable = try XCTUnwrap(input["Variable"] as? [String: Any])
-            XCTAssertEqual((variable["Value"] as? [String: String])?["Type"], "ExtensionInput")
-            XCTAssertEqual(parameters[1]["WFControlFlowMode"] as? Int, 1, "Only the no-input branch can change DND")
-            XCTAssertEqual(actions[2]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.dnd.set")
-            XCTAssertEqual(parameters[2]["Enabled"] as? Int, role == .enable ? 1 : 0)
-            XCTAssertEqual(actions[4]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.dnd.getfocus")
-            for index in [7, 9] {
-                XCTAssertEqual(actions[index]["WFWorkflowActionIdentifier"] as? String, "is.workflow.actions.output")
-            }
-            XCTAssertEqual(parameters[9]["WFOutput"] as? String, role.outputPrefix)
-            let output = try XCTUnwrap(parameters[7]["WFOutput"] as? [String: Any])
-            XCTAssertEqual(output["WFSerializationType"] as? String, "WFTextTokenString")
-            XCTAssertEqual((output["Value"] as? [String: Any])?["string"] as? String, role.outputPrefix + "\u{fffc}")
-        }
-    }
-
     func testOpeningDashboardNeverRunsShortcuts() throws {
         let fake = FakeDNDExecutor()
         let defaults = InMemoryUserDefaults()

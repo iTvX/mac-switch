@@ -79,14 +79,6 @@ else
     fail "Keep Awake helper is missing or incorrectly signed."
 fi
 
-for shortcut in "Mac Switch DND Enable" "Mac Switch DND Disable"; do
-    if [[ -s "$APP_PATH/Contents/Resources/Shortcuts/$shortcut.shortcut" ]]; then
-        pass "$shortcut installer is bundled"
-    else
-        fail "$shortcut installer is missing."
-    fi
-done
-
 if codesign --verify --deep --strict --verbose=2 "$APP_PATH" >/dev/null 2>&1; then
     pass "Developer ID code signature is valid"
 else

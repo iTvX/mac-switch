@@ -136,6 +136,9 @@ enum SwitchKind: String, CaseIterable, Codable, Identifiable, Sendable {
             return false
         }
     }
+
+    /// Do Not Disturb is hidden while its bundled Shortcuts helpers are removed.
+    var isOffered: Bool { self != .doNotDisturb }
 }
 
 struct SwitchModeID: RawRepresentable, Hashable, Codable, Identifiable, Sendable {
@@ -896,7 +899,7 @@ final class SwitchStore: ObservableObject {
     }
 
     var visibleKinds: [SwitchKind] {
-        Self.normalizedOrder(orderedKinds).filter { enabledKinds.contains($0) }
+        Self.normalizedOrder(orderedKinds).filter { $0.isOffered && enabledKinds.contains($0) }
     }
 
     var visibleModes: [SwitchModeDefinition] {

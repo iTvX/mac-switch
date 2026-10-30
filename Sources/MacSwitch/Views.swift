@@ -3326,7 +3326,7 @@ private struct CustomModeDetailPanel: View {
     @State private var draftSubtitle = ""
     @State private var draftSymbolName = "slider.horizontal.3"
 
-    private static let modeEligibleSwitches = SwitchKind.allCases.filter(\.isModeEligible)
+    private static let modeEligibleSwitches = SwitchKind.allCases.filter { $0.isModeEligible && $0.isOffered }
     private static let iconChoices: [ModeIconChoice] = [
         ModeIconChoice(symbol: "slider.horizontal.3", titleKey: .modeIconControls),
         ModeIconChoice(symbol: "rectangle.on.rectangle.angled", titleKey: .modeIconWindows),
@@ -4178,11 +4178,11 @@ private struct CustomizePreferencesView: View {
     }
 
     private var enabledCount: Int {
-        store.orderedKinds.filter { store.enabledKinds.contains($0) }.count
+        store.orderedKinds.filter { $0.isOffered && store.enabledKinds.contains($0) }.count
     }
 
     private var sortedKinds: [SwitchKind] {
-        store.orderedKinds.sorted { lhs, rhs in
+        store.orderedKinds.filter(\.isOffered).sorted { lhs, rhs in
             let lhsEnabled = store.enabledKinds.contains(lhs)
             let rhsEnabled = store.enabledKinds.contains(rhs)
             if lhsEnabled != rhsEnabled {
@@ -4235,7 +4235,7 @@ private struct CustomizePreferencesView: View {
                                     .font(.system(size: 11.5, weight: .bold))
                                     .foregroundStyle(.secondary)
                                 Spacer()
-                                Text(L10n.totalCount(store.orderedKinds.count, language: store.effectiveLanguage))
+                                Text(L10n.totalCount(store.orderedKinds.filter(\.isOffered).count, language: store.effectiveLanguage))
                                     .font(.system(size: 11, weight: .bold))
                                     .foregroundStyle(.tertiary)
                             }
@@ -5182,7 +5182,7 @@ private struct ShortcutInstallRow: View {
             Spacer()
             Button(installed ? "Reinstall" : "Install") {
                 guard let url = shortcut.resourceURL else {
-                    store.lastError = "Do Not Disturb installer is missing. Download the latest Mac Switch release."
+                    store.lastError = "Do Not Disturb setup is unavailable in this version of Mac Switch."
                     return
                 }
                 openWorkspaceURLOrReport(url, store: store, failureMessage: "Could not open the Do Not Disturb shortcut installer.")
