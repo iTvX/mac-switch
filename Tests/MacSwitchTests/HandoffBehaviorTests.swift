@@ -233,12 +233,39 @@ final class HandoffBehaviorTests: XCTestCase {
         XCTAssertTrue(
             HandoffRuntimeCompatibility.supports(osVersion: version(26), notificationContractAvailable: true)
         )
-        XCTAssertFalse(
+        XCTAssertTrue(
             HandoffRuntimeCompatibility.supports(osVersion: version(27), notificationContractAvailable: true)
+        )
+        XCTAssertFalse(
+            HandoffRuntimeCompatibility.supports(osVersion: version(28), notificationContractAvailable: true)
         )
         XCTAssertFalse(
             HandoffRuntimeCompatibility.supports(osVersion: version(26), notificationContractAvailable: false)
         )
+        XCTAssertFalse(
+            HandoffRuntimeCompatibility.supports(osVersion: version(27), notificationContractAvailable: false)
+        )
+    }
+
+    // The fail-closed gate hid Handoff on macOS 27 while every other test passed.
+    // When the installed macOS still exposes the notification contract, its major
+    // version must be verified and listed, so a new macOS cannot silently disable
+    // the switch again.
+    func testInstalledMacOSWithTheHandoffContractIsAVerifiedVersion() throws {
+        guard HandoffDarwinNotification.isSupported else {
+            throw XCTSkip("This macOS does not expose the Handoff notification contract.")
+        }
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        XCTAssertTrue(
+            HandoffRuntimeCompatibility.verifiedMajorVersions.contains(major),
+            """
+            macOS \(major) exposes the Handoff contract but is not verified. Check that \
+            AirDropHandoffExtension.appex still writes ActivityAdvertisingAllowed and \
+            ActivityReceivingAllowed and posts the continuation notification, then add \(major) \
+            to HandoffRuntimeCompatibility.verifiedMajorVersions.
+            """
+        )
+        XCTAssertTrue(HandoffRuntimeCompatibility.supportsCurrentSystem)
     }
 
     func testRollbackFailureReportsThatManualVerificationIsRequired() {

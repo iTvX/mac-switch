@@ -93,8 +93,13 @@ enum HandoffDarwinNotification {
 
 enum HandoffRuntimeCompatibility {
     // Global Handoff has no public setter. Fail closed until each major macOS
-    // version is verified against the native AirDrop & Continuity extension.
-    static let verifiedMajorVersions: Set<Int> = [14, 15, 26]
+    // version is verified against the native AirDrop & Handoff extension
+    // (/System/Library/ExtensionKit/Extensions/AirDropHandoffExtension.appex).
+    // A version is verified when that extension still writes both
+    // ActivityAdvertisingAllowed and ActivityReceivingAllowed to the ByHost
+    // com.apple.coreservices.useractivityd domain and posts
+    // UAUserActivityManagerActivityContinuationIsEnabledChangedNotification.
+    static let verifiedMajorVersions: Set<Int> = [14, 15, 26, 27]
 
     static var supportsCurrentSystem: Bool {
         supports(
